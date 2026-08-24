@@ -122,9 +122,9 @@ class SegmentEM(Estimator[SegmentConstantSDE, SegmentEMData]):
             for segment, dt in zip(segments, dts):
                 posterior = model.segment_posterior(segment, dt)
                 posteriors.append(posterior)
-                segment_nll_sum += float(
-                    (posterior * model.segment_nll(segment, dt)).sum()
-                )
+                segment_nll_sum += (
+                    posterior * model.segment_nll(segment, dt)
+                ).sum().detach().item()
             history.append(segment_nll_sum)
             for regime in range(n_modes):
                 F, c, covariance = self._weighted_ls(segments, posteriors, regime)
