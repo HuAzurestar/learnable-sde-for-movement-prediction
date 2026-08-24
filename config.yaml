@@ -1,0 +1,58 @@
+# Public default configuration. Local datasets and artifacts belong under
+# `.local/` or in paths supplied through LEARNABLE_SDE_* environment variables.
+
+seed: 20260814
+dtype: float64
+device: cpu
+
+paths:
+  data_root: .local/data
+  cond_root: .local/conditions
+  checkpoint: .local/checkpoints
+  output_root: .local/outputs
+
+components:
+  model: I1
+  estimator: EM
+  transfer: none
+  condition: none
+  inference: exact
+
+model:
+  I1:
+    n_modes: 3
+    kappa: 0.0
+    dt_ref: 60.0
+  neural:
+    hidden: [64, 64]
+    d_env: 1
+
+# The matrix includes research variants that are not all available through the
+# production registry. Unimplemented variants fail fast when selected.
+ablation_matrix:
+  model: [I1, neural]
+  condition: [none, solar, is_day, weather, terrain]
+  transfer: [none, C5_drift_only, C5_full]
+  estimator: [EM, CRPS, QMLE, ES_endpoint]
+  inference: [exact, J1_split, J2_FP, J3_CRN]
+  dt_sampling: [30, 60, 120, 300, 600]
+
+equivalence_regression:
+  I1_stratified_energy: 1453.0
+  C5_regional_full_finetune: 3.772
+  C7_solar_elev_gain_pct: -12.4
+  J1_backscatter_gain: 1000.0
+  J2_fp_order: 2.0
+  J3_er_gain: 2.0
+
+protocol:
+  em:
+    max_iter: 50
+    tol: 1.0e-5
+  euler:
+    max_step: 1.0
+  split:
+    max_step: 1.0
+  bootstrap:
+    block: segment
+    samples: 2000

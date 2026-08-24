@@ -1,0 +1,22 @@
+name: Feature request
+description: Propose a scoped model, estimator, inference, or tooling change
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: What research or software need does this address?
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Proposed interface and acceptance criteria
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: References or prior art

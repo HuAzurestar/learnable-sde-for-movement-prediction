@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "learnable-sde"
+version = "0.2.0"
+description = "Composable OOP framework for learnable stochastic differential equations"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "pyarrow>=14",
+  "PyYAML>=6.0",
+  "torch>=2.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/HuAzurestar/learnable-sde-for-movement-prediction"
+Repository = "https://github.com/HuAzurestar/learnable-sde-for-movement-prediction.git"
+Issues = "https://github.com/HuAzurestar/learnable-sde-for-movement-prediction/issues"
+
+[project.optional-dependencies]
+test = ["pytest>=7.4"]
+
+[project.scripts]
+learnable-sde = "cli.__main__:main"
+
+[tool.setuptools]
+py-modules = ["config", "numerics", "registry"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+  "application*",
+  "cli*",
+  "data*",
+  "domain*",
+  "estimation*",
+  "evaluation*",
+  "experiments*",
+  "inference*",
+  "infrastructure*",
+  "models*",
+  "transfer*",
+]
+exclude = ["tests*"]

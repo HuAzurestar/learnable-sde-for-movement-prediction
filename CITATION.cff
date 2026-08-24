@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the repository and the associated paper."
+title: "Learnable SDE for Movement Prediction"
+type: software
+version: 0.2.0
+date-released: 2026-08-24
+repository-code: "https://github.com/HuAzurestar/learnable-sde-for-movement-prediction"
+authors:
+  - name: "Learnable SDE contributors"
+keywords:
+  - stochastic differential equations
+  - probabilistic forecasting
+  - scientific machine learning

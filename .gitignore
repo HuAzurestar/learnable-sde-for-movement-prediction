@@ -1,0 +1,49 @@
+# Python 字节码 / 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# pytest / 测试缓存
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# 打包 / 发行
+build/
+dist/
+*.egg-info/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# 本地数据与生成物
+.local/
+outputs/
+artifacts/
+checkpoints/
+*.log
+*.npy
+*.npz
+*.parquet
+*.pt
+*.pth
+verify_report.json
+
+# OS / 编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Claude Code
+.claude/
