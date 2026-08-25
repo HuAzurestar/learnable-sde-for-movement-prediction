@@ -94,6 +94,7 @@ def _write_sources(tmp_path):
 
     digest = hashlib.sha256(gl_path.read_bytes()).hexdigest()
     build_stats = {
+        "status": "pass",
         "n_failed": 0,
         "schema_identical": True,
         "columns": list(gl_frame.columns),
@@ -293,3 +294,49 @@ def test_cli_returns_nonzero_and_writes_failure_report_for_negative_probe(
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["status"] == "failed"
     assert report["quality_evidence"]["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_error"),
+    [
+        pytest.param(
+            lambda value: value.pop("status"),
+            "missing required field: status",
+            id="missing-status",
+        ),
+        pytest.param(
+            lambda value: value.update(status="unknown"),
+            "status must be one of the successful build states",
+            id="unknown-status",
+        ),
+    ],
+)
+def test_cli_fails_closed_for_missing_or_unknown_build_status(
+    tmp_path, monkeypatch, mutate, expected_error
+):
+    osm_root, gl_root, registry_path = _write_sources(tmp_path)
+    _mutate_build_stats(gl_root, mutate)
+    output = tmp_path / "audit.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "audit_geolife_ingestion.py",
+            "--geolife-root",
+            str(gl_root),
+            "--osm-root",
+            str(osm_root),
+            "--registry",
+            str(registry_path),
+            "--output",
+            str(output),
+        ],
+    )
+    assert audit_main() == 3
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["status"] == "failed"
+    assert report["technical_status"] == "failed"
+    assert report["quality_evidence"]["status"] == "failed"
+    assert any(
+        expected_error in error for error in report["quality_evidence"]["errors"]
+    )

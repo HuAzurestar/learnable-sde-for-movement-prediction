@@ -41,7 +41,7 @@ CANONICAL_SCHEMA = (
 )
 CLEANED_LEG_GAP_DEFINITION_S = 60.0
 WALK_FILTERED_GAP_DEFINITION_S = 300.0
-_FAILED_BUILD_STATUSES = {"failed", "fail", "error", "invalid"}
+_SUCCESSFUL_BUILD_STATUSES = {"pass"}
 
 
 def _read_json(path: Path, *, label: str) -> dict[str, Any]:
@@ -382,6 +382,7 @@ def build_quality_audit(
         return {"status": "unconfirmed", "reason": "build stats are missing"}
     stats = _read_json(stats_path, label="GeoLife build stats")
     required = {
+        "status",
         "n_failed",
         "schema_identical",
         "columns",
@@ -394,11 +395,14 @@ def build_quality_audit(
     errors = [f"missing required field: {key}" for key in sorted(required - stats.keys())]
 
     build_status = stats.get("status")
-    if build_status is False or (
-        isinstance(build_status, str)
-        and build_status.strip().lower() in _FAILED_BUILD_STATUSES
+    if "status" in stats and (
+        not isinstance(build_status, str)
+        or build_status.strip().lower() not in _SUCCESSFUL_BUILD_STATUSES
     ):
-        errors.append(f"build status is not successful: {build_status!r}")
+        errors.append(
+            "status must be one of the successful build states "
+            f"{sorted(_SUCCESSFUL_BUILD_STATUSES)}, got {build_status!r}"
+        )
     if type(stats.get("n_failed")) is not int or stats.get("n_failed") != 0:
         errors.append(f"n_failed must be integer 0, got {stats.get('n_failed')!r}")
     if stats.get("schema_identical") is not True:

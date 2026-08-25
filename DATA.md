@@ -34,10 +34,12 @@ GeoLife audit inputs must additionally match the complete 14-column OSM schema
 (names and dtypes): `track_id`, `file_id`, `cluster_A`, `country`, `region`,
 `city`, `segment_id`, `t`, `x`, `y`, `z`, `vx`, `vy`, and `speed`. The audit
 independently recomputes schema, row/file/segment counts, byte size, and SHA-256;
-it does not trust `schema_identical` or `status` in build statistics. Time must
-be strictly increasing within a segment, state values must be finite, and every
-segment must contain at least two observations. Validation failures raise
-`DataValidationError`; invalid rows are not silently discarded.
+it independently checks every build-stat claim. Build statistics must contain
+`status`, and `pass` is the only allowlisted successful value; missing or unknown
+values fail closed. Time must be strictly increasing within a segment, state
+values must be finite, and every segment must contain at least two observations.
+Validation failures raise `DataValidationError`; invalid rows are not silently
+discarded.
 
 Canonical segment identifiers include source, file ID, and raw segment ID.
 This prevents repeated raw IDs such as `0_0` in different GeoLife files from

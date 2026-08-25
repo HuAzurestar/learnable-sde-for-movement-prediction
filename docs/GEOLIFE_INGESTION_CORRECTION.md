@@ -33,10 +33,11 @@ content-deduplicated and remain an explicit boundary.
 
 ## Quality, duration, and release gates
 
-The audit independently verifies all 14 column names and dtypes, build status,
-`n_failed == 0`, `schema_identical is true`, row/file/segment counts, byte size,
-and SHA-256. Missing, false, failed, or inconsistent evidence makes the
-technical gate fail and the CLI exit nonzero.
+The audit independently verifies all 14 column names and dtypes, requires an
+explicit build `status` whose only allowlisted success value is `pass`, and
+checks `n_failed == 0`, `schema_identical is true`, row/file/segment counts,
+byte size, and SHA-256. Missing, unknown, false, failed, or inconsistent evidence
+makes the technical gate fail and the CLI exit nonzero.
 
 Duration claims retain both definitions:
 
