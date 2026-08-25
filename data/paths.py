@@ -15,6 +15,7 @@ _LOCAL_ROOT = _PROJECT_ROOT / ".local"
 
 _DEFAULTS = {
     "data_root": _LOCAL_ROOT / "data",
+    "geolife_data_root": _LOCAL_ROOT / "data" / "geolife",
     "cond_root": _LOCAL_ROOT / "conditions",
     "checkpoint": _LOCAL_ROOT / "checkpoints",
     "output_root": _LOCAL_ROOT / "outputs",

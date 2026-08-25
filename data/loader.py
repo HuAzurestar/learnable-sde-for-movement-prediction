@@ -24,8 +24,10 @@ import pandas as pd
 import torch
 
 from domain import TrajectorySegment
+from .geolife import assert_cross_source_no_leak, geolife_file_id_splits
 from .paths import resolve
 from .validation import (
+    DataValidationError,
     ensure_finite,
     ensure_monotonic_increasing,
     validate_segment,
@@ -102,19 +104,45 @@ class StateStats:
 class SegmentLoader:
     """轨迹段统一 loader（无泄漏划分供给）。
 
-    split ∈ {train, val, eval, zhejiang_finetune, zhejiang_val, zhejiang_eval, smoke}
+    split ∈ {train, val, eval, geolife_train, geolife_val, geolife_eval,
+             unified_train, unified_val, unified_eval,
+             zhejiang_finetune, zhejiang_val, zhejiang_eval, smoke}
     train/val/eval 按 global_splits.json（file_id 级无重叠）；浙江留出仅微调/终评解锁。
     `max_segments` 限段数用于冒烟（读取时只载入该 split 的前 N 段，不改划分）。
     """
 
     def __init__(self, data_root: str | Path = DEFAULT_DATA_ROOT,
                  split: str = "train", seed: int = 20260814,
-                 max_segments: int | None = None):
+                 max_segments: int | None = None,
+                 geolife_root: str | Path | None = None):
         self.data_root = Path(data_root)
+        self.geolife_root = (
+            Path(geolife_root) if geolife_root is not None else resolve("geolife_data_root")
+        )
         self.split = split
         self.seed = seed
         self.max_segments = max_segments
         self.segments: List[Segment] = []
+        self._geolife_splits: Optional[dict[str, set[str]]] = None
+
+    def _split_parts(self) -> tuple[str, str]:
+        if self.split == "smoke":
+            return "smoke", ""
+        if self.split.startswith("zhejiang_"):
+            part = self.split.removeprefix("zhejiang_")
+            if part not in {"finetune", "val", "eval"}:
+                raise DataValidationError(f"unsupported split: {self.split!r}")
+            return "zhejiang", part
+        for domain in ("geolife", "unified"):
+            prefix = f"{domain}_"
+            if self.split.startswith(prefix):
+                part = self.split.removeprefix(prefix)
+                if part not in {"train", "val", "eval"}:
+                    raise DataValidationError(f"unsupported split: {self.split!r}")
+                return domain, part
+        if self.split not in {"train", "val", "eval"}:
+            raise DataValidationError(f"unsupported split: {self.split!r}")
+        return "osm", self.split
 
     # -- split 供给 ----------------------------------------------------------
     def _file_ids_for_split(self) -> Optional[set]:
@@ -124,49 +152,80 @@ class SegmentLoader:
             return set(sp.get(key, []))
         if self.split == "smoke":
             return None
+        return self._osm_file_ids_for(self.split)
+
+    def _osm_file_ids_for(self, part: str) -> set[str]:
         sp = json.loads((self.data_root / "global_splits.json").read_text(encoding="utf-8"))
-        return set(sp.get(self.split, []))
+        if part not in sp:
+            raise DataValidationError(f"global_splits.json missing partition {part!r}")
+        return {str(file_id) for file_id in sp[part]}
+
+    def _geolife_file_ids_for(self, part: str) -> set[str]:
+        if self._geolife_splits is None:
+            self._geolife_splits = geolife_file_id_splits(self.geolife_root)
+        return set(self._geolife_splits[part])
 
     def _load_holdout(self) -> int:
         """浙江留出 80k（唯一留出腿，训练期零接触）。"""
         df = pd.read_parquet(self.data_root / "zhejiang_holdout.parquet")
         keep = self._file_ids_for_split()
-        if keep:
-            df = df[df["file_id"].isin(keep)]
+        df = df[df["file_id"].astype(str).isin(keep or set())]
         return self._build_segments(df, source="zhejiang_holdout")
 
-    def _load_full_leg(self) -> int:
-        """全量腿 25.98M，按 file_id split 过滤（不整表载入内存）。"""
-        keep = self._file_ids_for_split()
-        df = pd.read_parquet(self.data_root / "unified_full_leg.parquet",
-                             columns=["file_id", "segment_id"])
-        if keep:
-            df = df[df["file_id"].isin(keep)]
-        seg_ids = df["segment_id"].unique()
-        if self.max_segments is not None:
+    def _load_table(self, path: Path, keep: set[str], *, source: str) -> int:
+        """Load selected (file_id, segment_id) pairs without cross-file merging."""
+        keys = pd.read_parquet(path, columns=["file_id", "segment_id"])
+        keys = keys[keys["file_id"].astype(str).isin(keep)].drop_duplicates()
+        if self.max_segments is not None and len(keys) > self.max_segments:
             rng = np.random.default_rng(self.seed)
-            seg_ids = rng.choice(seg_ids, size=min(self.max_segments, len(seg_ids)),
-                                 replace=False)
-        df = pd.read_parquet(self.data_root / "unified_full_leg.parquet",
-                             columns=["segment_id", "file_id", "t"] + STATE_COLS)
-        df = df[df["segment_id"].isin(set(seg_ids))]
-        return self._build_segments(df, source="unified_full_leg")
+            indices = rng.choice(len(keys), size=self.max_segments, replace=False)
+            keys = keys.iloc[indices]
+        if len(keys) == 0:
+            return 0
+        frame = pd.read_parquet(
+            path, columns=["segment_id", "file_id", "t"] + STATE_COLS
+        )
+        frame = frame.merge(
+            keys,
+            on=["file_id", "segment_id"],
+            how="inner",
+            validate="many_to_one",
+        )
+        return self._build_segments(frame, source=source)
+
+    def _load_full_leg(self, part: str) -> int:
+        """全量腿 25.98M，按 file_id split 过滤（不整表载入内存）。"""
+        return self._load_table(
+            self.data_root / "unified_full_leg.parquet",
+            self._osm_file_ids_for(part),
+            source="unified_full_leg",
+        )
+
+    def _load_geolife_leg(self, part: str) -> int:
+        return self._load_table(
+            self.geolife_root / "geolife_leg.parquet",
+            self._geolife_file_ids_for(part),
+            source="geolife_leg",
+        )
 
     def _build_segments(self, df: pd.DataFrame, source: str) -> int:
         n = 0
-        for _, g in df.groupby("segment_id", sort=False):
+        for (file_id, raw_segment_id), g in df.groupby(
+            ["file_id", "segment_id"], sort=False
+        ):
             g = g.sort_values("t")
             x = g[STATE_COLS].to_numpy(dtype=np.float64)
             t = g["t"].to_numpy(dtype=np.float64)
             if len(x) < 2:
                 continue
-            fid = str(g["file_id"].iloc[0]) if "file_id" in g.columns else ""
+            fid = str(file_id)
+            canonical_segment_id = f"{source}:{fid}:{raw_segment_id}"
             seg = Segment(
                 t=torch.tensor(t, dtype=torch.float64),
                 x=torch.tensor(x, dtype=torch.float64),
                 dt=float(np.median(np.diff(t))) if len(t) > 1 else 60.0,
-                meta={"source": source, "segment_id": str(g["segment_id"].iloc[0]),
-                      "file_id": fid},
+                meta={"source": source, "segment_id": canonical_segment_id,
+                      "raw_segment_id": str(raw_segment_id), "file_id": fid},
             )
             validate_segment(seg, source=f"{source}:{seg.meta['segment_id']}")
             self.segments.append(seg)
@@ -176,13 +235,20 @@ class SegmentLoader:
     # -- 主入口 ----------------------------------------------------------------
     def load(self) -> int:
         """装载当前 split，返回段数。"""
-        if self.split == "smoke":
+        self.segments.clear()
+        domain, part = self._split_parts()
+        if domain == "smoke":
             return self._build_segments(
                 pd.read_parquet(self.data_root / "smoke_fullleg.parquet"),
                 source="smoke_fullleg")
-        if self.split.startswith("zhejiang"):
+        if domain == "zhejiang":
             return self._load_holdout()
-        return self._load_full_leg()
+        if domain == "geolife":
+            return self._load_geolife_leg(part)
+        if domain == "unified":
+            assert_cross_source_no_leak(self.geolife_root, self.data_root)
+            return self._load_full_leg(part) + self._load_geolife_leg(part)
+        return self._load_full_leg(part)
 
     def sample_segments(self, n: int) -> List[Segment]:
         if len(self.segments) <= n:

@@ -10,6 +10,14 @@ Set `LEARNABLE_SDE_DATA_ROOT` to a directory containing the trajectory tables.
 If it is unset, the loader resolves `.local/data` below the repository root.
 Both locations are ignored by Git.
 
+Set `LEARNABLE_SDE_GEOLIFE_DATA_ROOT` to the directory containing the cleaned
+`geolife_leg.parquet`, `geolife_splits.json`, and `geolife_build_stats.json`.
+GeoLife is opt-in through `geolife_train|val|eval` or
+`unified_train|val|eval`; the public default does not assume a workstation
+path. Before research use, run `scripts/audit_geolife_ingestion.py` with the
+OSM root and the local provenance registry. A missing registry is recorded as
+`provisional` in the report rather than treated as confirmed provenance.
+
 The trajectory loader currently expects:
 
 - `unified_full_leg.parquet`: the main table;
@@ -22,6 +30,10 @@ Required table fields are `segment_id`, `file_id`, `t`, `x`, and `y`. Time must
 be strictly increasing within a segment, state values must be finite, and every
 segment must contain at least two observations. Validation failures raise
 `DataValidationError`; invalid rows are not silently discarded.
+
+Canonical segment identifiers include source, file ID, and raw segment ID.
+This prevents repeated raw IDs such as `0_0` in different GeoLife files from
+being merged into one trajectory.
 
 ## Public-release rule
 
