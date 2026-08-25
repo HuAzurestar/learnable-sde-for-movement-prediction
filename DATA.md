@@ -10,6 +10,17 @@ Set `LEARNABLE_SDE_DATA_ROOT` to a directory containing the trajectory tables.
 If it is unset, the loader resolves `.local/data` below the repository root.
 Both locations are ignored by Git.
 
+Set `LEARNABLE_SDE_GEOLIFE_DATA_ROOT` to the directory containing the cleaned
+`geolife_leg.parquet`, `geolife_splits.json`, `geolife_build_stats.json`, and
+`geolife_longduration_tiers.json`.
+GeoLife is opt-in through `geolife_train|val|eval` or
+`unified_train|val|eval`; the public default does not assume a workstation
+path. Before research use, run `scripts/audit_geolife_ingestion.py` with the
+OSM root and the provenance registry. The audit reports a separate technical
+gate and release/legal gate. A technically valid dataset remains
+`provisional`, with a nonzero CLI exit, while independent legal review is not
+recorded; source registration alone is not release approval.
+
 The trajectory loader currently expects:
 
 - `unified_full_leg.parquet`: the main table;
@@ -18,10 +29,37 @@ The trajectory loader currently expects:
 - `zhejiang_holdout.parquet` and `zhejiang_splits.json`: optional regional
   holdout files retained for compatibility with the research protocol.
 
-Required table fields are `segment_id`, `file_id`, `t`, `x`, and `y`. Time must
-be strictly increasing within a segment, state values must be finite, and every
-segment must contain at least two observations. Validation failures raise
-`DataValidationError`; invalid rows are not silently discarded.
+The generic loader consumes `segment_id`, `file_id`, `t`, `x`, and `y`.
+GeoLife audit inputs must additionally match the complete 14-column OSM schema
+(names and dtypes): `track_id`, `file_id`, `cluster_A`, `country`, `region`,
+`city`, `segment_id`, `t`, `x`, `y`, `z`, `vx`, `vy`, and `speed`. The audit
+independently recomputes schema, row/file/segment counts, byte size, and SHA-256;
+it independently checks every build-stat claim. Build statistics must contain
+`status`, and `pass` is the only allowlisted successful value; missing or unknown
+values fail closed. Time must be strictly increasing within a segment, state
+values must be finite, and every segment must contain at least two observations.
+Validation failures raise `DataValidationError`; invalid rows are not silently
+discarded.
+
+Canonical segment identifiers include source, file ID, and raw segment ID.
+This prevents repeated raw IDs such as `0_0` in different GeoLife files from
+being merged into one trajectory.
+
+## Partition and long-duration scope
+
+The GeoLife 70/15/15 assignment is a deterministic **file-ID split**. It proves
+that file IDs do not cross partitions and that the GeoLife and OSM file-ID
+namespaces do not collide. It does not prove user independence or content-level
+deduplication. In the registered GeoLife snapshot, 121 users occur in all three
+partitions (pairwise overlaps: train/val 136, train/eval 136, val/eval 122), so
+user-independent generalization must not be claimed. Cross-source trajectory
+content deduplication is also recorded as not performed.
+
+Long-duration evidence has two non-interchangeable definitions: the cleaned
+leg uses a 60-second gap (0 segments at or above 6 h), while the walk-filtered
+tier registry uses a 300-second gap (40 segments/22 users at or above 6 h and
+0 at or above 12 h; maximum 11.65 h). The audit emits both definitions and the
+12 h data-absence boundary.
 
 ## Public-release rule
 
