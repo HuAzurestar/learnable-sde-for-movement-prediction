@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from data.geolife import audit_geolife_ingestion
+from data.validation import DataValidationError
 
 
 def main() -> int:
@@ -23,18 +24,38 @@ def main() -> int:
     parser.add_argument("--skip-sha256", action="store_true")
     args = parser.parse_args()
 
-    report = audit_geolife_ingestion(
-        args.geolife_root,
-        osm_root=args.osm_root,
-        registry_path=args.registry,
-        verify_sha256=not args.skip_sha256,
-    )
+    try:
+        report = audit_geolife_ingestion(
+            args.geolife_root,
+            osm_root=args.osm_root,
+            registry_path=args.registry,
+            verify_sha256=not args.skip_sha256,
+        )
+    except DataValidationError as exc:
+        report = {
+            "status": "failed",
+            "technical_status": "failed",
+            "release_status": "blocked",
+            "failure_ledger": [
+                {"area": "ingestion_contract", "status": "failed", "reason": str(exc)}
+            ],
+            "boundary_ledger": [],
+        }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    print(json.dumps({"status": report["status"], "output": str(args.output)}))
-    return 0 if report["status"] == "pass" else 2
+    print(
+        json.dumps(
+            {
+                "status": report["status"],
+                "technical_status": report.get("technical_status"),
+                "release_status": report.get("release_status"),
+                "output": str(args.output),
+            }
+        )
+    )
+    return {"pass": 0, "provisional": 2, "failed": 3}[report["status"]]
 
 
 if __name__ == "__main__":

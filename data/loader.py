@@ -7,7 +7,7 @@
 本地研究数据目录预期包含：
   unified_full_leg.parquet  25.98M 点 / 96,830 段（train 18.2M / val 3.8M / eval 3.9M）
   zhejiang_holdout.parquet  80,159 点（finetune 60% / val 20% / eval 20%）
-  global_splits.json        file_id 级 70/15/15 无泄漏划分
+  global_splits.json        file_id 级 70/15/15 两两无重叠划分
   zhejiang_splits.json      track_id 级 60/20/20
 schema: track_id, file_id, cluster_A, country, region, city, segment_id,
         t, x, y, z, vx, vy, speed   （x/y 为局部切平面米制；t 秒）
@@ -24,7 +24,10 @@ import pandas as pd
 import torch
 
 from domain import TrajectorySegment
-from .geolife import assert_cross_source_no_leak, geolife_file_id_splits
+from .geolife import (
+    assert_cross_source_file_id_namespace_disjoint,
+    geolife_file_id_splits,
+)
 from .paths import resolve
 from .validation import (
     DataValidationError,
@@ -102,13 +105,15 @@ class StateStats:
 
 
 class SegmentLoader:
-    """轨迹段统一 loader（无泄漏划分供给）。
+    """轨迹段统一 loader（file_id 分区供给）。
 
     split ∈ {train, val, eval, geolife_train, geolife_val, geolife_eval,
              unified_train, unified_val, unified_eval,
              zhejiang_finetune, zhejiang_val, zhejiang_eval, smoke}
     train/val/eval 按 global_splits.json（file_id 级无重叠）；浙江留出仅微调/终评解锁。
-    `max_segments` 限段数用于冒烟（读取时只载入该 split 的前 N 段，不改划分）。
+    GeoLife 的 file_id 分区并非用户独立分区，不能据此声称跨用户泛化无泄漏。
+    `max_segments` 是整个请求的总上限；对 unified_* 也最多载入 N 段，
+    而不是对 OSM 和 GeoLife 各载入 N 段。
     """
 
     def __init__(self, data_root: str | Path = DEFAULT_DATA_ROOT,
@@ -121,6 +126,8 @@ class SegmentLoader:
         )
         self.split = split
         self.seed = seed
+        if max_segments is not None and max_segments < 0:
+            raise ValueError("max_segments must be non-negative")
         self.max_segments = max_segments
         self.segments: List[Segment] = []
         self._geolife_splits: Optional[dict[str, set[str]]] = None
@@ -172,14 +179,20 @@ class SegmentLoader:
         df = df[df["file_id"].astype(str).isin(keep or set())]
         return self._build_segments(df, source="zhejiang_holdout")
 
-    def _load_table(self, path: Path, keep: set[str], *, source: str) -> int:
-        """Load selected (file_id, segment_id) pairs without cross-file merging."""
+    def _segment_keys(self, path: Path, keep: set[str]) -> pd.DataFrame:
         keys = pd.read_parquet(path, columns=["file_id", "segment_id"])
-        keys = keys[keys["file_id"].astype(str).isin(keep)].drop_duplicates()
+        return keys[keys["file_id"].astype(str).isin(keep)].drop_duplicates()
+
+    def _limit_segment_keys(self, keys: pd.DataFrame) -> pd.DataFrame:
         if self.max_segments is not None and len(keys) > self.max_segments:
             rng = np.random.default_rng(self.seed)
             indices = rng.choice(len(keys), size=self.max_segments, replace=False)
-            keys = keys.iloc[indices]
+            return keys.iloc[indices]
+        return keys
+
+    def _load_selected_table(
+        self, path: Path, keys: pd.DataFrame, *, source: str
+    ) -> int:
         if len(keys) == 0:
             return 0
         frame = pd.read_parquet(
@@ -192,6 +205,11 @@ class SegmentLoader:
             validate="many_to_one",
         )
         return self._build_segments(frame, source=source)
+
+    def _load_table(self, path: Path, keep: set[str], *, source: str) -> int:
+        """Load selected (file_id, segment_id) pairs without cross-file merging."""
+        keys = self._limit_segment_keys(self._segment_keys(path, keep))
+        return self._load_selected_table(path, keys, source=source)
 
     def _load_full_leg(self, part: str) -> int:
         """全量腿 25.98M，按 file_id split 过滤（不整表载入内存）。"""
@@ -207,6 +225,36 @@ class SegmentLoader:
             self._geolife_file_ids_for(part),
             source="geolife_leg",
         )
+
+    def _load_unified(self, part: str) -> int:
+        """Load a deterministic, globally capped sample across both sources."""
+        sources = (
+            (
+                "unified_full_leg",
+                self.data_root / "unified_full_leg.parquet",
+                self._osm_file_ids_for(part),
+            ),
+            (
+                "geolife_leg",
+                self.geolife_root / "geolife_leg.parquet",
+                self._geolife_file_ids_for(part),
+            ),
+        )
+        key_frames = []
+        for source, path, keep in sources:
+            keys = self._segment_keys(path, keep).copy()
+            keys["__source"] = source
+            key_frames.append(keys)
+        selected = self._limit_segment_keys(
+            pd.concat(key_frames, ignore_index=True)
+        )
+        total = 0
+        for source, path, _ in sources:
+            keys = selected[selected["__source"] == source].drop(
+                columns=["__source"]
+            )
+            total += self._load_selected_table(path, keys, source=source)
+        return total
 
     def _build_segments(self, df: pd.DataFrame, source: str) -> int:
         n = 0
@@ -246,8 +294,10 @@ class SegmentLoader:
         if domain == "geolife":
             return self._load_geolife_leg(part)
         if domain == "unified":
-            assert_cross_source_no_leak(self.geolife_root, self.data_root)
-            return self._load_full_leg(part) + self._load_geolife_leg(part)
+            assert_cross_source_file_id_namespace_disjoint(
+                self.geolife_root, self.data_root
+            )
+            return self._load_unified(part)
         return self._load_full_leg(part)
 
     def sample_segments(self, n: int) -> List[Segment]:
