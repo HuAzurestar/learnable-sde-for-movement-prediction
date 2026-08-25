@@ -104,7 +104,7 @@ def validate_geolife_schema(root: str | Path) -> dict[str, Any]:
         )
     return {
         "status": "pass",
-        "path": str(table_path),
+        "file": table_path.name,
         "rows": parquet.metadata.num_rows,
         "columns": [name for name, _ in signature],
         "dtypes": {name: dtype for name, dtype in signature},
