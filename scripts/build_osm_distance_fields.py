@@ -14,9 +14,11 @@ import importlib.metadata
 import json
 import math
 import platform
+import shutil
 import sys
 import tempfile
 import time
+import uuid
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -84,12 +86,100 @@ def align_bounds(bounds: Sequence[float], resolution: float, outward: bool = Tru
 def _geojson_geometries(document: dict) -> list[dict]:
     kind = document.get("type")
     if kind == "FeatureCollection":
-        return [feature["geometry"] for feature in document.get("features", []) if feature.get("geometry")]
-    if kind == "Feature":
-        return [document["geometry"]]
-    if kind in {"Polygon", "MultiPolygon"}:
-        return [document]
-    raise ValueError(f"unsupported coverage GeoJSON type: {kind!r}")
+        features = document.get("features")
+        if not isinstance(features, list) or not features:
+            raise ValueError("coverage FeatureCollection must contain at least one feature")
+        geometries = []
+        for index, feature in enumerate(features):
+            if not isinstance(feature, dict) or feature.get("type") != "Feature":
+                raise ValueError(f"coverage feature {index} is not a GeoJSON Feature")
+            if not isinstance(feature.get("geometry"), dict):
+                raise ValueError(f"coverage feature {index} has no geometry")
+            geometries.append(feature["geometry"])
+    elif kind == "Feature":
+        if not isinstance(document.get("geometry"), dict):
+            raise ValueError("coverage Feature has no geometry")
+        geometries = [document["geometry"]]
+    elif kind in {"Polygon", "MultiPolygon"}:
+        geometries = [document]
+    else:
+        raise ValueError(
+            "coverage must be a Feature/FeatureCollection containing only "
+            f"Polygon/MultiPolygon geometry, got {kind!r}"
+        )
+
+    from shapely.geometry import shape
+
+    for index, geometry in enumerate(geometries):
+        if geometry.get("type") not in {"Polygon", "MultiPolygon"}:
+            raise ValueError(
+                f"coverage geometry {index} must be Polygon/MultiPolygon, "
+                f"got {geometry.get('type')!r}"
+            )
+        candidate = shape(geometry)
+        if candidate.is_empty or not candidate.is_valid:
+            raise ValueError(f"coverage geometry {index} is empty or invalid")
+        bounds = np.asarray(candidate.bounds, dtype=np.float64)
+        if not np.isfinite(bounds).all():
+            raise ValueError(f"coverage geometry {index} has non-finite coordinates")
+        min_lon, min_lat, max_lon, max_lat = bounds
+        if not (-180 <= min_lon <= max_lon <= 180 and -90 <= min_lat <= max_lat <= 90):
+            raise ValueError(f"coverage geometry {index} is outside EPSG:4326 bounds")
+    return geometries
+
+
+def validate_metric_projected_crs(value: str):
+    """Return a projected CRS whose horizontal axes are expressed in metres."""
+
+    from pyproj import CRS
+
+    crs = CRS.from_user_input(value)
+    if not crs.is_projected:
+        raise ValueError(f"CRS must be projected, got {value!r}")
+    axes = crs.axis_info
+    if len(axes) < 2:
+        raise ValueError(f"CRS must expose two horizontal axes, got {value!r}")
+    for axis in axes[:2]:
+        factor = float(axis.unit_conversion_factor)
+        if not math.isfinite(factor) or not math.isclose(factor, 1.0, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError(
+                "CRS horizontal axes must use metres because --resolution-m and "
+                f"--max-distance-m are not rescaled; axis={axis.name!r}, "
+                f"unit={axis.unit_name!r}, metres_per_unit={factor!r}"
+            )
+    return crs
+
+
+def _publish_staged_directory(staging: Path, destination: Path, overwrite: bool) -> None:
+    """Atomically replace one managed output directory on the same filesystem."""
+
+    managed_names = {
+        *(f"{channel}.tif" for channel in CHANNELS),
+        "osm_coverage.tif",
+        "manifest.json",
+        "quality_report.md",
+    }
+    backup = None
+    if destination.exists():
+        entries = list(destination.iterdir())
+        unexpected = [entry for entry in entries if entry.name not in managed_names]
+        if unexpected:
+            raise FileExistsError(f"refusing to replace directory with unmanaged files: {unexpected}")
+        if entries and not overwrite:
+            raise FileExistsError(f"refusing to overwrite existing outputs: {entries}")
+        if entries:
+            backup = destination.with_name(f".{destination.name}.backup-{uuid.uuid4().hex}")
+            destination.replace(backup)
+        else:
+            destination.rmdir()
+    try:
+        staging.replace(destination)
+    except Exception:
+        if backup is not None and not destination.exists():
+            backup.replace(destination)
+        raise
+    if backup is not None:
+        shutil.rmtree(backup)
 
 
 @dataclass
@@ -240,7 +330,7 @@ def _quality_stats(distance: np.ndarray, feature_core: np.ndarray, coverage: np.
     }
 
 
-def build(args: argparse.Namespace) -> BuildResult:
+def _build_staged(args: argparse.Namespace, output_dir: Path) -> BuildResult:
     try:
         import osmium
         import pyproj
@@ -268,14 +358,6 @@ def build(args: argparse.Namespace) -> BuildResult:
         )
     if args.assume_bounds_covered and not args.coverage_note:
         raise ValueError("--assume-bounds-covered requires a non-empty --coverage-note")
-
-    output_dir = args.output_dir.resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
-    managed_files = [output_dir / f"{channel}.tif" for channel in CHANNELS]
-    managed_files += [output_dir / "osm_coverage.tif", output_dir / "manifest.json", output_dir / "quality_report.md"]
-    existing = [path for path in managed_files if path.exists()]
-    if existing and not args.overwrite:
-        raise FileExistsError(f"refusing to overwrite existing outputs: {existing}")
 
     actual_sha256 = sha256_file(input_path)
     if args.expected_sha256 and actual_sha256.lower() != args.expected_sha256.lower():
@@ -310,8 +392,10 @@ def build(args: argparse.Namespace) -> BuildResult:
     min_lon, min_lat, max_lon, max_lat = requested_bounds
     if not (-180 <= min_lon < max_lon <= 180 and -90 <= min_lat < max_lat <= 90):
         raise ValueError(f"invalid EPSG:4326 bounds: {requested_bounds}")
+    target_crs = validate_metric_projected_crs(args.crs)
+    target_crs_name = target_crs.to_string()
     raw_core_bounds = transform_bounds(
-        "EPSG:4326", args.crs, *requested_bounds, densify_pts=21
+        "EPSG:4326", target_crs, *requested_bounds, densify_pts=21
     )
     core_bounds = align_bounds(raw_core_bounds, args.resolution_m)
     xmin, ymin, xmax, ymax = core_bounds
@@ -346,7 +430,7 @@ def build(args: argparse.Namespace) -> BuildResult:
             }
         ]
         coverage_mode = "verified_interior_bounds"
-    projected_coverage = _project_geometries(coverage_wgs84, args.crs)
+    projected_coverage = _project_geometries(coverage_wgs84, target_crs_name)
     coverage_geometry = unary_union(projected_coverage)
     coverage = rasterize(
         projected_coverage,
@@ -359,7 +443,7 @@ def build(args: argparse.Namespace) -> BuildResult:
     if not np.any(coverage == 1):
         raise ValueError("coverage geometry does not intersect the output grid")
 
-    collector = FeatureCollector(work_bounds, args.crs)
+    collector = FeatureCollector(work_bounds, target_crs_name)
     index_note = args.location_index
     if args.location_index.endswith("_file_array"):
         with tempfile.TemporaryDirectory(prefix="osm-node-index-", dir=output_dir) as temp_dir:
@@ -371,7 +455,7 @@ def build(args: argparse.Namespace) -> BuildResult:
     output_metadata: dict[str, dict] = {}
     channel_stats: dict[str, dict] = {}
     smoke_checks: dict[str, dict | None] = {}
-    inverse = pyproj.Transformer.from_crs(args.crs, "EPSG:4326", always_xy=True)
+    inverse = pyproj.Transformer.from_crs(target_crs, "EPSG:4326", always_xy=True)
     for channel in CHANNELS:
         geometries = collector.geometries[channel]
         if geometries:
@@ -400,7 +484,7 @@ def build(args: argparse.Namespace) -> BuildResult:
         feature_core = feature_work[rows, cols]
         distance[coverage == 0] = -9999.0
         path = output_dir / f"{channel}.tif"
-        _write_raster(path, distance, core_transform, args.crs, -9999.0, "float32")
+        _write_raster(path, distance, core_transform, target_crs_name, -9999.0, "float32")
         channel_stats[channel] = _quality_stats(distance, feature_core, coverage, args.max_distance_m)
 
         check = None
@@ -436,7 +520,7 @@ def build(args: argparse.Namespace) -> BuildResult:
         }
 
     coverage_path = output_dir / "osm_coverage.tif"
-    _write_raster(coverage_path, coverage, core_transform, args.crs, 0, "uint8")
+    _write_raster(coverage_path, coverage, core_transform, target_crs_name, 0, "uint8")
     output_metadata["coverage"] = {
         "file": coverage_path.name,
         "sha256": sha256_file(coverage_path),
@@ -462,7 +546,7 @@ def build(args: argparse.Namespace) -> BuildResult:
             "parent_input": parent_input,
         },
         "grid": {
-            "crs": args.crs,
+            "crs": target_crs_name,
             "requested_bounds_epsg4326": list(requested_bounds),
             "bounds_projected": list(core_bounds),
             "resolution_m": args.resolution_m,
@@ -520,7 +604,7 @@ def build(args: argparse.Namespace) -> BuildResult:
         "",
         f"Input SHA-256: `{actual_sha256}`",
         f"PBF replication timestamp: `{header['replication_timestamp']}`",
-        f"Grid: `{args.crs}`, {args.resolution_m:g} m, {core_width} × {core_height}; cap {args.max_distance_m:g} m.",
+        f"Grid: `{target_crs_name}`, {args.resolution_m:g} m, {core_width} × {core_height}; cap {args.max_distance_m:g} m.",
         f"Coverage: {int((coverage == 1).sum()):,}/{coverage.size:,} pixels ({(coverage == 1).mean():.2%}); mode `{coverage_mode}`.",
         "",
         "| channel | selected ways | feature pixels | non-empty (< cap) | at cap | p50 m | p95 m |",
@@ -542,6 +626,19 @@ def build(args: argparse.Namespace) -> BuildResult:
     report_path = output_dir / "quality_report.md"
     report_path.write_text("\n".join(report_lines) + "\n", encoding="utf-8")
     return BuildResult(manifest_path, report_path)
+
+
+def build(args: argparse.Namespace) -> BuildResult:
+    """Build in a sibling temporary directory, then publish by atomic rename."""
+
+    output_dir = args.output_dir.resolve()
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    prefix = f".{output_dir.name}.staging-"
+    with tempfile.TemporaryDirectory(prefix=prefix, dir=output_dir.parent) as temp_dir:
+        staging = Path(temp_dir)
+        _build_staged(args, staging)
+        _publish_staged_directory(staging, output_dir, args.overwrite)
+    return BuildResult(output_dir / "manifest.json", output_dir / "quality_report.md")
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

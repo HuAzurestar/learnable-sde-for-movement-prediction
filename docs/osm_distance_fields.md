@@ -54,9 +54,14 @@ osmium extract `
   united_kingdom-latest.osm.pbf
 ```
 
-`simple` is safe here only because the requested core is strictly farther from
-the extract boundary than the 2 km distance cap. Country/province production
-jobs should instead use reviewed coverage polygons and spatial tiling.
+`simple` is accepted for this one smoke artifact only because a same-bbox
+`complete_ways` reconstruction produced four byte-identical GeoTIFF files
+(`road_dist`, `water_dist`, `building_dist`, and `osm_coverage`) with zero
+differing pixels. Boundary margin is a useful diagnostic, not the validity
+proof. `scripts/compare_osm_distance_fields.py` makes that comparison
+reproducible and fails nonzero on any grid, array-byte, or file-byte mismatch.
+Country/province production jobs must use reviewed coverage polygons and
+reference-complete spatial tiling.
 
 ## Build examples
 
@@ -84,6 +89,13 @@ checksums and the exact derivation note.
 For arbitrary or full administrative coverage, omit
 `--assume-bounds-covered` and provide a reviewed WGS84 Polygon/MultiPolygon via
 `--coverage-geojson`. The command refuses ambiguous coverage by default.
+GeoJSON features must contain non-empty, valid Polygon/MultiPolygon geometry
+inside WGS84 bounds. The target CRS must be projected and both horizontal axes
+must use metres; geographic and foot-based CRSs fail before PBF scanning.
+
+The builder writes every managed artifact into a sibling temporary directory
+and atomically renames the complete directory into place. `--overwrite` never
+replaces a directory containing unmanaged files.
 
 ## Condition-slice integration
 
@@ -99,7 +111,33 @@ python scripts/augment_cond_slices_osm.py `
 
 The adapter preserves `dem_elev`, `dem_slope`, `landcover`, and `has_map`, then
 adds the three distance columns and `has_osm`. `data.source.CONDITION_SPECS`
-exposes these as condition kind `osm`; rows with `has_osm=0` are excluded.
+exposes these as condition kind `osm`; rows with `has_osm=0` are excluded. If
+any covered row has a non-finite value in any OSM channel, the whole segment
+feature is unavailable (`None`) rather than silently averaged. Each manifest
+records both input and output parquet SHA-256. Like raster construction, the
+entire enhanced tree is staged and atomically published.
+
+## Training integration boundary
+
+This NEX-380 delivery is a validated data pipeline, **not training-ready**.
+Training remains gated until a later reviewed change completes all of the
+following as one contract:
+
+1. point `cond_root` at the versioned augmented tree without changing the
+   terrain baseline;
+2. write an audited `absolute_start_epoch` into every `SegmentLoader` segment
+   (the current loader has only relative `t` and the legacy backend reconstructs
+   offsets out of band);
+3. add `osm` and its three ordered columns to `experiments.backend._COND_FEATURES`
+   or migrate the backend to `data.source.CONDITION_SPECS`;
+4. register `cond.kind=osm` in the experiment configuration and expand the
+   model condition dimension from the relevant existing baseline to three;
+5. add train/validation end-to-end alignment, missingness, normalization, and
+   no-leakage tests before opening the training gate.
+
+The immutable source keys are registered in
+`docs/data_registry/NEX-317-osm-snapshots.json`; a moving `*-latest` URL alone
+is never sufficient to reproduce a build.
 
 ## Implementation sources
 
@@ -109,5 +147,10 @@ exposes these as condition kind `osm`; rows with `has_osm=0` are excluded.
   grid: https://rasterio.readthedocs.io/en/stable/api/rasterio.features.html
 - SciPy documents `distance_transform_edt` as an exact Euclidean distance
   transform with physical sampling: https://docs.scipy.org/doc/scipy/reference/generated/scipy.ndimage.distance_transform_edt.html
+- pyproj exposes each CRS axis' metre conversion factor:
+  https://pyproj4.github.io/pyproj/stable/api/crs/coordinate_system.html
+- osmium documents why `simple` is not normally reference-complete and how it
+  differs from `complete_ways`:
+  https://docs.osmcode.org/osmium/latest/osmium-extract.html
 - OSM tagging references: https://wiki.openstreetmap.org/wiki/Key:building and
   https://wiki.openstreetmap.org/wiki/Key:waterway

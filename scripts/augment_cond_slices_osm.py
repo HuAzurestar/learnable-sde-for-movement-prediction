@@ -6,7 +6,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import sys
+import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
@@ -28,14 +31,10 @@ def sha256_file(path: Path, chunk_size: int = 4 * 1024 * 1024) -> str:
     return digest.hexdigest()
 
 
-def run(args: argparse.Namespace) -> Path:
-    input_root = args.input_root.resolve()
-    output_root = args.output_root.resolve()
-    if input_root == output_root:
-        raise ValueError("input-root and output-root must differ; in-place mutation is not allowed")
+def _run_into(
+    args: argparse.Namespace, input_root: Path, output_root: Path, published_root: Path
+) -> Path:
     sources = sorted(input_root.rglob(args.pattern))
-    if not sources:
-        raise FileNotFoundError(f"no files matching {args.pattern!r} below {input_root}")
     output_root.mkdir(parents=True, exist_ok=True)
     collection = OSMDistanceCollection(args.manifest)
     totals = {
@@ -82,7 +81,9 @@ def run(args: argparse.Namespace) -> Path:
             outputs.append(
                 {
                     "file": relative.as_posix(),
+                    "input_sha256": sha256_file(source),
                     "sha256": sha256_file(destination),
+                    "output_sha256": sha256_file(destination),
                     "points": len(augmented),
                     "covered_points": int(covered.sum()),
                 }
@@ -97,7 +98,7 @@ def run(args: argparse.Namespace) -> Path:
         "schema_version": "osm-cond-slices/v1",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "input_root": str(input_root),
-        "output_root": str(output_root),
+        "output_root": str(published_root),
         "distance_field_manifests": [str(path.resolve()) for path in args.manifest],
         "schema_additions": [*OSM_DISTANCE_COLUMNS, "has_osm"],
         "missing_semantics": "has_osm=0 and distance columns NaN; capped distances remain has_osm=1",
@@ -107,6 +108,45 @@ def run(args: argparse.Namespace) -> Path:
     manifest_path = output_root / "osm_augmentation_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return manifest_path
+
+
+def _publish_tree(staging: Path, destination: Path, overwrite: bool) -> None:
+    backup = None
+    if destination.exists():
+        entries = list(destination.iterdir())
+        if entries and not overwrite:
+            raise FileExistsError(f"refusing to overwrite existing output tree: {destination}")
+        if entries:
+            backup = destination.with_name(f".{destination.name}.backup-{uuid.uuid4().hex}")
+            destination.replace(backup)
+        else:
+            destination.rmdir()
+    try:
+        staging.replace(destination)
+    except Exception:
+        if backup is not None and not destination.exists():
+            backup.replace(destination)
+        raise
+    if backup is not None:
+        shutil.rmtree(backup)
+
+
+def run(args: argparse.Namespace) -> Path:
+    input_root = args.input_root.resolve()
+    output_root = args.output_root.resolve()
+    if input_root == output_root:
+        raise ValueError("input-root and output-root must differ; in-place mutation is not allowed")
+    if not input_root.is_dir():
+        raise FileNotFoundError(input_root)
+    if not any(input_root.rglob(args.pattern)):
+        raise FileNotFoundError(f"no files matching {args.pattern!r} below {input_root}")
+    output_root.parent.mkdir(parents=True, exist_ok=True)
+    prefix = f".{output_root.name}.staging-"
+    with tempfile.TemporaryDirectory(prefix=prefix, dir=output_root.parent) as temp_dir:
+        staging = Path(temp_dir)
+        _run_into(args, input_root, staging, output_root)
+        _publish_tree(staging, output_root, args.overwrite)
+    return output_root / "osm_augmentation_manifest.json"
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

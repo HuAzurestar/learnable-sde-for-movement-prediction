@@ -150,7 +150,16 @@ class OSMDistanceCollection:
         result["has_osm"] = np.zeros(len(lon_array), dtype=np.int8)
         for field in self.fields:
             sampled = field.sample(lon_array, lat_array)
-            take = (result["has_osm"].to_numpy() == 0) & (sampled["has_osm"].to_numpy() == 1)
+            already_covered = result["has_osm"].to_numpy() == 1
+            newly_covered = sampled["has_osm"].to_numpy() == 1
+            overlap = already_covered & newly_covered
+            if overlap.any():
+                indices = np.flatnonzero(overlap)[:10].tolist()
+                raise OSMDistanceFieldError(
+                    "overlapping OSM manifests are ambiguous; "
+                    f"region={field.region!r}, sample_indices={indices}"
+                )
+            take = (~already_covered) & newly_covered
             if take.any():
                 result.loc[take, list(OSM_DISTANCE_COLUMNS)] = sampled.loc[
                     take, list(OSM_DISTANCE_COLUMNS)

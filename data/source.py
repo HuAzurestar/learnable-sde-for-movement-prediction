@@ -64,17 +64,26 @@ def extract_features(sub: pd.DataFrame, kind: str) -> Optional[np.ndarray]:
             return None
     per_col = spec.get("per_column_agg", {})
     default_agg = spec.get("agg", "mean")
+    columns = spec["columns"]
+    missing = [column for column in columns if column not in sub.columns]
+    if missing:
+        raise DataValidationError(
+            f"条件 kind={kind} 缺列 {missing!r} —— schema 错误"
+        )
+    # Aggregation must not turn a partially missing covered interval into an
+    # apparently valid feature vector (pandas mean() skips NaN by default).
+    numeric = sub[columns].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=np.float64)
+    if not np.isfinite(numeric).all():
+        return None
     vals = []
-    for col in spec["columns"]:
-        if col not in sub.columns:
-            raise DataValidationError(f"条件 kind={kind} 缺列 {col!r} —— schema 错误")
+    for col in columns:
         agg = per_col.get(col, default_agg)
         if agg == "mode":
             mode_vals = sub[col].mode()
             vals.append(float(mode_vals.iloc[0]) if len(mode_vals) else np.nan)
         else:  # mean
             vals.append(float(sub[col].mean()))
-    if any(np.isnan(v) for v in vals):
+    if not np.isfinite(vals).all():
         return None
     return np.array(vals, dtype=np.float64)
 

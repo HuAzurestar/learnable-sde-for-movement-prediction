@@ -1,0 +1,23 @@
+{
+  "schema_version": "nex-data-snapshot-registry/v1",
+  "registry_owner": "NEX-317",
+  "acquisition_policy": "The upstream *-latest URL is discovery metadata only. Reproduction requires the registered byte size, replication timestamp, and full SHA-256; a mismatch is a new snapshot and must receive a new snapshot_id.",
+  "snapshots": [
+    {
+      "snapshot_id": "NEX-317-OSM-ZHEJIANG-20260813-A3001722",
+      "region": "Zhejiang",
+      "source_url": "https://download.openstreetmap.fr/extracts/asia/china/zhejiang-latest.osm.pbf",
+      "replication_timestamp": "2026-08-13T00:51:06Z",
+      "size_bytes": 97073437,
+      "sha256": "a30017225e70490409736810962bc634d44db875ca023f6a0c745f923122e15e"
+    },
+    {
+      "snapshot_id": "NEX-317-OSM-GB-20260813-E403B469",
+      "region": "United Kingdom",
+      "source_url": "https://download.geofabrik.de/europe/united-kingdom-latest.osm.pbf",
+      "replication_timestamp": "2026-08-13T01:32:04Z",
+      "size_bytes": 2567822478,
+      "sha256": "e403b469010e1ed9ca87326e64616488ed033fe36dcc890494af9e9d0ba7923c"
+    }
+  ]
+}

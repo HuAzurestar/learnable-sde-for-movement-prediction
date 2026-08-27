@@ -1,13 +1,27 @@
 import json
+from argparse import Namespace
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from data.osm import OSM_DISTANCE_COLUMNS, OSMDistanceField, augment_condition_frame
+from data.osm import (
+    OSM_DISTANCE_COLUMNS,
+    OSMDistanceCollection,
+    OSMDistanceField,
+    OSMDistanceFieldError,
+    augment_condition_frame,
+)
 from data.source import extract_features
-from scripts.build_osm_distance_fields import align_bounds, classify_way
+from scripts.augment_cond_slices_osm import run as augment_slices
+from scripts.build_osm_distance_fields import (
+    _geojson_geometries,
+    _publish_staged_directory,
+    align_bounds,
+    classify_way,
+    validate_metric_projected_crs,
+)
 
 
 def test_classify_way_declares_active_feature_rules():
@@ -28,6 +42,8 @@ def _write_test_field(root: Path) -> Path:
     rasterio = pytest.importorskip("rasterio")
     pytest.importorskip("pyproj")
     from rasterio.transform import from_origin
+
+    root.mkdir(parents=True, exist_ok=True)
 
     transform = from_origin(0.0, 200.0, 100.0, 100.0)
     profile = {
@@ -107,3 +123,102 @@ def test_osm_condition_aggregation_filters_uncovered_rows():
         }
     )
     np.testing.assert_allclose(extract_features(frame, "osm"), [100.0, 200.0, 300.0])
+
+
+@pytest.mark.parametrize(
+    ("column", "bad_value"),
+    [("road_dist", np.nan), ("water_dist", np.inf), ("building_dist", -np.inf)],
+)
+def test_osm_condition_rejects_any_nonfinite_covered_value(column, bad_value):
+    frame = pd.DataFrame(
+        {
+            "road_dist": [100.0, 110.0],
+            "water_dist": [200.0, 210.0],
+            "building_dist": [300.0, 310.0],
+            "has_osm": [1, 1],
+        }
+    )
+    frame.loc[1, column] = bad_value
+    assert extract_features(frame, "osm") is None
+
+
+def test_crs_must_be_projected_and_meter_based():
+    pyproj = pytest.importorskip("pyproj")
+    assert validate_metric_projected_crs("EPSG:32651") == pyproj.CRS("EPSG:32651")
+    with pytest.raises(ValueError, match="projected"):
+        validate_metric_projected_crs("EPSG:4326")
+    with pytest.raises(ValueError, match="must use metres"):
+        validate_metric_projected_crs("EPSG:2263")
+
+
+def test_coverage_geojson_requires_valid_polygon():
+    pytest.importorskip("shapely")
+    valid = {
+        "type": "Polygon",
+        "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+    }
+    assert _geojson_geometries(valid) == [valid]
+    with pytest.raises(ValueError, match="Polygon/MultiPolygon"):
+        _geojson_geometries({"type": "LineString", "coordinates": [[0, 0], [1, 1]]})
+    with pytest.raises(ValueError, match="empty or invalid"):
+        _geojson_geometries(
+            {
+                "type": "Polygon",
+                "coordinates": [[[0, 0], [1, 1], [1, 0], [0, 1], [0, 0]]],
+            }
+        )
+
+
+def test_collection_rejects_overlapping_manifests(tmp_path):
+    pyproj = pytest.importorskip("pyproj")
+    left = _write_test_field(tmp_path / "left")
+    right = _write_test_field(tmp_path / "right")
+    inverse = pyproj.Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
+    lon, lat = inverse.transform([50.0], [150.0])
+    collection = OSMDistanceCollection([left, right])
+    try:
+        with pytest.raises(OSMDistanceFieldError, match="overlapping OSM manifests"):
+            collection.sample(lon, lat)
+    finally:
+        collection.close()
+
+
+def test_condition_augmentation_manifest_hashes_input_and_publishes_atomically(tmp_path):
+    pyproj = pytest.importorskip("pyproj")
+    pytest.importorskip("pyarrow")
+    field_manifest = _write_test_field(tmp_path / "field")
+    inverse = pyproj.Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
+    lon, lat = inverse.transform([50.0], [150.0])
+    input_root = tmp_path / "input"
+    source = input_root / "val" / "sample_cond.parquet"
+    source.parent.mkdir(parents=True)
+    pd.DataFrame({"lon": lon, "lat": lat}).to_parquet(source, index=False)
+    output_root = tmp_path / "output"
+    manifest_path = augment_slices(
+        Namespace(
+            input_root=input_root,
+            output_root=output_root,
+            manifest=[field_manifest],
+            pattern="*_cond.parquet",
+            overwrite=False,
+        )
+    )
+    document = json.loads(manifest_path.read_text(encoding="utf-8"))
+    record = document["outputs"][0]
+    from scripts.augment_cond_slices_osm import sha256_file
+
+    assert record["input_sha256"] == sha256_file(source)
+    assert record["output_sha256"] == record["sha256"]
+    assert not list(tmp_path.glob(".output.staging-*"))
+
+
+def test_atomic_build_publication_refuses_unmanaged_destination(tmp_path):
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "manifest.json").write_text("{}", encoding="utf-8")
+    destination = tmp_path / "published"
+    destination.mkdir()
+    (destination / "keep.txt").write_text("user data", encoding="utf-8")
+    with pytest.raises(FileExistsError, match="unmanaged"):
+        _publish_staged_directory(staging, destination, overwrite=True)
+    assert (destination / "keep.txt").read_text(encoding="utf-8") == "user data"
