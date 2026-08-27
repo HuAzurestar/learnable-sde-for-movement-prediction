@@ -1,4 +1,4 @@
-"""Count capacity and fail-fast validate the NEX-381-v4 experiment contract."""
+"""Count capacity and fail-fast validate the NEX-381-v5 experiment contract."""
 
 from __future__ import annotations
 
@@ -18,7 +18,10 @@ FROZEN_MANIFEST_FIELDS = (
     "schema_version",
     "unified_full_leg_sha256",
     "global_splits_sha256",
-    "condition_files_sha256",
+    "segment_start_map_path",
+    "segment_start_map_sha256",
+    "condition_file_manifest_path",
+    "condition_file_manifest_sha256",
     "state_adapter_id",
     "state_normalization_sha256",
     "environment_feature_id",
@@ -42,6 +45,15 @@ NEURAL_DIFFUSION_CONTRACT = {
     ),
 }
 FROZEN_STRUCTURE_CLAIM = "2.48×参数量、非参数匹配的 fitted-pipeline 比较"
+EXPECTED_CONTRASTS = (
+    ("I1-K03-vs-K01", "CAP-I1-K01", "CAP-I1-K03", "I1-capacity"),
+    ("I1-K10-vs-K03", "CAP-I1-K03", "CAP-I1-K10", "I1-capacity"),
+    ("I1-K30-vs-K10", "CAP-I1-K10", "CAP-I1-K30", "I1-capacity"),
+    ("NN-H032-vs-H008", "CAP-NN-H008", "CAP-NN-H032", "neural-capacity"),
+    ("NN-H064-vs-H032", "CAP-NN-H032", "CAP-NN-H064", "neural-capacity"),
+    ("NN-H128-vs-H064", "CAP-NN-H064", "CAP-NN-H128", "neural-capacity"),
+    ("STRUCT-I1-K10-vs-NN-H008", "CAP-I1-K10", "CAP-NN-H008", "structure"),
+)
 FROZEN_ARM_REFS = {
     "data_lock": "common_protocol.data_lock",
     "splits": "common_protocol.splits",
@@ -61,12 +73,13 @@ ARM_RESULT_HEADER = (
     "event_id", "domain_D", "region_A", "full_support_bin_edges",
     "dual_pi_plus_surv_abs_error", "dual_reconstruction_l1", "dual_hit_count",
     "dual_non_hit_count", "dual_undefined_stratum", "dual_algebra_pass", "fp_mc_l1",
-    "sigma_hist", "delta", "delta_probe_direction", "delta_probe_value",
-    "delta_probe_status", "wall_time_seconds", "peak_memory_mb", "notes",
+    "sigma_hist", "delta", "delta_probe_direction", "delta_probe_status",
+    "wall_time_seconds", "peak_memory_mb", "notes",
 )
 CONTRAST_RESULT_HEADER = (
-    "preregistration_id", "contrast_id", "left_arm_id", "right_arm_id", "metric",
-    "effect_definition", "n_paired_seeds", "n_paired_segments", "estimate",
+    "preregistration_id", "execution_git_sha", "dataset_id", "global_splits_sha256",
+    "contrast_id", "left_arm_id", "right_arm_id", "metric_id", "effect_definition",
+    "n_paired_seeds", "n_paired_segments", "estimate",
     "pointwise_ci_low", "pointwise_ci_high", "simultaneous_ci_low",
     "simultaneous_ci_high", "raw_p_value", "holm_family", "holm_rank",
     "holm_family_size", "holm_adjusted_p", "reject_alpha", "bootstrap_B", "status",
@@ -153,19 +166,19 @@ def _count_from_arm(arm: Mapping[str, Any]) -> int:
 
 def _expect(errors: list[str], actual: Any, expected: Any, label: str) -> None:
     if actual != expected:
-        errors.append(f"{label} must equal frozen v4 value {expected!r}; got {actual!r}")
+        errors.append(f"{label} must equal frozen v5 value {expected!r}; got {actual!r}")
 
 
 def validate_matrix(document: Mapping[str, Any]) -> list[str]:
     """Validate every field needed to resolve any arm without investigator choice."""
 
     errors: list[str] = []
-    _expect(errors, document.get("schema_version"), "4.0", "schema_version")
-    _expect(errors, document.get("preregistration_id"), "NEX-381-v4", "preregistration_id")
-    _expect(errors, document.get("approval_state"), "draft_pending_v4_math_review", "approval_state")
+    _expect(errors, document.get("schema_version"), "5.0", "schema_version")
+    _expect(errors, document.get("preregistration_id"), "NEX-381-v5", "preregistration_id")
+    _expect(errors, document.get("approval_state"), "draft_pending_v5_math_review", "approval_state")
     supersedes = document.get("supersedes", {})
-    _expect(errors, supersedes.get("preregistration_id"), "NEX-381-v3", "supersedes.preregistration_id")
-    _expect(errors, supersedes.get("git_sha"), "7765dc002732349018dbf0d494f78046a88ddf30", "supersedes.git_sha")
+    _expect(errors, supersedes.get("preregistration_id"), "NEX-381-v4", "supersedes.preregistration_id")
+    _expect(errors, supersedes.get("git_sha"), "1c8bc1288c0cd5845dde8aad5b96ca4ffc0bed84", "supersedes.git_sha")
 
     common = document.get("common_protocol", {})
     lock = common.get("data_lock", {})
@@ -179,11 +192,28 @@ def validate_matrix(document: Mapping[str, Any]) -> list[str]:
     _expect(errors, adapter.get("call"), "data.loader.to_phase_space_1d(segment, coord=0)", "state adapter call")
     if "population std (ddof=0)" not in adapter.get("normalization", ""):
         errors.append("state adapter must freeze train population normalization")
+    coordinate_policy = adapter.get("model_coordinate_policy", {})
+    if "only in raw" not in coordinate_policy.get("I1", "") or "never feed z" not in coordinate_policy.get("I1", ""):
+        errors.append("I1 must fit and exact-rollout only in raw [X,V]")
+    if "at every registered grid point" not in coordinate_policy.get("evaluation", ""):
+        errors.append("I1 raw paths must transform to common normalized state at every evaluation point")
     environment = common.get("environment_feature", {})
     _expect(errors, environment.get("feature_id"), "aligned_solar_elev_mean_v1", "environment feature id")
     _expect(errors, environment.get("dimension"), 1, "environment dimension")
     if "solar_elev only" not in environment.get("source", ""):
         errors.append("environment source must freeze the solar_elev column only")
+    start_map = environment.get("start_map", "")
+    for token in ("segment_id,file_id,absolute_start_epoch", "segment_id unique", "hash must equal segment_start_map_sha256"):
+        if token not in start_map:
+            errors.append(f"solar start map contract missing {token}")
+    file_map = environment.get("condition_file_map", "")
+    for token in ("file_id,relative_path,sha256", "file_id unique", "duplicate candidate files fail", "runtime glob selection is forbidden"):
+        if token not in file_map:
+            errors.append(f"condition file manifest contract missing {token}")
+    if "every aligned solar_elev value finite" not in environment.get("aggregation", ""):
+        errors.append("environment aggregation must fail on any nonfinite aligned solar value")
+    if "filtering nonfinite rows is forbidden" not in environment.get("aggregation", ""):
+        errors.append("environment aggregation must forbid finite-row filtering")
     if "day_fraction" not in environment.get("aggregation", ""):
         errors.append("environment aggregation must explicitly exclude day_fraction")
     if "population std (ddof=0)" not in environment.get("normalization", ""):
@@ -206,6 +236,8 @@ def validate_matrix(document: Mapping[str, Any]) -> list[str]:
     for key, value in (("batch_size", 256), ("shuffle", True), ("drop_last", False), ("gradient_clipping", "none"), ("max_epochs", 300)):
         _expect(errors, neural_training.get(key), value, f"neural training {key}")
     rollout = common.get("rollout", {})
+    if "raw r=[X_raw,V_raw]" not in rollout.get("I1", "") or "never propagate z" not in rollout.get("I1", ""):
+        errors.append("I1 rollout must preserve raw dX=Vdt dynamics and transform only for evaluation")
     if "Euler-Maruyama" not in rollout.get("neural", "") or "no adaptive stepping" not in rollout.get("neural", ""):
         errors.append("neural rollout must freeze non-adaptive Euler-Maruyama")
     if "including t=0 and exact endpoint T" not in rollout.get("time_grid", ""):
@@ -220,8 +252,10 @@ def validate_matrix(document: Mapping[str, Any]) -> list[str]:
     for token in ("2D Gaussian KDE", "M=1000", "M-1", "M^(-1/6)", "1e-9*I"):
         if token not in hdr.get("density", ""):
             errors.append(f"HDR90 density contract missing {token}")
-    if "ceil(0.10*M)" not in hdr.get("threshold", "") or "ties inside" not in hdr.get("membership", ""):
+    if "ceil(0.10*M)=100" not in hdr.get("threshold", "") or "901/1000" not in hdr.get("membership", ""):
         errors.append("HDR90 threshold/tie boundary algorithm is not frozen")
+    if "at least 90.1% forecast-sample mass" not in hdr.get("report", ""):
+        errors.append("HDR90 must state its conservative finite-sample mass")
     event = evaluation.get("event", {})
     _expect(errors, event.get("event_id"), "hit_X_origin_interval_v1", "event id")
     _expect(errors, event.get("coordinate"), "state[0] = normalized_position_X only", "event coordinate")
@@ -233,21 +267,40 @@ def validate_matrix(document: Mapping[str, Any]) -> list[str]:
         errors.append("event hit rule must freeze the complete discrete time grid")
     dual = evaluation.get("bridge_dual", {})
     _expect(errors, dual.get("event_ref"), "common_protocol.evaluation.event", "bridge event reference")
-    if "state[0]=X then state[1]=V" not in dual.get("bridge_correction_coordinates", ""):
-        errors.append("bridge correction must act on X then V")
+    if "state[0]=X then state[1]=V" not in dual.get("neural_correction", ""):
+        errors.append("neural bridge correction must act on X then V")
+    for token in ("grad_r(log_h)=S^-T grad_z(log_h)", "a_r S^-T", "S^-1 a_r S^-T"):
+        if token not in dual.get("I1_raw_correction", ""):
+            errors.append(f"I1 bridge affine chain rule missing {token}")
+    for token in ("z=S^-1(r-m)", "A_raw=m_X+s_X*A", "closed boundaries preserved"):
+        if token not in dual.get("I1_event_transform", ""):
+            errors.append(f"I1 event coordinate transform missing {token}")
     delta = evaluation.get("delta_probe", {})
     _expect(errors, delta.get("coordinate_index"), 0, "delta coordinate index")
     _expect(errors, delta.get("directions"), ["base", "dilation", "erosion"], "delta directions")
     if "state_i[T,0]-state_i[0,0]" not in delta.get("displacement", ""):
         errors.append("delta must use normalized coordinate zero only")
     inference = evaluation.get("inference", {})
-    for token in ("B=2000", "resample 5 seeds", "segment_id", "identical draws"):
+    _expect(errors, inference.get("contrast_metric_ids"), ["energy_half", "hdr90_abs_calibration_error"], "contrast metric enum")
+    for token in ("B=2000", "length-5 seed index vector", "length-N_eval", "Cartesian product", "all 8 arms", "all 7 contrasts", "never nested"):
         if token not in inference.get("bootstrap", ""):
-            errors.append(f"paired hierarchical bootstrap missing {token}")
-    if "within contrast family and metric" not in inference.get("holm", ""):
-        errors.append("Holm family/ranking algorithm is not frozen")
-    if "max_c" not in inference.get("simultaneous_ci", ""):
-        errors.append("simultaneous CI algorithm is not frozen")
+            errors.append(f"crossed bootstrap missing {token}")
+    if "every contrast" not in inference.get("family_shared_draws", "") or "same matrix-wide index vectors" not in inference.get("family_shared_draws", ""):
+        errors.append("all family contrasts must share replicate index vectors")
+    for token in ("Q_0.025", "Q_0.975", "Hyndman-Fan type 7", "method='linear'"):
+        if token not in inference.get("pointwise_ci", ""):
+            errors.append(f"pointwise CI contract missing {token}")
+    if "approximate centered-bootstrap" not in inference.get("raw_p", "") or "not an exact" not in inference.get("raw_p", ""):
+        errors.append("raw p-value approximation status is not frozen")
+    for token in ("I1-capacity=3", "neural-capacity=3", "structure=1", "lexical tie-break"):
+        if token not in inference.get("holm", ""):
+            errors.append(f"Holm family contract missing {token}")
+    for token in ("Q_0.95", "max_c", "type-7", "family sizes 3,3,1"):
+        if token not in inference.get("simultaneous_ci", ""):
+            errors.append(f"simultaneous CI contract missing {token}")
+    for token in ("8 arms x 5 seeds x N_eval", "all 7 contrast rows", "literal NA", "no complete-case deletion"):
+        if token not in inference.get("complete_cube_policy", ""):
+            errors.append(f"failure propagation contract missing {token}")
 
     required_arm_keys = {"arm_id", "question", "model", "registered_parameter_count", *FROZEN_ARM_REFS, "environment_feature", "training", "rollout", "failure_policy", "implementation_status"}
     arms = document.get("arms")
@@ -287,18 +340,9 @@ def validate_matrix(document: Mapping[str, Any]) -> list[str]:
     if len(arms) != 8:
         errors.append("exactly eight registered arms are required")
 
-    expected_contrasts = [
-        ("I1-K03-vs-K01", "CAP-I1-K01", "CAP-I1-K03", "I1-capacity"),
-        ("I1-K10-vs-K03", "CAP-I1-K03", "CAP-I1-K10", "I1-capacity"),
-        ("I1-K30-vs-K10", "CAP-I1-K10", "CAP-I1-K30", "I1-capacity"),
-        ("NN-H032-vs-H008", "CAP-NN-H008", "CAP-NN-H032", "neural-capacity"),
-        ("NN-H064-vs-H032", "CAP-NN-H032", "CAP-NN-H064", "neural-capacity"),
-        ("NN-H128-vs-H064", "CAP-NN-H064", "CAP-NN-H128", "neural-capacity"),
-        ("STRUCT-I1-K10-vs-NN-H008", "CAP-I1-K10", "CAP-NN-H008", "structure"),
-    ]
     contrasts = document.get("predeclared_contrasts", [])
     actual_contrasts = [(c.get("contrast_id"), c.get("left"), c.get("right"), c.get("family")) for c in contrasts]
-    _expect(errors, actual_contrasts, expected_contrasts, "predeclared contrast identities")
+    _expect(errors, actual_contrasts, list(EXPECTED_CONTRASTS), "predeclared contrast identities")
     if contrasts:
         structure = contrasts[-1]
         _expect(errors, structure.get("claim"), FROZEN_STRUCTURE_CLAIM, "structure claim")
@@ -308,16 +352,22 @@ def validate_matrix(document: Mapping[str, Any]) -> list[str]:
     schemas = common.get("result_schemas", {})
     arm_schema = schemas.get("arm_results", {})
     _expect(errors, arm_schema.get("file"), "result_template.csv", "arm result filename")
-    _expect(errors, arm_schema.get("primary_key"), ["preregistration_id", "execution_git_sha", "arm_id", "seed", "delta_probe_direction"], "arm result primary key")
+    _expect(errors, arm_schema.get("primary_key"), ["preregistration_id", "execution_git_sha", "dataset_id", "global_splits_sha256", "arm_id", "seed", "delta_probe_direction"], "arm result primary key")
     _expect(errors, arm_schema.get("direction_enum"), ["base", "dilation", "erosion"], "arm result direction enum")
+    if "delta_probe_value is forbidden" not in arm_schema.get("rule", ""):
+        errors.append("arm result schema must remove ambiguous delta_probe_value")
     contrast_schema = schemas.get("contrast_results", {})
     _expect(errors, contrast_schema.get("file"), "contrast_result_template.csv", "contrast result filename")
-    _expect(errors, contrast_schema.get("primary_key"), ["preregistration_id", "contrast_id", "metric"], "contrast result primary key")
+    _expect(errors, contrast_schema.get("primary_key"), ["preregistration_id", "execution_git_sha", "dataset_id", "global_splits_sha256", "contrast_id", "metric_id"], "contrast result primary key")
+    _expect(errors, contrast_schema.get("metric_enum"), ["energy_half", "hdr90_abs_calibration_error"], "contrast result metric enum")
+    _expect(errors, contrast_schema.get("required_record_count"), 14, "contrast required record count")
+    if "Cartesian product" not in contrast_schema.get("required_record_set", "") or "no extra or missing rows" not in contrast_schema.get("required_record_set", ""):
+        errors.append("contrast result set must be the exact 7x2 Cartesian product")
     return errors
 
 
 def validate_result_templates(document: Mapping[str, Any], root: Path) -> list[str]:
-    """Lock the actual CSV headers and unique delta direction records."""
+    """Lock CSV headers, delta records and the exact 7x2 contrast row set."""
 
     errors: list[str] = []
     schemas = document.get("common_protocol", {}).get("result_schemas", {})
@@ -337,15 +387,35 @@ def validate_result_templates(document: Mapping[str, Any], root: Path) -> list[s
             continue
         if any(len(row) != len(rows[0]) for row in rows[1:]):
             errors.append(f"{schema_name}: template row/header column count mismatch")
-        if any(row[0] != "NEX-381-v4" for row in rows[1:]):
-            errors.append(f"{schema_name}: template rows must identify NEX-381-v4")
+        if any(row[0] != "NEX-381-v5" for row in rows[1:]):
+            errors.append(f"{schema_name}: template rows must identify NEX-381-v5")
         if schema_name == "arm_results":
+            if "delta_probe_value" in rows[0]:
+                errors.append("arm_results: delta_probe_value column is forbidden")
             direction_index = rows[0].index("delta_probe_direction")
             directions = [row[direction_index] for row in rows[1:]]
             if directions != ["base", "dilation", "erosion"]:
                 errors.append("arm_results: require exactly one ordered base/dilation/erosion template row")
-        elif len(rows) != 2:
-            errors.append("contrast_results: require exactly one schema example row")
+        else:
+            contrast_index = rows[0].index("contrast_id")
+            metric_index = rows[0].index("metric_id")
+            family_index = rows[0].index("holm_family")
+            size_index = rows[0].index("holm_family_size")
+            contrast_ids = [item[0] for item in EXPECTED_CONTRASTS]
+            metric_ids = ["energy_half", "hdr90_abs_calibration_error"]
+            expected_records = [(contrast_id, metric_id) for metric_id in metric_ids for contrast_id in contrast_ids]
+            actual_records = [(row[contrast_index], row[metric_index]) for row in rows[1:]]
+            if actual_records != expected_records:
+                errors.append("contrast_results: rows must equal the ordered 7x2 contrast-metric Cartesian product")
+            family_sizes = {"I1-capacity": "3", "neural-capacity": "3", "structure": "1"}
+            contrast_family = {item[0]: item[3] for item in EXPECTED_CONTRASTS}
+            for row in rows[1:]:
+                family = contrast_family.get(row[contrast_index])
+                metric_id = row[metric_index]
+                if family and row[family_index] != f"{metric_id}:{family}":
+                    errors.append("contrast_results: Holm family id does not match metric and contrast family")
+                if family and row[size_index] != family_sizes[family]:
+                    errors.append("contrast_results: Holm family size does not match frozen 3/3/1")
     return errors
 
 
