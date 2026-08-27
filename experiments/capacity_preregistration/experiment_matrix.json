@@ -1,0 +1,163 @@
+{
+  "schema_version": "1.0",
+  "preregistration_id": "NEX-381-v1",
+  "approval_state": "draft_pending_math_and_five_dimension_review",
+  "code_baseline": {
+    "repository": "HuAzurestar/learnable-sde-for-movement-prediction",
+    "reviewed_git_sha": "740a563d923971a8d7c161733f829f09d2ff5c6e",
+    "execution_git_sha": "required_at_run_time"
+  },
+  "common_protocol": {
+    "data_lock": {
+      "manifest_path": "${LEARNABLE_SDE_DATA_ROOT}/capacity_data_manifest.json",
+      "required_manifest_fields": [
+        "dataset_id",
+        "schema_version",
+        "unified_full_leg_sha256",
+        "global_splits_sha256",
+        "preprocessing_git_sha",
+        "created_at_utc"
+      ],
+      "policy": "fail_before_fit_if_manifest_or_hash_is_missing_or_mismatched"
+    },
+    "splits": {
+      "train": "global_splits.json:train; fit model and normalization only",
+      "validation": "global_splits.json:val; checkpoint selection and stopping only",
+      "evaluation": "global_splits.json:eval; locked until all arms and failure records freeze",
+      "leakage_unit": "file_id",
+      "segment_overlap_check": true,
+      "normalization": "fit on train once per data manifest; reuse unchanged on val/eval and every arm"
+    },
+    "seeds": [20260814],
+    "evaluation": {
+      "forecast_samples_per_segment": 1000,
+      "primary_metric": "canonical half energy: E||X-y|| - 0.5 E||X-X'||",
+      "hdr90": "segment endpoint membership in the model's 90% highest-density region; report coverage and abs(coverage-0.90)",
+      "bootstrap": "paired segment-level block bootstrap, B=2000, resample identical segment_id blocks for every contrast",
+      "convergence": "report converged flag, iterations/epochs, final objective, selected checkpoint and all numerical failures",
+      "bridge_dual": "full-horizon existence/exclusion check: pi_exist+surv_excl=1 and pi*p_exist+(1-pi)*p_excl=p; report absolute identity error and reconstruction L1",
+      "delta_probe": "delta=0.3*sigma_hist, where sigma_hist is train-split-only robust scale 1.4826*MAD of endpoint displacement in normalized coordinates; use only to dilate/erode the bridge event region in a predeclared sensitivity probe"
+    },
+    "reporting": {
+      "capacity_scan": "ordered trend with simultaneous 95% family-wise intervals; Holm-adjust the three adjacent contrasts within each model family",
+      "structure_contrast": "one predeclared paired contrast I1-K10 minus neural-H8; separate Holm family from the two capacity scans",
+      "seeds": "use and report only the registered seed 20260814; any diagnostic rerun is labeled non-confirmatory",
+      "failures": "intention-to-run denominator; no metric imputation; report failure count and reason beside successful-run summaries"
+    }
+  },
+  "arms": [
+    {
+      "arm_id": "CAP-I1-K01",
+      "question": "within_I1_capacity_scan",
+      "model": {"family": "I1", "n_modes": 1, "kappa": 0.0, "dt_ref": 60.0, "dtype": "float64", "include_prior_logits": true},
+      "registered_parameter_count": 5,
+      "data_lock": "common_protocol.data_lock",
+      "splits": "common_protocol.splits",
+      "seeds": [20260814],
+      "budget": {"estimator": "EM", "max_iter": 50, "forecast_samples_per_segment": 1000, "bootstrap_B": 2000},
+      "stopping": {"criterion": "relative train NLL improvement < 1e-5", "validation_role": "no hyperparameter search"},
+      "failure_policy": "record nonconvergence/numerical/data/hash failure; do not substitute a baseline or rerun with changed settings",
+      "implementation_status": "ready_after_data_manifest_lock"
+    },
+    {
+      "arm_id": "CAP-I1-K03",
+      "question": "within_I1_capacity_scan",
+      "model": {"family": "I1", "n_modes": 3, "kappa": 0.0, "dt_ref": 60.0, "dtype": "float64", "include_prior_logits": true},
+      "registered_parameter_count": 15,
+      "data_lock": "common_protocol.data_lock",
+      "splits": "common_protocol.splits",
+      "seeds": [20260814],
+      "budget": {"estimator": "EM", "max_iter": 50, "forecast_samples_per_segment": 1000, "bootstrap_B": 2000},
+      "stopping": {"criterion": "relative train NLL improvement < 1e-5", "validation_role": "no hyperparameter search"},
+      "failure_policy": "record nonconvergence/numerical/data/hash failure; do not substitute a baseline or rerun with changed settings",
+      "implementation_status": "ready_after_data_manifest_lock"
+    },
+    {
+      "arm_id": "CAP-I1-K10",
+      "question": "within_I1_capacity_scan_and_equal_order_structure_contrast",
+      "model": {"family": "I1", "n_modes": 10, "kappa": 0.0, "dt_ref": 60.0, "dtype": "float64", "include_prior_logits": true},
+      "registered_parameter_count": 50,
+      "data_lock": "common_protocol.data_lock",
+      "splits": "common_protocol.splits",
+      "seeds": [20260814],
+      "budget": {"estimator": "EM", "max_iter": 50, "forecast_samples_per_segment": 1000, "bootstrap_B": 2000},
+      "stopping": {"criterion": "relative train NLL improvement < 1e-5", "validation_role": "no hyperparameter search"},
+      "failure_policy": "record nonconvergence/numerical/data/hash failure; do not substitute a baseline or rerun with changed settings",
+      "implementation_status": "ready_after_data_manifest_lock"
+    },
+    {
+      "arm_id": "CAP-I1-K30",
+      "question": "within_I1_capacity_scan",
+      "model": {"family": "I1", "n_modes": 30, "kappa": 0.0, "dt_ref": 60.0, "dtype": "float64", "include_prior_logits": true},
+      "registered_parameter_count": 150,
+      "data_lock": "common_protocol.data_lock",
+      "splits": "common_protocol.splits",
+      "seeds": [20260814],
+      "budget": {"estimator": "EM", "max_iter": 50, "forecast_samples_per_segment": 1000, "bootstrap_B": 2000},
+      "stopping": {"criterion": "relative train NLL improvement < 1e-5", "validation_role": "no hyperparameter search"},
+      "failure_policy": "record nonconvergence/numerical/data/hash failure; do not substitute a baseline or rerun with changed settings",
+      "implementation_status": "ready_after_data_manifest_lock"
+    },
+    {
+      "arm_id": "CAP-NN-H008",
+      "question": "within_neural_capacity_scan_and_equal_order_structure_contrast",
+      "model": {"family": "neural", "state_dim": 2, "env_dim": 1, "hidden": [8, 8], "diffusion_dim": 2, "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
+      "registered_parameter_count": 124,
+      "data_lock": "common_protocol.data_lock",
+      "splits": "common_protocol.splits",
+      "seeds": [20260814],
+      "budget": {"estimator": "Adam one-step transition NLL", "learning_rate": 0.001, "max_epochs": 300, "batch_size": 256, "forecast_samples_per_segment": 1000, "bootstrap_B": 2000},
+      "stopping": {"criterion": "validation NLL patience=30 and min_delta=1e-5", "checkpoint": "minimum validation NLL; tie goes to earliest epoch"},
+      "failure_policy": "record unavailable/nonconvergence/numerical/data/hash failure; do not run the skeleton or substitute I1",
+      "implementation_status": "blocked_until_EnvDriftNet_runtime_count_equals_124_and_contract_tests_pass"
+    },
+    {
+      "arm_id": "CAP-NN-H032",
+      "question": "within_neural_capacity_scan",
+      "model": {"family": "neural", "state_dim": 2, "env_dim": 1, "hidden": [32, 32], "diffusion_dim": 2, "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
+      "registered_parameter_count": 1252,
+      "data_lock": "common_protocol.data_lock",
+      "splits": "common_protocol.splits",
+      "seeds": [20260814],
+      "budget": {"estimator": "Adam one-step transition NLL", "learning_rate": 0.001, "max_epochs": 300, "batch_size": 256, "forecast_samples_per_segment": 1000, "bootstrap_B": 2000},
+      "stopping": {"criterion": "validation NLL patience=30 and min_delta=1e-5", "checkpoint": "minimum validation NLL; tie goes to earliest epoch"},
+      "failure_policy": "record unavailable/nonconvergence/numerical/data/hash failure; do not run the skeleton or substitute I1",
+      "implementation_status": "blocked_until_EnvDriftNet_runtime_count_equals_1252_and_contract_tests_pass"
+    },
+    {
+      "arm_id": "CAP-NN-H064",
+      "question": "within_neural_capacity_scan",
+      "model": {"family": "neural", "state_dim": 2, "env_dim": 1, "hidden": [64, 64], "diffusion_dim": 2, "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
+      "registered_parameter_count": 4548,
+      "data_lock": "common_protocol.data_lock",
+      "splits": "common_protocol.splits",
+      "seeds": [20260814],
+      "budget": {"estimator": "Adam one-step transition NLL", "learning_rate": 0.001, "max_epochs": 300, "batch_size": 256, "forecast_samples_per_segment": 1000, "bootstrap_B": 2000},
+      "stopping": {"criterion": "validation NLL patience=30 and min_delta=1e-5", "checkpoint": "minimum validation NLL; tie goes to earliest epoch"},
+      "failure_policy": "record unavailable/nonconvergence/numerical/data/hash failure; do not run the skeleton or substitute I1",
+      "implementation_status": "blocked_until_EnvDriftNet_runtime_count_equals_4548_and_contract_tests_pass"
+    },
+    {
+      "arm_id": "CAP-NN-H128",
+      "question": "within_neural_capacity_scan",
+      "model": {"family": "neural", "state_dim": 2, "env_dim": 1, "hidden": [128, 128], "diffusion_dim": 2, "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
+      "registered_parameter_count": 17284,
+      "data_lock": "common_protocol.data_lock",
+      "splits": "common_protocol.splits",
+      "seeds": [20260814],
+      "budget": {"estimator": "Adam one-step transition NLL", "learning_rate": 0.001, "max_epochs": 300, "batch_size": 256, "forecast_samples_per_segment": 1000, "bootstrap_B": 2000},
+      "stopping": {"criterion": "validation NLL patience=30 and min_delta=1e-5", "checkpoint": "minimum validation NLL; tie goes to earliest epoch"},
+      "failure_policy": "record unavailable/nonconvergence/numerical/data/hash failure; do not run the skeleton or substitute I1",
+      "implementation_status": "blocked_until_EnvDriftNet_runtime_count_equals_17284_and_contract_tests_pass"
+    }
+  ],
+  "predeclared_contrasts": [
+    {
+      "contrast_id": "STRUCT-EQUAL-ORDER-01",
+      "left": "CAP-I1-K10",
+      "right": "CAP-NN-H008",
+      "parameter_ratio_right_over_left": 2.48,
+      "claim_boundary": "similar-order parameter count, not equal parameter count; estimates the full fitted-pipeline difference and does not isolate architecture from estimator"
+    }
+  ]
+}
