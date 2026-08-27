@@ -1,0 +1,2 @@
+preregistration_id,contrast_id,left_arm_id,right_arm_id,metric,effect_definition,n_paired_seeds,n_paired_segments,estimate,pointwise_ci_low,pointwise_ci_high,simultaneous_ci_low,simultaneous_ci_high,raw_p_value,holm_family,holm_rank,holm_family_size,holm_adjusted_p,reject_alpha,bootstrap_B,status,notes
+NEX-381-v4,,,,,right_minus_left,5,,,,,,,,,,,,0.05,2000,,

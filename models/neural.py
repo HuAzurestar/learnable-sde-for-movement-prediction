@@ -1,9 +1,11 @@
-"""C-7 neural SDE skeleton with exogenous conditions in augmented state ``[x; e]``.
+"""C-7 neural SDE implementation placeholder.
 
-已验（神经参数化）: 连续 solar_elev 显著 −12.4% energy（配对 bootstrap CI 下界>0）；
-二值 is_day 不显著；天气仅冒烟方向性。
-本文件为接口骨架 —— EnvDriftNet + transition_nll + rollout 由后续实现
-22 臂冒烟脚本接线时实现（condition: solar 臂）。
+NEX-381-v4 does not permit this skeleton to run.  Its future implementation is
+frozen to normalized state ``[X,V]`` plus one normalized, aligned-window mean
+``solar_elev`` input (never ``day_fraction``), two Tanh hidden layers, diagonal
+``(ell_X, ell_V)`` diffusion, ``dt_scale=60 seconds`` and elementwise drift
+clipping at 10.  See ``experiments/capacity_preregistration`` for the complete
+optimizer, initialization, adapter and Euler-Maruyama contracts.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ class TimeVaryingNeuralSDE(SDEModel, ParameterGroupProvider):
     """C-7 神经 SDE 接口骨架；不声明精确转移能力。"""
 
     def __init__(self, d: int = 2, d_env: int = 1, hidden: list = (64, 64),
-                 dt_scale: float = 1.0, drift_clip: float = 10.0):
+                 dt_scale: float = 60.0, drift_clip: float = 10.0):
         super().__init__()
         self.d = d
         self.d_env = d_env
@@ -42,7 +44,7 @@ class TimeVaryingNeuralSDE(SDEModel, ParameterGroupProvider):
         raise NotImplementedError
 
     def transition_nll(self, x, y, dt, cond=None):
-        """一步 EM 转移 p̃(y|x,e)=N(y; x+(dt/τ)b, (dt/τ)diag(σ²))（训练=评估，同口径）。"""
+        """Frozen future form: N(y; x+(dt/60)b, (dt/60)diag(exp(2 ell)))."""
         raise NotImplementedError("接线后实现")
 
     def parameter_groups(self):

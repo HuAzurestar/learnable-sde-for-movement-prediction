@@ -1,207 +1,86 @@
 {
-  "schema_version": "3.0",
-  "preregistration_id": "NEX-381-v3",
-  "approval_state": "draft_pending_v3_math_review",
-  "supersedes": {
-    "preregistration_id": "NEX-381-v2",
-    "git_sha": "5346377f4451c0c0e3774ba71a2b541a1c555f54",
-    "reason": "freeze the shared [X,V] state semantics without rewriting v2"
-  },
-  "code_baseline": {
-    "repository": "HuAzurestar/learnable-sde-for-movement-prediction",
-    "reviewed_git_sha": "740a563d923971a8d7c161733f829f09d2ff5c6e",
-    "execution_git_sha": "required_at_run_time"
-  },
+  "schema_version": "4.0",
+  "preregistration_id": "NEX-381-v4",
+  "approval_state": "draft_pending_v4_math_review",
+  "supersedes": {"preregistration_id":"NEX-381-v3","git_sha":"7765dc002732349018dbf0d494f78046a88ddf30","reason":"versioned replacement closing the S1/S2 reproducibility findings without rewriting frozen v3"},
+  "code_baseline": {"repository":"HuAzurestar/learnable-sde-for-movement-prediction","reviewed_git_sha":"740a563d923971a8d7c161733f829f09d2ff5c6e","execution_git_sha":"required_at_run_time"},
   "common_protocol": {
     "data_lock": {
       "manifest_path": "${LEARNABLE_SDE_DATA_ROOT}/capacity_data_manifest.json",
-      "required_manifest_fields": [
-        "dataset_id",
-        "schema_version",
-        "unified_full_leg_sha256",
-        "global_splits_sha256",
-        "preprocessing_git_sha",
-        "created_at_utc"
-      ],
-      "policy": "fail_before_fit_if_manifest_or_hash_is_missing_or_mismatched"
+      "required_manifest_fields": ["dataset_id","schema_version","unified_full_leg_sha256","global_splits_sha256","condition_files_sha256","state_adapter_id","state_normalization_sha256","environment_feature_id","environment_normalization_sha256","preprocessing_git_sha","created_at_utc"],
+      "hash_algorithm": "sha256 lowercase hex",
+      "policy": "fail_before_fit_if_any_required_field_or_hash_is_missing_or_mismatched"
     },
-    "splits": {
-      "train": "global_splits.json:train; fit model and normalization only",
-      "validation": "global_splits.json:val; checkpoint selection and stopping only",
-      "evaluation": "global_splits.json:eval; locked until all arms and failure records freeze",
-      "leakage_unit": "file_id",
-      "segment_overlap_check": true,
-      "normalization": "fit on train once per data manifest; reuse unchanged on val/eval and every arm"
+    "splits": {"train":"global_splits.json:train; fit model and both normalizers only","validation":"global_splits.json:val; checkpoint selection and stopping only","evaluation":"global_splits.json:eval; locked until every arm and failure record freezes","leakage_unit":"file_id","segment_overlap_check":true},
+    "paired_seeds": [20260814,20260815,20260816,20260817,20260818],
+    "rng_contract": {"pairing":"same five seeds for every arm: initialization, minibatch order, rollout and bootstrap pairing","streams":"derive independent train, rollout and bootstrap streams as SeedSequence(seed).spawn(3) in that order","determinism":"torch float64 deterministic algorithms; no diagnostic rerun replaces a registered run"},
+    "state_layout": ["normalized_position_X","normalized_velocity_V"],
+    "state_adapter": {
+      "adapter_id":"phase_space_1d_coord0_v1",
+      "call":"data.loader.to_phase_space_1d(segment, coord=0)",
+      "raw_coordinate":"Segment.x[:,0] = parquet column x; column y is never read",
+      "velocity":"V_i=(X_{i+1}-X_i)/(t_{i+1}-t_i), require positive dt; V_T=V_{T-1}",
+      "normalization":"pool all adapted train timepoints; coordinatewise mean and population std (ddof=0); fail if nonfinite or std<1e-8; reuse unchanged on val/eval and every arm",
+      "output_layout":"common_protocol.state_layout"
     },
-    "seeds": [20260814],
-    "state_layout": ["normalized_position_X", "normalized_velocity_V"],
+    "environment_feature": {
+      "feature_id":"aligned_solar_elev_mean_v1",
+      "dimension":1,
+      "source":"data.source.ConditionSource.slice_for(file_id), condition parquet column solar_elev only",
+      "alignment":"inclusive t_epoch window [absolute_start_epoch, absolute_start_epoch + (segment.t[-1]-segment.t[0])]",
+      "aggregation":"arithmetic mean of finite solar_elev rows in the aligned window; day_fraction and every other column excluded",
+      "missing_policy":"fail arm before fit if file/window/solar_elev is missing, empty or nonfinite; no imputation",
+      "normalization":"fit scalar mean and population std (ddof=0) over train segments only; fail if nonfinite or std<1e-8; reuse unchanged on val/eval and all neural arms"
+    },
     "neural_diffusion_contract": {
-      "parameter": "ell = (ell_X, ell_V) in R^2",
-      "parameter_order": ["ell_X", "ell_V"],
-      "B": "diag(exp(ell_X), exp(ell_V))",
-      "a": "B @ B.T = diag(exp(2*ell_X), exp(2*ell_V))",
-      "noise_coordinates": ["normalized_position_X", "normalized_velocity_V"],
-      "state_dependent": false,
-      "time_dependent": false,
-      "transform_modifiers": null,
-      "bridge_correction": "a @ grad(log_h) in state order [X,V]; component 0 acts on X and component 1 acts on V"
+      "parameter":"ell = (ell_X, ell_V) in R^2","parameter_order":["ell_X","ell_V"],"B":"diag(exp(ell_X), exp(ell_V))","a":"B @ B.T = diag(exp(2*ell_X), exp(2*ell_V))","noise_coordinates":["normalized_position_X","normalized_velocity_V"],"state_dependent":false,"time_dependent":false,"transform_modifiers":null,"initial_value":["log(0.1)","log(0.1)"],"bridge_correction":"a @ grad(log_h) in state order [X,V]; component 0 acts on X and component 1 acts on V"
+    },
+    "neural_architecture": {
+      "input_order":["normalized_position_X","normalized_velocity_V","normalized_solar_elev"],
+      "layers":"Linear(3,H)-Tanh-Linear(H,H)-Tanh-Linear(H,2)",
+      "activation":"torch.nn.Tanh after each hidden Linear; no output activation",
+      "initialization":"all Linear weights xavier_uniform_ with calculate_gain('tanh'); all Linear biases zero",
+      "time_is_input":false,"dt_scale_seconds":60.0,"drift_clip":"elementwise clamp network drift to [-10.0,10.0] before NLL and rollout","dtype":"float64"
+    },
+    "training": {
+      "i1":{"estimator":"EM","max_iter":50,"stopping":"relative train NLL improvement <1e-5, otherwise max_iter; no validation tuning","tie_break":"not applicable","forecast_samples_per_segment":1000},
+      "neural":{"objective":"one-step Gaussian NLL on normalized [X,V]: mean=z+(dt/60)b_clipped(z,e), covariance=(dt/60)diag(exp(2ell_X),exp(2ell_V))","optimizer":"torch.optim.Adam","adam":{"lr":0.001,"betas":[0.9,0.999],"eps":1e-8,"weight_decay":0.0,"amsgrad":false,"maximize":false,"foreach":false,"fused":false},"batch_size":256,"shuffle":true,"drop_last":false,"gradient_clipping":"none","max_epochs":300,"stopping":"validation NLL patience=30 completed epochs and absolute min_delta=1e-5","checkpoint":"minimum validation NLL; exact tie goes to earliest epoch","forecast_samples_per_segment":1000}
+    },
+    "rollout": {
+      "I1":"exact Gaussian transition kernel at each event-grid interval, left-to-right, using registered seed stream",
+      "neural":"Euler-Maruyama in normalized [X,V], left endpoint coefficients, h=min(1.0 second, remaining interval), z_next=z+(h/60)b_clipped+sqrt(h/60)B epsilon, no adaptive stepping",
+      "time_grid":"t_0=0; t_k=min(k*1.0 seconds,T), including t=0 and exact endpoint T","samples_per_segment":1000,"dtype":"float64"
     },
     "evaluation": {
-      "forecast_samples_per_segment": 1000,
-      "primary_metric": "canonical half energy: E||X-y|| - 0.5 E||X-X'||",
-      "hdr90": "segment endpoint membership in the model's 90% highest-density region; report coverage and abs(coverage-0.90)",
-      "bootstrap": "paired segment-level block bootstrap, B=2000, resample identical segment_id blocks for every contrast",
-      "convergence": "report converged flag, iterations/epochs, final objective, selected checkpoint and all numerical failures",
-      "bridge_dual": {
-        "state_layout": "common_protocol.state_layout",
-        "bridge_correction_coordinates": "a @ grad(log_h) acts in order state[0]=X then state[1]=V",
-        "hit_event_coordinate": "state[0] = normalized_position_X only",
-        "paths": "same sampled paths for existence and exclusion",
-        "event": "one discrete per-path boolean hit event E; exclusion is the boolean complement not E",
-        "scalar_identity": "abs(pi_exist + surv_excl - 1) <= 1e-12",
-        "reconstruction": "raw full-support bin counts including underflow and overflow; sum_j abs(p_recon_j - p_prior_j) <= 1e-12",
-        "strata": "hit and non-hit strata must both be non-empty; otherwise record undefined_stratum and never pass",
-        "fp_mc_l1": "report analytic-prior versus Monte-Carlo sampling/discretization error separately; do not apply the algebraic 1e-12 tolerance"
-      },
-      "delta_probe": {
-        "scope": "one-dimensional position event only; a two-dimensional event requires a new preregistration",
-        "coordinate_index": 0,
-        "coordinate": "state[0] = normalized_position_X",
-        "displacement": "DeltaX_i = state_i[T,0] - state_i[0,0] = X_T_i - X_0_i on the train split after frozen position normalization",
-        "sigma_hist": "1.4826 * median_i(abs(DeltaX_i - median_j(DeltaX_j))); compute exactly once for the whole matrix",
-        "delta": "0.3 * sigma_hist",
-        "base_region": "normalize preregistered A to a union of mutually disjoint closed intervals [l_j,r_j]",
-        "dilation": "A_plus_delta = union [l_j-delta,r_j+delta], merge overlaps, intersect domain D",
-        "erosion": "A_minus_delta = union [l_j+delta,r_j-delta], delete empty components",
-        "boundary": "closed-set membership for every hit decision",
-        "failure": "non-finite or zero sigma_hist, or empty eroded region, is probe failure/NA; never replace delta post hoc"
-      }
+      "energy_half":{"state":"complete normalized state [X,V] at endpoint","finite_sample_estimator":"U-statistic: M^-1 sum_m ||z_m-y||_2 - [2M(M-1)]^-1 sum_{m!=n} ||z_m-z_n||_2","M":1000,"failure":"M<2 or any nonfinite state is metric failure"},
+      "hdr90":{"state":"complete normalized endpoint state [X,V]","density":"2D Gaussian KDE over M=1000 samples; sample covariance denominator M-1; Scott f=M^(-1/6); H=f^2*S+1e-9*I","threshold":"sort M leave-none-out KDE densities ascending; q=ceil(0.10*M); threshold=sorted[q-1]","membership":"closed rule density_H(y)>=threshold; ties inside; fail if H or density nonfinite/non-positive","report":"coverage=mean membership and abs(coverage-0.90)"},
+      "event":{"event_id":"hit_X_origin_interval_v1","coordinate":"state[0] = normalized_position_X only","domain_D":[-8.0,8.0],"region_A":[[-0.5,0.5]],"time_grid":"common_protocol.rollout.time_grid","hit_rule":"E true iff closed-set X(t_k) in A at any registered point including t=0,T; never read velocity","full_support_bin_edges":["-inf",-8.0,-4.0,-2.0,-1.0,-0.5,0.0,0.5,1.0,2.0,4.0,8.0,"inf"],"histogram_rule":"terminal state[0]=X only; searchsorted(edges,X,side='right')-1; X=8 belongs [8,+inf)"},
+      "bridge_dual":{"state_layout":"common_protocol.state_layout","bridge_correction_coordinates":"a @ grad(log_h) acts state[0]=X then state[1]=V","event_ref":"common_protocol.evaluation.event","paths":"same 1000 paths for existence/exclusion","exclusion":"boolean complement not E per path","scalar_identity":"abs(pi_exist+surv_excl-1)<=1e-12","reconstruction":"raw full-support bin counts including underflow/overflow; sum_j abs(p_recon_j-p_prior_j)<=1e-12","strata":"hit and non-hit counts positive; else undefined_stratum and never pass","fp_mc_l1":"analytic-prior versus Monte-Carlo error separately without 1e-12 tolerance"},
+      "delta_probe":{"coordinate_index":0,"displacement":"DeltaX_i=state_i[T,0]-state_i[0,0] on normalized train trajectories; never read state[1]","sigma_hist":"1.4826*median_i(abs(DeltaX_i-median_j(DeltaX_j))); compute once for matrix","delta":"0.3*sigma_hist","directions":["base","dilation","erosion"],"base":"A from common_protocol.evaluation.event.region_A","dilation":"merge closed [l-delta,r+delta], intersect D","erosion":"closed [l+delta,r-delta], delete empty components","failure":"nonfinite/zero sigma_hist or empty erosion is failure/NA; never replace delta"},
+      "inference":{"unit":"paired seed and segment_id","bootstrap":"hierarchical paired bootstrap B=2000: resample 5 seeds with replacement, then segment_id blocks within each selected seed; identical draws for all arms in contrast","effect":"right metric minus left metric; energy lower better; HDR signed error is coverage-0.90","raw_p":"two-sided p=2*min((1+#theta_b<=0)/(B+1),(1+#theta_b>=0)/(B+1)), cap 1","holm":"within contrast family and metric: sort p; adjusted rank r cumulative max min(1,(m-r+1)*p_r)","simultaneous_ci":"theta_c +/- bootstrap 0.95 quantile of max_c abs(theta_b,c-theta_c) within family/metric","alpha":0.05}
     },
-    "reporting": {
-      "capacity_scan": "ordered trend with simultaneous 95% family-wise intervals; Holm-adjust the three adjacent contrasts within each model family",
-      "structure_contrast": "one predeclared paired contrast I1-K10 minus neural-H8; separate Holm family from the two capacity scans",
-      "seeds": "use and report only the registered seed 20260814; any diagnostic rerun is labeled non-confirmatory",
-      "failures": "intention-to-run denominator; no metric imputation; report failure count and reason beside successful-run summaries"
+    "result_schemas": {
+      "arm_results":{"file":"result_template.csv","primary_key":["preregistration_id","execution_git_sha","arm_id","seed","delta_probe_direction"],"direction_enum":["base","dilation","erosion"],"rule":"one row per key; energy/HDR only on base; dual/event on all directions; NA literal NA"},
+      "contrast_results":{"file":"contrast_result_template.csv","primary_key":["preregistration_id","contrast_id","metric"],"rule":"one row per registered contrast and metric with raw/Holm p and pointwise/simultaneous CI"}
     }
   },
   "arms": [
-    {
-      "arm_id": "CAP-I1-K01",
-      "question": "within_I1_capacity_scan",
-      "model": {"family": "I1", "n_modes": 1, "kappa": 0.0, "dt_ref": 60.0, "dtype": "float64", "include_prior_logits": true},
-      "registered_parameter_count": 5,
-      "registered_effective_degrees_of_freedom": 4,
-      "data_lock": "common_protocol.data_lock",
-      "splits": "common_protocol.splits",
-      "seeds": [20260814],
-      "budget": {"estimator": "EM", "max_iter": 50, "forecast_samples_per_segment": 1000, "bootstrap_B": 2000},
-      "stopping": {"criterion": "relative train NLL improvement < 1e-5", "validation_role": "no hyperparameter search"},
-      "failure_policy": "record nonconvergence/numerical/data/hash failure; do not substitute a baseline or rerun with changed settings",
-      "implementation_status": "ready_after_data_manifest_lock"
-    },
-    {
-      "arm_id": "CAP-I1-K03",
-      "question": "within_I1_capacity_scan",
-      "model": {"family": "I1", "n_modes": 3, "kappa": 0.0, "dt_ref": 60.0, "dtype": "float64", "include_prior_logits": true},
-      "registered_parameter_count": 15,
-      "registered_effective_degrees_of_freedom": 14,
-      "data_lock": "common_protocol.data_lock",
-      "splits": "common_protocol.splits",
-      "seeds": [20260814],
-      "budget": {"estimator": "EM", "max_iter": 50, "forecast_samples_per_segment": 1000, "bootstrap_B": 2000},
-      "stopping": {"criterion": "relative train NLL improvement < 1e-5", "validation_role": "no hyperparameter search"},
-      "failure_policy": "record nonconvergence/numerical/data/hash failure; do not substitute a baseline or rerun with changed settings",
-      "implementation_status": "ready_after_data_manifest_lock"
-    },
-    {
-      "arm_id": "CAP-I1-K10",
-      "question": "within_I1_capacity_scan_and_equal_order_structure_contrast",
-      "model": {"family": "I1", "n_modes": 10, "kappa": 0.0, "dt_ref": 60.0, "dtype": "float64", "include_prior_logits": true},
-      "registered_parameter_count": 50,
-      "registered_effective_degrees_of_freedom": 49,
-      "data_lock": "common_protocol.data_lock",
-      "splits": "common_protocol.splits",
-      "seeds": [20260814],
-      "budget": {"estimator": "EM", "max_iter": 50, "forecast_samples_per_segment": 1000, "bootstrap_B": 2000},
-      "stopping": {"criterion": "relative train NLL improvement < 1e-5", "validation_role": "no hyperparameter search"},
-      "failure_policy": "record nonconvergence/numerical/data/hash failure; do not substitute a baseline or rerun with changed settings",
-      "implementation_status": "ready_after_data_manifest_lock"
-    },
-    {
-      "arm_id": "CAP-I1-K30",
-      "question": "within_I1_capacity_scan",
-      "model": {"family": "I1", "n_modes": 30, "kappa": 0.0, "dt_ref": 60.0, "dtype": "float64", "include_prior_logits": true},
-      "registered_parameter_count": 150,
-      "registered_effective_degrees_of_freedom": 149,
-      "data_lock": "common_protocol.data_lock",
-      "splits": "common_protocol.splits",
-      "seeds": [20260814],
-      "budget": {"estimator": "EM", "max_iter": 50, "forecast_samples_per_segment": 1000, "bootstrap_B": 2000},
-      "stopping": {"criterion": "relative train NLL improvement < 1e-5", "validation_role": "no hyperparameter search"},
-      "failure_policy": "record nonconvergence/numerical/data/hash failure; do not substitute a baseline or rerun with changed settings",
-      "implementation_status": "ready_after_data_manifest_lock"
-    },
-    {
-      "arm_id": "CAP-NN-H008",
-      "question": "within_neural_capacity_scan_and_equal_order_structure_contrast",
-      "model": {"family": "neural", "state_dim": 2, "state_layout": "common_protocol.state_layout", "env_dim": 1, "hidden": [8, 8], "diffusion_dim": 2, "diffusion_contract": "common_protocol.neural_diffusion_contract", "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
-      "registered_parameter_count": 124,
-      "data_lock": "common_protocol.data_lock",
-      "splits": "common_protocol.splits",
-      "seeds": [20260814],
-      "budget": {"estimator": "Adam one-step transition NLL", "learning_rate": 0.001, "max_epochs": 300, "batch_size": 256, "forecast_samples_per_segment": 1000, "bootstrap_B": 2000},
-      "stopping": {"criterion": "validation NLL patience=30 and min_delta=1e-5", "checkpoint": "minimum validation NLL; tie goes to earliest epoch"},
-      "failure_policy": "record unavailable/nonconvergence/numerical/data/hash failure; do not run the skeleton or substitute I1",
-      "implementation_status": "blocked_until_EnvDriftNet_runtime_count_equals_124_and_contract_tests_pass"
-    },
-    {
-      "arm_id": "CAP-NN-H032",
-      "question": "within_neural_capacity_scan",
-      "model": {"family": "neural", "state_dim": 2, "state_layout": "common_protocol.state_layout", "env_dim": 1, "hidden": [32, 32], "diffusion_dim": 2, "diffusion_contract": "common_protocol.neural_diffusion_contract", "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
-      "registered_parameter_count": 1252,
-      "data_lock": "common_protocol.data_lock",
-      "splits": "common_protocol.splits",
-      "seeds": [20260814],
-      "budget": {"estimator": "Adam one-step transition NLL", "learning_rate": 0.001, "max_epochs": 300, "batch_size": 256, "forecast_samples_per_segment": 1000, "bootstrap_B": 2000},
-      "stopping": {"criterion": "validation NLL patience=30 and min_delta=1e-5", "checkpoint": "minimum validation NLL; tie goes to earliest epoch"},
-      "failure_policy": "record unavailable/nonconvergence/numerical/data/hash failure; do not run the skeleton or substitute I1",
-      "implementation_status": "blocked_until_EnvDriftNet_runtime_count_equals_1252_and_contract_tests_pass"
-    },
-    {
-      "arm_id": "CAP-NN-H064",
-      "question": "within_neural_capacity_scan",
-      "model": {"family": "neural", "state_dim": 2, "state_layout": "common_protocol.state_layout", "env_dim": 1, "hidden": [64, 64], "diffusion_dim": 2, "diffusion_contract": "common_protocol.neural_diffusion_contract", "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
-      "registered_parameter_count": 4548,
-      "data_lock": "common_protocol.data_lock",
-      "splits": "common_protocol.splits",
-      "seeds": [20260814],
-      "budget": {"estimator": "Adam one-step transition NLL", "learning_rate": 0.001, "max_epochs": 300, "batch_size": 256, "forecast_samples_per_segment": 1000, "bootstrap_B": 2000},
-      "stopping": {"criterion": "validation NLL patience=30 and min_delta=1e-5", "checkpoint": "minimum validation NLL; tie goes to earliest epoch"},
-      "failure_policy": "record unavailable/nonconvergence/numerical/data/hash failure; do not run the skeleton or substitute I1",
-      "implementation_status": "blocked_until_EnvDriftNet_runtime_count_equals_4548_and_contract_tests_pass"
-    },
-    {
-      "arm_id": "CAP-NN-H128",
-      "question": "within_neural_capacity_scan",
-      "model": {"family": "neural", "state_dim": 2, "state_layout": "common_protocol.state_layout", "env_dim": 1, "hidden": [128, 128], "diffusion_dim": 2, "diffusion_contract": "common_protocol.neural_diffusion_contract", "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
-      "registered_parameter_count": 17284,
-      "data_lock": "common_protocol.data_lock",
-      "splits": "common_protocol.splits",
-      "seeds": [20260814],
-      "budget": {"estimator": "Adam one-step transition NLL", "learning_rate": 0.001, "max_epochs": 300, "batch_size": 256, "forecast_samples_per_segment": 1000, "bootstrap_B": 2000},
-      "stopping": {"criterion": "validation NLL patience=30 and min_delta=1e-5", "checkpoint": "minimum validation NLL; tie goes to earliest epoch"},
-      "failure_policy": "record unavailable/nonconvergence/numerical/data/hash failure; do not run the skeleton or substitute I1",
-      "implementation_status": "blocked_until_EnvDriftNet_runtime_count_equals_17284_and_contract_tests_pass"
-    }
+    {"arm_id":"CAP-I1-K01","question":"within_I1_capacity_scan","model":{"family":"I1","n_modes":1,"kappa":0.0,"dt_ref":60.0,"dtype":"float64","include_prior_logits":true},"registered_parameter_count":5,"registered_effective_degrees_of_freedom":4,"data_lock":"common_protocol.data_lock","splits":"common_protocol.splits","state_adapter":"common_protocol.state_adapter","environment_feature":null,"rng":"common_protocol.rng_contract","seeds":"common_protocol.paired_seeds","training":"common_protocol.training.i1","rollout":"common_protocol.rollout.I1","evaluation":"common_protocol.evaluation","failure_policy":"record every failure; no substitution or changed-setting rerun","implementation_status":"ready_after_data_manifest_lock"},
+    {"arm_id":"CAP-I1-K03","question":"within_I1_capacity_scan","model":{"family":"I1","n_modes":3,"kappa":0.0,"dt_ref":60.0,"dtype":"float64","include_prior_logits":true},"registered_parameter_count":15,"registered_effective_degrees_of_freedom":14,"data_lock":"common_protocol.data_lock","splits":"common_protocol.splits","state_adapter":"common_protocol.state_adapter","environment_feature":null,"rng":"common_protocol.rng_contract","seeds":"common_protocol.paired_seeds","training":"common_protocol.training.i1","rollout":"common_protocol.rollout.I1","evaluation":"common_protocol.evaluation","failure_policy":"record every failure; no substitution or changed-setting rerun","implementation_status":"ready_after_data_manifest_lock"},
+    {"arm_id":"CAP-I1-K10","question":"within_I1_capacity_scan_and_structure_contrast","model":{"family":"I1","n_modes":10,"kappa":0.0,"dt_ref":60.0,"dtype":"float64","include_prior_logits":true},"registered_parameter_count":50,"registered_effective_degrees_of_freedom":49,"data_lock":"common_protocol.data_lock","splits":"common_protocol.splits","state_adapter":"common_protocol.state_adapter","environment_feature":null,"rng":"common_protocol.rng_contract","seeds":"common_protocol.paired_seeds","training":"common_protocol.training.i1","rollout":"common_protocol.rollout.I1","evaluation":"common_protocol.evaluation","failure_policy":"record every failure; no substitution or changed-setting rerun","implementation_status":"ready_after_data_manifest_lock"},
+    {"arm_id":"CAP-I1-K30","question":"within_I1_capacity_scan","model":{"family":"I1","n_modes":30,"kappa":0.0,"dt_ref":60.0,"dtype":"float64","include_prior_logits":true},"registered_parameter_count":150,"registered_effective_degrees_of_freedom":149,"data_lock":"common_protocol.data_lock","splits":"common_protocol.splits","state_adapter":"common_protocol.state_adapter","environment_feature":null,"rng":"common_protocol.rng_contract","seeds":"common_protocol.paired_seeds","training":"common_protocol.training.i1","rollout":"common_protocol.rollout.I1","evaluation":"common_protocol.evaluation","failure_policy":"record every failure; no substitution or changed-setting rerun","implementation_status":"ready_after_data_manifest_lock"},
+    {"arm_id":"CAP-NN-H008","question":"within_neural_capacity_scan_and_structure_contrast","model":{"family":"neural","state_dim":2,"state_layout":"common_protocol.state_layout","env_dim":1,"hidden":[8,8],"diffusion_dim":2,"diffusion_contract":"common_protocol.neural_diffusion_contract","architecture":"common_protocol.neural_architecture","dtype":"float64"},"registered_parameter_count":124,"data_lock":"common_protocol.data_lock","splits":"common_protocol.splits","state_adapter":"common_protocol.state_adapter","environment_feature":"common_protocol.environment_feature","rng":"common_protocol.rng_contract","seeds":"common_protocol.paired_seeds","training":"common_protocol.training.neural","rollout":"common_protocol.rollout.neural","evaluation":"common_protocol.evaluation","failure_policy":"record every failure; never run skeleton or substitute I1","implementation_status":"blocked_until_exact_EnvDriftNet_contract_and_runtime_count_124_pass"},
+    {"arm_id":"CAP-NN-H032","question":"within_neural_capacity_scan","model":{"family":"neural","state_dim":2,"state_layout":"common_protocol.state_layout","env_dim":1,"hidden":[32,32],"diffusion_dim":2,"diffusion_contract":"common_protocol.neural_diffusion_contract","architecture":"common_protocol.neural_architecture","dtype":"float64"},"registered_parameter_count":1252,"data_lock":"common_protocol.data_lock","splits":"common_protocol.splits","state_adapter":"common_protocol.state_adapter","environment_feature":"common_protocol.environment_feature","rng":"common_protocol.rng_contract","seeds":"common_protocol.paired_seeds","training":"common_protocol.training.neural","rollout":"common_protocol.rollout.neural","evaluation":"common_protocol.evaluation","failure_policy":"record every failure; never run skeleton or substitute I1","implementation_status":"blocked_until_exact_EnvDriftNet_contract_and_runtime_count_1252_pass"},
+    {"arm_id":"CAP-NN-H064","question":"within_neural_capacity_scan","model":{"family":"neural","state_dim":2,"state_layout":"common_protocol.state_layout","env_dim":1,"hidden":[64,64],"diffusion_dim":2,"diffusion_contract":"common_protocol.neural_diffusion_contract","architecture":"common_protocol.neural_architecture","dtype":"float64"},"registered_parameter_count":4548,"data_lock":"common_protocol.data_lock","splits":"common_protocol.splits","state_adapter":"common_protocol.state_adapter","environment_feature":"common_protocol.environment_feature","rng":"common_protocol.rng_contract","seeds":"common_protocol.paired_seeds","training":"common_protocol.training.neural","rollout":"common_protocol.rollout.neural","evaluation":"common_protocol.evaluation","failure_policy":"record every failure; never run skeleton or substitute I1","implementation_status":"blocked_until_exact_EnvDriftNet_contract_and_runtime_count_4548_pass"},
+    {"arm_id":"CAP-NN-H128","question":"within_neural_capacity_scan","model":{"family":"neural","state_dim":2,"state_layout":"common_protocol.state_layout","env_dim":1,"hidden":[128,128],"diffusion_dim":2,"diffusion_contract":"common_protocol.neural_diffusion_contract","architecture":"common_protocol.neural_architecture","dtype":"float64"},"registered_parameter_count":17284,"data_lock":"common_protocol.data_lock","splits":"common_protocol.splits","state_adapter":"common_protocol.state_adapter","environment_feature":"common_protocol.environment_feature","rng":"common_protocol.rng_contract","seeds":"common_protocol.paired_seeds","training":"common_protocol.training.neural","rollout":"common_protocol.rollout.neural","evaluation":"common_protocol.evaluation","failure_policy":"record every failure; never run skeleton or substitute I1","implementation_status":"blocked_until_exact_EnvDriftNet_contract_and_runtime_count_17284_pass"}
   ],
   "predeclared_contrasts": [
-    {
-      "contrast_id": "STRUCT-EQUAL-ORDER-01",
-      "left": "CAP-I1-K10",
-      "right": "CAP-NN-H008",
-      "parameter_ratio_right_over_left": 2.48,
-      "secondary_ratio_right_over_i1_effective_dof": 2.5306122448979593,
-      "claim_boundary": "2.48×参数量、非参数匹配的 fitted-pipeline 比较"
-    }
+    {"contrast_id":"I1-K03-vs-K01","left":"CAP-I1-K01","right":"CAP-I1-K03","family":"I1-capacity","claim":"adjacent capacity contrast"},
+    {"contrast_id":"I1-K10-vs-K03","left":"CAP-I1-K03","right":"CAP-I1-K10","family":"I1-capacity","claim":"adjacent capacity contrast"},
+    {"contrast_id":"I1-K30-vs-K10","left":"CAP-I1-K10","right":"CAP-I1-K30","family":"I1-capacity","claim":"adjacent capacity contrast"},
+    {"contrast_id":"NN-H032-vs-H008","left":"CAP-NN-H008","right":"CAP-NN-H032","family":"neural-capacity","claim":"adjacent capacity contrast"},
+    {"contrast_id":"NN-H064-vs-H032","left":"CAP-NN-H032","right":"CAP-NN-H064","family":"neural-capacity","claim":"adjacent capacity contrast"},
+    {"contrast_id":"NN-H128-vs-H064","left":"CAP-NN-H064","right":"CAP-NN-H128","family":"neural-capacity","claim":"adjacent capacity contrast"},
+    {"contrast_id":"STRUCT-I1-K10-vs-NN-H008","left":"CAP-I1-K10","right":"CAP-NN-H008","family":"structure","claim":"2.48×参数量、非参数匹配的 fitted-pipeline 比较","parameter_ratio_right_over_left":2.48,"secondary_ratio_right_over_i1_effective_dof":2.5306122448979593}
   ]
 }
