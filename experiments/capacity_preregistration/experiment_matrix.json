@@ -1,7 +1,7 @@
 {
-  "schema_version": "1.0",
-  "preregistration_id": "NEX-381-v1",
-  "approval_state": "draft_pending_math_and_five_dimension_review",
+  "schema_version": "2.0",
+  "preregistration_id": "NEX-381-v2",
+  "approval_state": "draft_pending_v2_math_and_five_dimension_review",
   "code_baseline": {
     "repository": "HuAzurestar/learnable-sde-for-movement-prediction",
     "reviewed_git_sha": "740a563d923971a8d7c161733f829f09d2ff5c6e",
@@ -29,14 +29,40 @@
       "normalization": "fit on train once per data manifest; reuse unchanged on val/eval and every arm"
     },
     "seeds": [20260814],
+    "neural_diffusion_contract": {
+      "parameter": "ell in R^2",
+      "B": "diag(exp(ell))",
+      "a": "B @ B.T = diag(exp(2*ell))",
+      "state_dependent": false,
+      "time_dependent": false,
+      "transform_modifiers": null,
+      "bridge_correction": "full a @ grad(log_h) in both state coordinates"
+    },
     "evaluation": {
       "forecast_samples_per_segment": 1000,
       "primary_metric": "canonical half energy: E||X-y|| - 0.5 E||X-X'||",
       "hdr90": "segment endpoint membership in the model's 90% highest-density region; report coverage and abs(coverage-0.90)",
       "bootstrap": "paired segment-level block bootstrap, B=2000, resample identical segment_id blocks for every contrast",
       "convergence": "report converged flag, iterations/epochs, final objective, selected checkpoint and all numerical failures",
-      "bridge_dual": "full-horizon existence/exclusion check: pi_exist+surv_excl=1 and pi*p_exist+(1-pi)*p_excl=p; report absolute identity error and reconstruction L1",
-      "delta_probe": "delta=0.3*sigma_hist, where sigma_hist is train-split-only robust scale 1.4826*MAD of endpoint displacement in normalized coordinates; use only to dilate/erode the bridge event region in a predeclared sensitivity probe"
+      "bridge_dual": {
+        "paths": "same sampled paths for existence and exclusion",
+        "event": "one discrete per-path boolean hit event E; exclusion is the boolean complement not E",
+        "scalar_identity": "abs(pi_exist + surv_excl - 1) <= 1e-12",
+        "reconstruction": "raw full-support bin counts including underflow and overflow; sum_j abs(p_recon_j - p_prior_j) <= 1e-12",
+        "strata": "hit and non-hit strata must both be non-empty; otherwise record undefined_stratum and never pass",
+        "fp_mc_l1": "report analytic-prior versus Monte-Carlo sampling/discretization error separately; do not apply the algebraic 1e-12 tolerance"
+      },
+      "delta_probe": {
+        "scope": "one-dimensional position event only; a two-dimensional event requires a new preregistration",
+        "displacement": "DeltaX_i = X_T_i - X_0_i on the train split after frozen position normalization",
+        "sigma_hist": "1.4826 * median_i(abs(DeltaX_i - median_j(DeltaX_j))); compute exactly once for the whole matrix",
+        "delta": "0.3 * sigma_hist",
+        "base_region": "normalize preregistered A to a union of mutually disjoint closed intervals [l_j,r_j]",
+        "dilation": "A_plus_delta = union [l_j-delta,r_j+delta], merge overlaps, intersect domain D",
+        "erosion": "A_minus_delta = union [l_j+delta,r_j-delta], delete empty components",
+        "boundary": "closed-set membership for every hit decision",
+        "failure": "non-finite or zero sigma_hist, or empty eroded region, is probe failure/NA; never replace delta post hoc"
+      }
     },
     "reporting": {
       "capacity_scan": "ordered trend with simultaneous 95% family-wise intervals; Holm-adjust the three adjacent contrasts within each model family",
@@ -51,6 +77,7 @@
       "question": "within_I1_capacity_scan",
       "model": {"family": "I1", "n_modes": 1, "kappa": 0.0, "dt_ref": 60.0, "dtype": "float64", "include_prior_logits": true},
       "registered_parameter_count": 5,
+      "registered_effective_degrees_of_freedom": 4,
       "data_lock": "common_protocol.data_lock",
       "splits": "common_protocol.splits",
       "seeds": [20260814],
@@ -64,6 +91,7 @@
       "question": "within_I1_capacity_scan",
       "model": {"family": "I1", "n_modes": 3, "kappa": 0.0, "dt_ref": 60.0, "dtype": "float64", "include_prior_logits": true},
       "registered_parameter_count": 15,
+      "registered_effective_degrees_of_freedom": 14,
       "data_lock": "common_protocol.data_lock",
       "splits": "common_protocol.splits",
       "seeds": [20260814],
@@ -77,6 +105,7 @@
       "question": "within_I1_capacity_scan_and_equal_order_structure_contrast",
       "model": {"family": "I1", "n_modes": 10, "kappa": 0.0, "dt_ref": 60.0, "dtype": "float64", "include_prior_logits": true},
       "registered_parameter_count": 50,
+      "registered_effective_degrees_of_freedom": 49,
       "data_lock": "common_protocol.data_lock",
       "splits": "common_protocol.splits",
       "seeds": [20260814],
@@ -90,6 +119,7 @@
       "question": "within_I1_capacity_scan",
       "model": {"family": "I1", "n_modes": 30, "kappa": 0.0, "dt_ref": 60.0, "dtype": "float64", "include_prior_logits": true},
       "registered_parameter_count": 150,
+      "registered_effective_degrees_of_freedom": 149,
       "data_lock": "common_protocol.data_lock",
       "splits": "common_protocol.splits",
       "seeds": [20260814],
@@ -101,7 +131,7 @@
     {
       "arm_id": "CAP-NN-H008",
       "question": "within_neural_capacity_scan_and_equal_order_structure_contrast",
-      "model": {"family": "neural", "state_dim": 2, "env_dim": 1, "hidden": [8, 8], "diffusion_dim": 2, "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
+      "model": {"family": "neural", "state_dim": 2, "env_dim": 1, "hidden": [8, 8], "diffusion_dim": 2, "diffusion_contract": "common_protocol.neural_diffusion_contract", "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
       "registered_parameter_count": 124,
       "data_lock": "common_protocol.data_lock",
       "splits": "common_protocol.splits",
@@ -114,7 +144,7 @@
     {
       "arm_id": "CAP-NN-H032",
       "question": "within_neural_capacity_scan",
-      "model": {"family": "neural", "state_dim": 2, "env_dim": 1, "hidden": [32, 32], "diffusion_dim": 2, "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
+      "model": {"family": "neural", "state_dim": 2, "env_dim": 1, "hidden": [32, 32], "diffusion_dim": 2, "diffusion_contract": "common_protocol.neural_diffusion_contract", "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
       "registered_parameter_count": 1252,
       "data_lock": "common_protocol.data_lock",
       "splits": "common_protocol.splits",
@@ -127,7 +157,7 @@
     {
       "arm_id": "CAP-NN-H064",
       "question": "within_neural_capacity_scan",
-      "model": {"family": "neural", "state_dim": 2, "env_dim": 1, "hidden": [64, 64], "diffusion_dim": 2, "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
+      "model": {"family": "neural", "state_dim": 2, "env_dim": 1, "hidden": [64, 64], "diffusion_dim": 2, "diffusion_contract": "common_protocol.neural_diffusion_contract", "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
       "registered_parameter_count": 4548,
       "data_lock": "common_protocol.data_lock",
       "splits": "common_protocol.splits",
@@ -140,7 +170,7 @@
     {
       "arm_id": "CAP-NN-H128",
       "question": "within_neural_capacity_scan",
-      "model": {"family": "neural", "state_dim": 2, "env_dim": 1, "hidden": [128, 128], "diffusion_dim": 2, "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
+      "model": {"family": "neural", "state_dim": 2, "env_dim": 1, "hidden": [128, 128], "diffusion_dim": 2, "diffusion_contract": "common_protocol.neural_diffusion_contract", "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
       "registered_parameter_count": 17284,
       "data_lock": "common_protocol.data_lock",
       "splits": "common_protocol.splits",
@@ -157,7 +187,8 @@
       "left": "CAP-I1-K10",
       "right": "CAP-NN-H008",
       "parameter_ratio_right_over_left": 2.48,
-      "claim_boundary": "similar-order parameter count, not equal parameter count; estimates the full fitted-pipeline difference and does not isolate architecture from estimator"
+      "secondary_ratio_right_over_i1_effective_dof": 2.5306122448979593,
+      "claim_boundary": "2.48×参数量、非参数匹配的 fitted-pipeline 比较"
     }
   ]
 }

@@ -15,6 +15,16 @@ from typing import Any, Mapping, Sequence
 
 
 I1_PARAMETER_GROUPS = ("Gamma", "a", "c", "g", "prior_logits")
+NEURAL_DIFFUSION_CONTRACT = {
+    "parameter": "ell in R^2",
+    "B": "diag(exp(ell))",
+    "a": "B @ B.T = diag(exp(2*ell))",
+    "state_dependent": False,
+    "time_dependent": False,
+    "transform_modifiers": None,
+    "bridge_correction": "full a @ grad(log_h) in both state coordinates",
+}
+FROZEN_STRUCTURE_CLAIM = "2.48×参数量、非参数匹配的 fitted-pipeline 比较"
 
 
 def _positive_int(value: int, name: str) -> int:
@@ -86,7 +96,7 @@ def count_neural_parameters(
             "input_dim": input_dim,
             "hidden": [hidden_1, hidden_2],
             "drift_output_dim": state_dim,
-            "diffusion": "trainable diagonal log scale",
+            "diffusion": NEURAL_DIFFUSION_CONTRACT,
             "time_is_input": False,
         },
         "excluded_buffers": ["train_split_feature_mean", "train_split_feature_std"],
@@ -135,6 +145,8 @@ def validate_matrix(document: Mapping[str, Any]) -> list[str]:
     arms = document.get("arms")
     if not isinstance(arms, list) or not arms:
         return ["arms must be a non-empty list"]
+    if document.get("preregistration_id") != "NEX-381-v2":
+        errors.append("preregistration_id must be NEX-381-v2")
 
     for index, arm in enumerate(arms):
         label = arm.get("arm_id", f"index:{index}")
@@ -154,8 +166,32 @@ def validate_matrix(document: Mapping[str, Any]) -> list[str]:
             errors.append(
                 f"{label}: registered count {arm['registered_parameter_count']} != computed {actual}"
             )
+        if arm["model"]["family"] == "I1":
+            expected_effective = actual - 1
+            if arm.get("registered_effective_degrees_of_freedom") != expected_effective:
+                errors.append(
+                    f"{label}: effective DoF must be {expected_effective} beside stored count {actual}"
+                )
+        elif (
+            arm["model"].get("diffusion_contract")
+            != "common_protocol.neural_diffusion_contract"
+            or document.get("common_protocol", {}).get("neural_diffusion_contract")
+            != NEURAL_DIFFUSION_CONTRACT
+        ):
+            errors.append(f"{label}: neural diffusion contract is not frozen to v2")
         if not arm["seeds"]:
             errors.append(f"{label}: seeds must not be empty")
+    contrasts = document.get("predeclared_contrasts", [])
+    if len(contrasts) != 1:
+        errors.append("exactly one predeclared structure contrast is required")
+    else:
+        contrast = contrasts[0]
+        if contrast.get("claim_boundary") != FROZEN_STRUCTURE_CLAIM:
+            errors.append("structure contrast claim boundary is not the frozen v2 wording")
+        if contrast.get("parameter_ratio_right_over_left") != 2.48:
+            errors.append("stored parameter ratio must be exactly 2.48")
+        if contrast.get("secondary_ratio_right_over_i1_effective_dof") != 124 / 49:
+            errors.append("secondary effective-DoF ratio must be exactly 124/49")
     return errors
 
 
