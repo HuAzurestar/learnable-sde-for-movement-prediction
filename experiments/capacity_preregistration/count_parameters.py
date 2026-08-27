@@ -1,9 +1,10 @@
-"""Count capacity and fail-fast validate the NEX-381-v5 experiment contract."""
+"""Count capacity and exact-validate the frozen NEX-381-v6 matrix."""
 
 from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -13,6 +14,72 @@ I1_PARAMETER_GROUPS = ("Gamma", "a", "c", "g", "prior_logits")
 FROZEN_STATE_LAYOUT = ("normalized_position_X", "normalized_velocity_V")
 FROZEN_STATE_LAYOUT_REF = "common_protocol.state_layout"
 FROZEN_SEEDS = (20260814, 20260815, 20260816, 20260817, 20260818)
+FROZEN_MATRIX_SHA256 = "07a7a47170e4756bd34dc5aa2c9928be74a50f7df7e2c19e3b59021198a626d4"
+FROZEN_SPLITS = {
+    "source": "global_splits.json",
+    "train": {"key": "train", "roles": ["fit_model", "fit_state_normalizer", "fit_environment_normalizer"]},
+    "validation": {"key": "val", "roles": ["checkpoint_selection", "stopping"]},
+    "evaluation": {"key": "eval", "roles": ["locked_final_metrics_only"], "unlock_condition": "every registered arm success/failure record frozen"},
+    "leakage_unit": "file_id",
+    "segment_overlap_check": True,
+}
+FROZEN_RNG_CONTRACT = {
+    "paired_seeds_ref": "common_protocol.paired_seeds",
+    "same_seed_scopes": ["all_8_arms", "initialization", "minibatch_order", "rollout", "bootstrap_pairing"],
+    "stream_derivation": {"algorithm": "numpy.random.SeedSequence", "spawn_count": 3, "stream_order": ["train", "rollout", "bootstrap"]},
+    "determinism": {"dtype": "float64", "torch_deterministic_algorithms": True, "diagnostic_rerun_replaces_registered_run": False},
+}
+FROZEN_SOLAR_ALIGNMENT = {
+    "condition_time_column": "t",
+    "condition_time_conversion": "datetime64[s] to signed integer Unix seconds",
+    "start_source": "hashed segment_start_map.absolute_start_epoch",
+    "duration_seconds": "segment.t[-1]-segment.t[0]",
+    "lower_bound": "inclusive",
+    "upper_bound": "inclusive",
+    "row_selection": "all and only rows with start<=t_epoch<=start+duration",
+    "ordering": "source row order does not affect arithmetic mean",
+}
+FROZEN_I1_TRAINING = {
+    "estimator": {"name": "expectation_maximization", "objective": "raw_state_train_negative_log_likelihood"},
+    "maximum_iterations": 50,
+    "stopping": {"metric": "relative_train_nll_improvement", "comparison": "less_than", "tolerance": 1e-5, "check_after_each_completed_iteration": True, "otherwise": "stop_at_maximum_iterations"},
+    "validation_hyperparameter_search": False,
+    "checkpoint": {"selection": "final_accepted_iteration", "tie_break": "not_applicable"},
+    "forecast_samples_per_segment": 1000,
+}
+FROZEN_NEURAL_TRAINING = {
+    "objective": {"name": "one_step_gaussian_transition_nll", "state": "normalized_[X,V]", "mean": "z+(dt/60)*b_clipped(z,e)", "covariance": "(dt/60)*diag(exp(2ell_X),exp(2ell_V))"},
+    "optimizer": {"name": "torch.optim.Adam", "parameters": {"lr": 0.001, "betas": [0.9, 0.999], "eps": 1e-8, "weight_decay": 0.0, "amsgrad": False, "maximize": False, "foreach": False, "fused": False}},
+    "batching": {"batch_size": 256, "shuffle": True, "drop_last": False},
+    "gradient_clipping": "none",
+    "maximum_epochs": 300,
+    "stopping": {"metric": "validation_nll", "mode": "min", "patience_completed_epochs": 30, "min_delta_absolute": 1e-5},
+    "checkpoint": {"selection": "minimum_validation_nll", "exact_tie_break": "earliest_epoch"},
+    "forecast_samples_per_segment": 1000,
+}
+FROZEN_TIME_GRID = {
+    "start_seconds": 0.0,
+    "regular_step_seconds": 1.0,
+    "construction": "t_k=min(k*regular_step_seconds,T)",
+    "include_start": True,
+    "include_exact_endpoint": True,
+    "duplicate_endpoint_policy": "store endpoint once",
+}
+FROZEN_EVENT_HIT_RULE = {
+    "quantifier": "exists",
+    "grid_points": "all registered points including start and exact endpoint",
+    "membership": "closed_interval",
+    "coordinate_index": 0,
+    "velocity_read": False,
+}
+FROZEN_DELTA_FAILURE = {
+    "nonfinite_sigma_hist": "unavailable",
+    "zero_sigma_hist": "unavailable",
+    "empty_erosion": "unavailable",
+    "replacement_delta_allowed": False,
+    "post_failure_reselection_allowed": False,
+    "result_literal": "NA",
+}
 FROZEN_MANIFEST_FIELDS = (
     "dataset_id",
     "schema_version",
@@ -166,25 +233,36 @@ def _count_from_arm(arm: Mapping[str, Any]) -> int:
 
 def _expect(errors: list[str], actual: Any, expected: Any, label: str) -> None:
     if actual != expected:
-        errors.append(f"{label} must equal frozen v5 value {expected!r}; got {actual!r}")
+        errors.append(f"{label} must equal frozen v6 value {expected!r}; got {actual!r}")
+
+
+def canonical_matrix_sha256(document: Mapping[str, Any]) -> str:
+    """Hash the entire parsed matrix with deterministic JSON serialization."""
+
+    payload = json.dumps(
+        document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def validate_matrix(document: Mapping[str, Any]) -> list[str]:
     """Validate every field needed to resolve any arm without investigator choice."""
 
     errors: list[str] = []
-    _expect(errors, document.get("schema_version"), "5.0", "schema_version")
-    _expect(errors, document.get("preregistration_id"), "NEX-381-v5", "preregistration_id")
-    _expect(errors, document.get("approval_state"), "draft_pending_v5_math_review", "approval_state")
+    _expect(errors, document.get("schema_version"), "6.0", "schema_version")
+    _expect(errors, document.get("preregistration_id"), "NEX-381-v6", "preregistration_id")
+    _expect(errors, document.get("approval_state"), "draft_pending_v6_five_dimension_diff_review", "approval_state")
     supersedes = document.get("supersedes", {})
-    _expect(errors, supersedes.get("preregistration_id"), "NEX-381-v4", "supersedes.preregistration_id")
-    _expect(errors, supersedes.get("git_sha"), "1c8bc1288c0cd5845dde8aad5b96ca4ffc0bed84", "supersedes.git_sha")
+    _expect(errors, supersedes.get("preregistration_id"), "NEX-381-v5", "supersedes.preregistration_id")
+    _expect(errors, supersedes.get("git_sha"), "1081a4ebb0a1f807b0b62799503bb98e1642763e", "supersedes.git_sha")
 
     common = document.get("common_protocol", {})
     lock = common.get("data_lock", {})
     _expect(errors, lock.get("required_manifest_fields"), list(FROZEN_MANIFEST_FIELDS), "data manifest fields")
     _expect(errors, lock.get("hash_algorithm"), "sha256 lowercase hex", "data manifest hash algorithm")
+    _expect(errors, common.get("splits"), FROZEN_SPLITS, "split and leakage contract")
     _expect(errors, common.get("paired_seeds"), list(FROZEN_SEEDS), "paired seeds")
+    _expect(errors, common.get("rng_contract"), FROZEN_RNG_CONTRACT, "RNG contract")
     _expect(errors, common.get("state_layout"), list(FROZEN_STATE_LAYOUT), "state layout")
 
     adapter = common.get("state_adapter", {})
@@ -200,6 +278,7 @@ def validate_matrix(document: Mapping[str, Any]) -> list[str]:
     environment = common.get("environment_feature", {})
     _expect(errors, environment.get("feature_id"), "aligned_solar_elev_mean_v1", "environment feature id")
     _expect(errors, environment.get("dimension"), 1, "environment dimension")
+    _expect(errors, environment.get("alignment"), FROZEN_SOLAR_ALIGNMENT, "solar alignment")
     if "solar_elev only" not in environment.get("source", ""):
         errors.append("environment source must freeze the solar_elev column only")
     start_map = environment.get("start_map", "")
@@ -229,19 +308,15 @@ def validate_matrix(document: Mapping[str, Any]) -> list[str]:
     if "xavier_uniform_" not in architecture.get("initialization", ""):
         errors.append("neural initialization must be Xavier uniform with frozen biases")
 
-    neural_training = common.get("training", {}).get("neural", {})
-    expected_adam = {"lr": 0.001, "betas": [0.9, 0.999], "eps": 1e-8, "weight_decay": 0.0, "amsgrad": False, "maximize": False, "foreach": False, "fused": False}
-    _expect(errors, neural_training.get("optimizer"), "torch.optim.Adam", "optimizer")
-    _expect(errors, neural_training.get("adam"), expected_adam, "Adam parameters")
-    for key, value in (("batch_size", 256), ("shuffle", True), ("drop_last", False), ("gradient_clipping", "none"), ("max_epochs", 300)):
-        _expect(errors, neural_training.get(key), value, f"neural training {key}")
+    training = common.get("training", {})
+    _expect(errors, training.get("i1"), FROZEN_I1_TRAINING, "I1 training, stopping and forecast budget")
+    _expect(errors, training.get("neural"), FROZEN_NEURAL_TRAINING, "neural objective, optimizer, stopping, checkpoint and forecast budget")
     rollout = common.get("rollout", {})
+    _expect(errors, rollout.get("time_grid"), FROZEN_TIME_GRID, "rollout and event time grid")
     if "raw r=[X_raw,V_raw]" not in rollout.get("I1", "") or "never propagate z" not in rollout.get("I1", ""):
         errors.append("I1 rollout must preserve raw dX=Vdt dynamics and transform only for evaluation")
     if "Euler-Maruyama" not in rollout.get("neural", "") or "no adaptive stepping" not in rollout.get("neural", ""):
         errors.append("neural rollout must freeze non-adaptive Euler-Maruyama")
-    if "including t=0 and exact endpoint T" not in rollout.get("time_grid", ""):
-        errors.append("rollout time grid must include start and exact endpoint")
 
     evaluation = common.get("evaluation", {})
     energy = evaluation.get("energy_half", {})
@@ -261,10 +336,10 @@ def validate_matrix(document: Mapping[str, Any]) -> list[str]:
     _expect(errors, event.get("coordinate"), "state[0] = normalized_position_X only", "event coordinate")
     _expect(errors, event.get("domain_D"), [-8.0, 8.0], "event domain D")
     _expect(errors, event.get("region_A"), [[-0.5, 0.5]], "event region A")
+    _expect(errors, event.get("time_grid_ref"), "common_protocol.rollout.time_grid", "event time grid reference")
+    _expect(errors, event.get("hit_rule"), FROZEN_EVENT_HIT_RULE, "event hit rule")
     expected_edges = ["-inf", -8.0, -4.0, -2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0, 4.0, 8.0, "inf"]
     _expect(errors, event.get("full_support_bin_edges"), expected_edges, "event full-support bins")
-    if "including t=0,T" not in event.get("hit_rule", ""):
-        errors.append("event hit rule must freeze the complete discrete time grid")
     dual = evaluation.get("bridge_dual", {})
     _expect(errors, dual.get("event_ref"), "common_protocol.evaluation.event", "bridge event reference")
     if "state[0]=X then state[1]=V" not in dual.get("neural_correction", ""):
@@ -278,6 +353,7 @@ def validate_matrix(document: Mapping[str, Any]) -> list[str]:
     delta = evaluation.get("delta_probe", {})
     _expect(errors, delta.get("coordinate_index"), 0, "delta coordinate index")
     _expect(errors, delta.get("directions"), ["base", "dilation", "erosion"], "delta directions")
+    _expect(errors, delta.get("failure"), FROZEN_DELTA_FAILURE, "delta failure policy")
     if "state_i[T,0]-state_i[0,0]" not in delta.get("displacement", ""):
         errors.append("delta must use normalized coordinate zero only")
     inference = evaluation.get("inference", {})
@@ -363,6 +439,12 @@ def validate_matrix(document: Mapping[str, Any]) -> list[str]:
     _expect(errors, contrast_schema.get("required_record_count"), 14, "contrast required record count")
     if "Cartesian product" not in contrast_schema.get("required_record_set", "") or "no extra or missing rows" not in contrast_schema.get("required_record_set", ""):
         errors.append("contrast result set must be the exact 7x2 Cartesian product")
+    _expect(
+        errors,
+        canonical_matrix_sha256(document),
+        FROZEN_MATRIX_SHA256,
+        "canonical full-matrix sha256",
+    )
     return errors
 
 
@@ -387,8 +469,8 @@ def validate_result_templates(document: Mapping[str, Any], root: Path) -> list[s
             continue
         if any(len(row) != len(rows[0]) for row in rows[1:]):
             errors.append(f"{schema_name}: template row/header column count mismatch")
-        if any(row[0] != "NEX-381-v5" for row in rows[1:]):
-            errors.append(f"{schema_name}: template rows must identify NEX-381-v5")
+        if any(row[0] != "NEX-381-v6" for row in rows[1:]):
+            errors.append(f"{schema_name}: template rows must identify NEX-381-v6")
         if schema_name == "arm_results":
             if "delta_probe_value" in rows[0]:
                 errors.append("arm_results: delta_probe_value column is forbidden")

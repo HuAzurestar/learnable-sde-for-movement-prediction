@@ -51,19 +51,19 @@ def test_neural_contract_rejects_unregistered_depth():
         count_neural_parameters((8,))
 
 
-def test_v5_matrix_and_templates_are_executable_contracts():
+def test_v6_matrix_and_templates_are_executable_contracts():
     document = load_matrix()
     assert validate_matrix(document) == []
     assert validate_result_templates(document, ROOT) == []
-    assert document["schema_version"] == "5.0"
-    assert document["preregistration_id"] == "NEX-381-v5"
-    assert document["approval_state"] == "draft_pending_v5_math_review"
-    assert document["supersedes"]["preregistration_id"] == "NEX-381-v4"
-    assert document["supersedes"]["git_sha"] == "1c8bc1288c0cd5845dde8aad5b96ca4ffc0bed84"
+    assert document["schema_version"] == "6.0"
+    assert document["preregistration_id"] == "NEX-381-v6"
+    assert document["approval_state"] == "draft_pending_v6_five_dimension_diff_review"
+    assert document["supersedes"]["preregistration_id"] == "NEX-381-v5"
+    assert document["supersedes"]["git_sha"] == "1081a4ebb0a1f807b0b62799503bb98e1642763e"
     assert TimeVaryingNeuralSDE().dt_scale == 60.0
 
 
-def test_v5_i1_raw_kernel_and_affine_evaluation_contract():
+def test_v6_inherits_i1_raw_kernel_and_affine_evaluation_contract():
     common = load_matrix()["common_protocol"]
     policy = common["state_adapter"]["model_coordinate_policy"]
     assert "only in raw" in policy["I1"]
@@ -76,7 +76,7 @@ def test_v5_i1_raw_kernel_and_affine_evaluation_contract():
     assert "A_raw=m_X+s_X*A" in dual["I1_event_transform"]
 
 
-def test_v5_hashed_solar_time_and_file_maps_are_unique():
+def test_v6_inherits_hashed_solar_time_and_file_maps():
     common = load_matrix()["common_protocol"]
     assert common["data_lock"]["required_manifest_fields"] == list(FROZEN_MANIFEST_FIELDS)
     environment = common["environment_feature"]
@@ -88,7 +88,7 @@ def test_v5_hashed_solar_time_and_file_maps_are_unique():
     assert "filtering nonfinite rows is forbidden" in environment["aggregation"]
 
 
-def test_v5_freezes_neural_contract_and_accepted_metrics():
+def test_v6_inherits_neural_contract_and_accepted_metrics():
     common = load_matrix()["common_protocol"]
     assert common["paired_seeds"] == list(FROZEN_SEEDS)
     assert common["state_layout"] == list(FROZEN_STATE_LAYOUT)
@@ -99,7 +99,7 @@ def test_v5_freezes_neural_contract_and_accepted_metrics():
     assert "Tanh" in architecture["layers"]
     assert "xavier_uniform_" in architecture["initialization"]
     assert architecture["dt_scale_seconds"] == 60.0
-    assert common["training"]["neural"]["adam"]["eps"] == 1e-8
+    assert common["training"]["neural"]["optimizer"]["parameters"]["eps"] == 1e-8
     evaluation = common["evaluation"]
     assert "U-statistic" in evaluation["energy_half"]["finite_sample_estimator"]
     assert "2D Gaussian KDE" in evaluation["hdr90"]["density"]
@@ -107,7 +107,7 @@ def test_v5_freezes_neural_contract_and_accepted_metrics():
     assert "at least 90.1% forecast-sample mass" in evaluation["hdr90"]["report"]
 
 
-def test_v5_crossed_bootstrap_and_failure_propagation_are_closed():
+def test_v6_inherits_crossed_bootstrap_and_failure_propagation():
     inference = load_matrix()["common_protocol"]["evaluation"]["inference"]
     assert inference["contrast_metric_ids"] == [
         "energy_half", "hdr90_abs_calibration_error"
@@ -123,7 +123,7 @@ def test_v5_crossed_bootstrap_and_failure_propagation_are_closed():
     assert "no complete-case deletion" in inference["complete_cube_policy"]
 
 
-def test_v5_result_contract_has_exact_14_rows_and_identity_keys():
+def test_v6_result_contract_has_exact_14_rows_and_identity_keys():
     document = load_matrix()
     schemas = document["common_protocol"]["result_schemas"]
     assert schemas["arm_results"]["primary_key"] == [
@@ -149,7 +149,7 @@ def test_v5_result_contract_has_exact_14_rows_and_identity_keys():
     }
 
 
-def test_v5_all_arms_and_contrasts_remain_frozen():
+def test_v6_all_arms_and_contrasts_remain_frozen():
     document = load_matrix()
     assert len(document["arms"]) == 8
     assert len(document["predeclared_contrasts"]) == 7
@@ -160,6 +160,41 @@ def test_v5_all_arms_and_contrasts_remain_frozen():
     structure = document["predeclared_contrasts"][-1]
     assert structure["claim"] == FROZEN_STRUCTURE_CLAIM
     assert structure["parameter_ratio_right_over_left"] == 2.48
+
+
+@pytest.mark.parametrize(
+    "case_id, mutation, expected_error",
+    [
+        ("leakage_unit", lambda d: d["common_protocol"]["splits"].update(leakage_unit="segment_id"), "split and leakage contract"),
+        ("overlap_check", lambda d: d["common_protocol"]["splits"].update(segment_overlap_check=False), "split and leakage contract"),
+        ("i1_max_iter", lambda d: d["common_protocol"]["training"]["i1"].update(maximum_iterations=999), "I1 training, stopping and forecast budget"),
+        ("i1_stopping", lambda d: d["common_protocol"]["training"]["i1"]["stopping"].update(tolerance=0.5), "I1 training, stopping and forecast budget"),
+        ("i1_forecast_samples", lambda d: d["common_protocol"]["training"]["i1"].update(forecast_samples_per_segment=17), "I1 training, stopping and forecast budget"),
+        ("neural_objective", lambda d: d["common_protocol"]["training"]["neural"]["objective"].update(name="arbitrary_loss"), "neural objective, optimizer, stopping, checkpoint and forecast budget"),
+        ("neural_stopping", lambda d: d["common_protocol"]["training"]["neural"]["stopping"].update(patience_completed_epochs=999), "neural objective, optimizer, stopping, checkpoint and forecast budget"),
+        ("neural_checkpoint", lambda d: d["common_protocol"]["training"]["neural"]["checkpoint"].update(selection="last_epoch"), "neural objective, optimizer, stopping, checkpoint and forecast budget"),
+        ("neural_forecast_samples", lambda d: d["common_protocol"]["training"]["neural"].update(forecast_samples_per_segment=17), "neural objective, optimizer, stopping, checkpoint and forecast budget"),
+        ("solar_row_selection", lambda d: d["common_protocol"]["environment_feature"]["alignment"].update(row_selection="arbitrary first row"), "solar alignment"),
+        ("rng_stream_reuse", lambda d: d["common_protocol"]["rng_contract"]["stream_derivation"].update(stream_order=["shared", "shared", "shared"]), "RNG contract"),
+        ("rng_diagnostic_replacement", lambda d: d["common_protocol"]["rng_contract"]["determinism"].update(diagnostic_rerun_replaces_registered_run=True), "RNG contract"),
+        ("event_time_grid", lambda d: d["common_protocol"]["evaluation"]["event"].update(time_grid_ref="arbitrary_grid"), "event time grid reference"),
+        ("delta_reselection", lambda d: d["common_protocol"]["evaluation"]["delta_probe"]["failure"].update(post_failure_reselection_allowed=True), "delta failure policy"),
+    ],
+)
+def test_v6_rejects_each_reviewer_counterexample(case_id, mutation, expected_error):
+    document = load_matrix()
+    mutation(document)
+    errors = validate_matrix(document)
+    assert errors, case_id
+    assert any(expected_error in error for error in errors), (case_id, errors)
+    assert any("canonical full-matrix sha256" in error for error in errors), case_id
+
+
+def test_v6_canonical_digest_rejects_an_unlisted_field_mutation():
+    document = load_matrix()
+    document["code_baseline"]["execution_git_sha"] = "silently_drifted"
+    errors = validate_matrix(document)
+    assert any("canonical full-matrix sha256" in error for error in errors)
 
 
 @pytest.mark.parametrize(
@@ -180,13 +215,13 @@ def test_v5_all_arms_and_contrasts_remain_frozen():
         (lambda d: d["common_protocol"]["result_schemas"]["contrast_results"].update(required_record_count=7), "required record count"),
     ],
 )
-def test_v5_validator_rejects_mathematical_contract_drift(mutation, expected_error):
+def test_v6_validator_rejects_inherited_mathematical_contract_drift(mutation, expected_error):
     document = load_matrix()
     mutation(document)
     assert any(expected_error in error for error in validate_matrix(document))
 
 
-def test_v5_validator_rejects_missing_arm_reference_or_contrast_identity():
+def test_v6_validator_rejects_missing_arm_reference_or_contrast_identity():
     missing_ref = load_matrix()
     del missing_ref["arms"][4]["environment_feature"]
     assert any("missing executable keys" in error for error in validate_matrix(missing_ref))
@@ -195,7 +230,7 @@ def test_v5_validator_rejects_missing_arm_reference_or_contrast_identity():
     assert any("predeclared contrast identities" in error for error in validate_matrix(wrong_contrast))
 
 
-def test_v5_result_template_rejects_direction_and_record_set_drift(tmp_path):
+def test_v6_result_template_rejects_direction_and_record_set_drift(tmp_path):
     document = load_matrix()
     arm_source = (ROOT / "result_template.csv").read_text(encoding="utf-8")
     contrast_source = (ROOT / "contrast_result_template.csv").read_text(encoding="utf-8")

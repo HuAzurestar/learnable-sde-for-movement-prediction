@@ -1,8 +1,8 @@
 {
-  "schema_version": "5.0",
-  "preregistration_id": "NEX-381-v5",
-  "approval_state": "draft_pending_v5_math_review",
-  "supersedes": {"preregistration_id":"NEX-381-v4","git_sha":"1c8bc1288c0cd5845dde8aad5b96ca4ffc0bed84","reason":"versioned replacement closing the v4 mathematical findings without rewriting frozen v4"},
+  "schema_version": "6.0",
+  "preregistration_id": "NEX-381-v6",
+  "approval_state": "draft_pending_v6_five_dimension_diff_review",
+  "supersedes": {"preregistration_id":"NEX-381-v5","git_sha":"1081a4ebb0a1f807b0b62799503bb98e1642763e","reason":"versioned validator-only replacement; v5 mathematical semantics are unchanged"},
   "code_baseline": {"repository":"HuAzurestar/learnable-sde-for-movement-prediction","reviewed_git_sha":"740a563d923971a8d7c161733f829f09d2ff5c6e","execution_git_sha":"required_at_run_time"},
   "common_protocol": {
     "data_lock": {
@@ -11,9 +11,21 @@
       "hash_algorithm": "sha256 lowercase hex",
       "policy": "fail_before_fit_if_any_required_field_or_hash_is_missing_or_mismatched"
     },
-    "splits": {"train":"global_splits.json:train; fit model and both normalizers only","validation":"global_splits.json:val; checkpoint selection and stopping only","evaluation":"global_splits.json:eval; locked until every arm and failure record freezes","leakage_unit":"file_id","segment_overlap_check":true},
+    "splits": {
+      "source":"global_splits.json",
+      "train":{"key":"train","roles":["fit_model","fit_state_normalizer","fit_environment_normalizer"]},
+      "validation":{"key":"val","roles":["checkpoint_selection","stopping"]},
+      "evaluation":{"key":"eval","roles":["locked_final_metrics_only"],"unlock_condition":"every registered arm success/failure record frozen"},
+      "leakage_unit":"file_id",
+      "segment_overlap_check":true
+    },
     "paired_seeds": [20260814,20260815,20260816,20260817,20260818],
-    "rng_contract": {"pairing":"same five seeds for every arm: initialization, minibatch order, rollout and bootstrap pairing","streams":"derive independent train, rollout and bootstrap streams as SeedSequence(seed).spawn(3) in that order","determinism":"torch float64 deterministic algorithms; no diagnostic rerun replaces a registered run"},
+    "rng_contract": {
+      "paired_seeds_ref":"common_protocol.paired_seeds",
+      "same_seed_scopes":["all_8_arms","initialization","minibatch_order","rollout","bootstrap_pairing"],
+      "stream_derivation":{"algorithm":"numpy.random.SeedSequence","spawn_count":3,"stream_order":["train","rollout","bootstrap"]},
+      "determinism":{"dtype":"float64","torch_deterministic_algorithms":true,"diagnostic_rerun_replaces_registered_run":false}
+    },
     "state_layout": ["normalized_position_X","normalized_velocity_V"],
     "state_adapter": {
       "adapter_id":"phase_space_1d_coord0_v1",
@@ -30,7 +42,7 @@
       "start_map":"manifest segment_start_map_path is UTF-8 JSONL with exactly fields segment_id,file_id,absolute_start_epoch; segment_id unique; every used segment has exactly one row; file_id must match trajectory; epoch is finite integer Unix seconds; hash must equal segment_start_map_sha256",
       "condition_file_map":"manifest condition_file_manifest_path is UTF-8 JSONL with exactly fields file_id,relative_path,sha256; file_id unique; every used file_id has exactly one row; resolve relative_path under cond_root and verify sha256; zero or duplicate candidate files fail; runtime glob selection is forbidden",
       "source":"the uniquely manifested condition parquet, column solar_elev only",
-      "alignment":"convert condition t to integer Unix seconds; inclusive window [absolute_start_epoch, absolute_start_epoch + (segment.t[-1]-segment.t[0])] from the hashed start map",
+      "alignment":{"condition_time_column":"t","condition_time_conversion":"datetime64[s] to signed integer Unix seconds","start_source":"hashed segment_start_map.absolute_start_epoch","duration_seconds":"segment.t[-1]-segment.t[0]","lower_bound":"inclusive","upper_bound":"inclusive","row_selection":"all and only rows with start<=t_epoch<=start+duration","ordering":"source row order does not affect arithmetic mean"},
       "aggregation":"require at least one aligned row and require every aligned solar_elev value finite, then arithmetic mean all aligned rows; day_fraction and every other column excluded; filtering nonfinite rows is forbidden",
       "missing_policy":"fail arm before fit on missing/duplicate mapping or file, hash mismatch, empty window, nonfinite aligned value, or nonfinite/near-constant train normalizer; no imputation",
       "normalization":"fit scalar mean and population std (ddof=0) over train segments only; fail if nonfinite or std<1e-8; reuse unchanged on val/eval and all neural arms"
@@ -46,20 +58,20 @@
       "time_is_input":false,"dt_scale_seconds":60.0,"drift_clip":"elementwise clamp network drift to [-10.0,10.0] before NLL and rollout","dtype":"float64"
     },
     "training": {
-      "i1":{"estimator":"EM","max_iter":50,"stopping":"relative train NLL improvement <1e-5, otherwise max_iter; no validation tuning","tie_break":"not applicable","forecast_samples_per_segment":1000},
-      "neural":{"objective":"one-step Gaussian NLL on normalized [X,V]: mean=z+(dt/60)b_clipped(z,e), covariance=(dt/60)diag(exp(2ell_X),exp(2ell_V))","optimizer":"torch.optim.Adam","adam":{"lr":0.001,"betas":[0.9,0.999],"eps":1e-8,"weight_decay":0.0,"amsgrad":false,"maximize":false,"foreach":false,"fused":false},"batch_size":256,"shuffle":true,"drop_last":false,"gradient_clipping":"none","max_epochs":300,"stopping":"validation NLL patience=30 completed epochs and absolute min_delta=1e-5","checkpoint":"minimum validation NLL; exact tie goes to earliest epoch","forecast_samples_per_segment":1000}
+      "i1":{"estimator":{"name":"expectation_maximization","objective":"raw_state_train_negative_log_likelihood"},"maximum_iterations":50,"stopping":{"metric":"relative_train_nll_improvement","comparison":"less_than","tolerance":1e-5,"check_after_each_completed_iteration":true,"otherwise":"stop_at_maximum_iterations"},"validation_hyperparameter_search":false,"checkpoint":{"selection":"final_accepted_iteration","tie_break":"not_applicable"},"forecast_samples_per_segment":1000},
+      "neural":{"objective":{"name":"one_step_gaussian_transition_nll","state":"normalized_[X,V]","mean":"z+(dt/60)*b_clipped(z,e)","covariance":"(dt/60)*diag(exp(2ell_X),exp(2ell_V))"},"optimizer":{"name":"torch.optim.Adam","parameters":{"lr":0.001,"betas":[0.9,0.999],"eps":1e-8,"weight_decay":0.0,"amsgrad":false,"maximize":false,"foreach":false,"fused":false}},"batching":{"batch_size":256,"shuffle":true,"drop_last":false},"gradient_clipping":"none","maximum_epochs":300,"stopping":{"metric":"validation_nll","mode":"min","patience_completed_epochs":30,"min_delta_absolute":1e-5},"checkpoint":{"selection":"minimum_validation_nll","exact_tie_break":"earliest_epoch"},"forecast_samples_per_segment":1000}
     },
     "rollout": {
       "I1":"fit and exact Gaussian rollout in raw r=[X_raw,V_raw] where dX_raw=V_raw dt; after each event-grid interval transform r to z=S^-1(r-m) for all evaluations; never propagate z through the raw kernel",
       "neural":"Euler-Maruyama in normalized [X,V], left endpoint coefficients, h=min(1.0 second, remaining interval), z_next=z+(h/60)b_clipped+sqrt(h/60)B epsilon, no adaptive stepping",
-      "time_grid":"t_0=0; t_k=min(k*1.0 seconds,T), including t=0 and exact endpoint T","samples_per_segment":1000,"dtype":"float64"
+      "time_grid":{"start_seconds":0.0,"regular_step_seconds":1.0,"construction":"t_k=min(k*regular_step_seconds,T)","include_start":true,"include_exact_endpoint":true,"duplicate_endpoint_policy":"store endpoint once"},"samples_per_segment":1000,"dtype":"float64"
     },
     "evaluation": {
       "energy_half":{"state":"complete normalized state [X,V] at endpoint","finite_sample_estimator":"U-statistic: M^-1 sum_m ||z_m-y||_2 - [2M(M-1)]^-1 sum_{m!=n} ||z_m-z_n||_2","M":1000,"failure":"M<2 or any nonfinite state is metric failure"},
       "hdr90":{"state":"complete normalized endpoint state [X,V]","density":"2D Gaussian KDE over M=1000 samples; sample covariance denominator M-1; Scott f=M^(-1/6); H=f^2*S+1e-9*I","threshold":"sort M leave-none-out KDE densities ascending; q=ceil(0.10*M)=100; threshold=sorted[q-1]","membership":"closed rule density_H(y)>=threshold; with unique forecast densities this contains 901/1000 and ties can only increase membership; fail if H or density nonfinite/non-positive","report":"finite-sample set has at least 90.1% forecast-sample mass, never described as exactly 90%; report eval-truth coverage and abs(coverage-0.90)"},
-      "event":{"event_id":"hit_X_origin_interval_v1","coordinate":"state[0] = normalized_position_X only","domain_D":[-8.0,8.0],"region_A":[[-0.5,0.5]],"time_grid":"common_protocol.rollout.time_grid","hit_rule":"E true iff closed-set X(t_k) in A at any registered point including t=0,T; never read velocity","full_support_bin_edges":["-inf",-8.0,-4.0,-2.0,-1.0,-0.5,0.0,0.5,1.0,2.0,4.0,8.0,"inf"],"histogram_rule":"terminal state[0]=X only; searchsorted(edges,X,side='right')-1; X=8 belongs [8,+inf)"},
+      "event":{"event_id":"hit_X_origin_interval_v1","coordinate":"state[0] = normalized_position_X only","domain_D":[-8.0,8.0],"region_A":[[-0.5,0.5]],"time_grid_ref":"common_protocol.rollout.time_grid","hit_rule":{"quantifier":"exists","grid_points":"all registered points including start and exact endpoint","membership":"closed_interval","coordinate_index":0,"velocity_read":false},"full_support_bin_edges":["-inf",-8.0,-4.0,-2.0,-1.0,-0.5,0.0,0.5,1.0,2.0,4.0,8.0,"inf"],"histogram_rule":"terminal state[0]=X only; searchsorted(edges,X,side='right')-1; X=8 belongs [8,+inf)"},
       "bridge_dual":{"state_layout":"common_protocol.state_layout","neural_correction":"a_z @ grad_z(log_h) in normalized order state[0]=X then state[1]=V","I1_raw_correction":"with z=S^-1(r-m), grad_r(log_h)=S^-T grad_z(log_h); apply raw a_r S^-T grad_z(log_h), equivalently normalized correction S^-1 a_r S^-T grad_z(log_h)","I1_event_transform":"evaluate normalized A,D and bins only after z=S^-1(r-m); equivalently A_raw=m_X+s_X*A and D_raw=m_X+s_X*D with s_X>0, closed boundaries preserved","event_ref":"common_protocol.evaluation.event","paths":"same 1000 paths for existence/exclusion","exclusion":"boolean complement not E per path","scalar_identity":"abs(pi_exist+surv_excl-1)<=1e-12","reconstruction":"normalized terminal-X raw full-support bin counts including underflow/overflow; sum_j abs(p_recon_j-p_prior_j)<=1e-12","strata":"hit and non-hit counts positive; else undefined_stratum and never pass","fp_mc_l1":"analytic-prior versus Monte-Carlo error separately without 1e-12 tolerance"},
-      "delta_probe":{"coordinate_index":0,"displacement":"DeltaX_i=state_i[T,0]-state_i[0,0] on normalized train trajectories; never read state[1]","sigma_hist":"1.4826*median_i(abs(DeltaX_i-median_j(DeltaX_j))); compute once for matrix","delta":"0.3*sigma_hist","directions":["base","dilation","erosion"],"base":"A from common_protocol.evaluation.event.region_A","dilation":"merge closed [l-delta,r+delta], intersect D","erosion":"closed [l+delta,r-delta], delete empty components","failure":"nonfinite/zero sigma_hist or empty erosion is failure/NA; never replace delta"},
+      "delta_probe":{"coordinate_index":0,"displacement":"DeltaX_i=state_i[T,0]-state_i[0,0] on normalized train trajectories; never read state[1]","sigma_hist":"1.4826*median_i(abs(DeltaX_i-median_j(DeltaX_j))); compute once for matrix","delta":"0.3*sigma_hist","directions":["base","dilation","erosion"],"base":"A from common_protocol.evaluation.event.region_A","dilation":"merge closed [l-delta,r+delta], intersect D","erosion":"closed [l+delta,r-delta], delete empty components","failure":{"nonfinite_sigma_hist":"unavailable","zero_sigma_hist":"unavailable","empty_erosion":"unavailable","replacement_delta_allowed":false,"post_failure_reselection_allowed":false,"result_literal":"NA"}},
       "inference":{"contrast_metric_ids":["energy_half","hdr90_abs_calibration_error"],"metric_definitions":{"energy_half":"mean per-cell Energy U-statistic; lower is better","hdr90_abs_calibration_error":"for each bootstrap arm compute abs(mean HDR membership over crossed cells - 0.90); lower is better"},"unit":"crossed seed and eval segment_id","bootstrap":"B=2000; replicate b samples one length-5 seed index vector with replacement and one length-N_eval ordered segment index vector with replacement, then uses their Cartesian product with multiplicity; the same two vectors are shared by all 8 arms, both metrics and all 7 contrasts; seed and segment are crossed, never nested","family_shared_draws":"within replicate b every contrast in I1-capacity, neural-capacity and structure uses the same matrix-wide index vectors before max_c","effect":"theta=right metric minus left metric","pointwise_ci":"percentile [Q_0.025(theta_b),Q_0.975(theta_b)] over B=2000 using Hyndman-Fan type 7 / numpy method='linear': h=(B-1)p, interpolate between zero-based floor(h) and ceil(h)","raw_p":"approximate centered-bootstrap two-sided Monte-Carlo p=(1+#_b abs(theta_b-theta_hat)>=abs(theta_hat))/(B+1); not an exact permutation/randomization p-value","holm":"separate family per (metric_id,contrast family); family sizes exactly I1-capacity=3, neural-capacity=3, structure=1; sort raw p ascending with contrast_id lexical tie-break; adjusted rank r is cumulative max min(1,(m-r+1)*p_r)","simultaneous_ci":"within each (metric_id,contrast family), q=Q_0.95(max_c abs(theta_b,c-theta_hat_c)) using type-7 linear interpolation; interval theta_hat_c+[-q,+q]; family sizes 3,3,1","complete_cube_policy":"for a metric require every one of 8 arms x 5 seeds x N_eval segment_ids; if any cell is missing/failed/nonfinite, all 7 contrast rows for that metric are status=unavailable and every estimate/CI/p/Holm field literal NA; no complete-case deletion or imputation","alpha":0.05}
     },
     "result_schemas": {

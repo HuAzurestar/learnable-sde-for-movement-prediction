@@ -1,48 +1,40 @@
-# NEX-381-v5: capacity and structure preregistration
+# NEX-381-v6: exact-validator preregistration
 
-Status: **draft; training gate closed pending v5 mathematical and five-dimension review**. v5 is a versioned child of frozen v4 commit `1c8bc1288c0cd5845dde8aad5b96ca4ffc0bed84`; it does not rewrite v1–v4. `experiment_matrix.json` is the executable source of truth.
+Status: **draft; training gate closed pending five-dimension differential review**. v6 is a validator-only successor of frozen, mathematically accepted v5 commit `1081a4ebb0a1f807b0b62799503bb98e1642763e`. It does not alter v5's model, event, metric, or inference semantics and does not rewrite v1–v5.
 
-## Arms and claim boundary
+## Inherited mathematical contract
 
-The eight arms remain I1 `K={1,3,10,30}` with stored counts `{5,15,50,150}` (effective DoF `{4,14,49,149}`), and neural `H={8,32,64,128}` with counts `{124,1252,4548,17284}`. The structure contrast remains I1-K10 versus NN-H008: **2.48×参数量、非参数匹配的 fitted-pipeline 比较**, never equal-parameter, capacity-matched, or a pure architecture effect.
+All v5 mathematical conclusions remain unchanged: I1 fits and exact-rolls raw `[X,V]` before per-grid affine conversion to common normalized state; bridge/event coordinates obey the frozen chain rule; solar alignment is determined by two hashed one-to-one manifests; seed and eval segment are crossed factors; Energy is the M=1000 U-statistic; HDR uses the accepted 2D KDE and “at least 90.1% forecast-sample mass” wording; event/A/D/bins and delta read normalized X only; inference has two fixed metrics, type-7 intervals, fixed 3/3/1 multiplicity families, complete-cube failure propagation, and exactly 14 contrast rows.
 
-## Raw I1 dynamics and common evaluation coordinates
+## v6 structured execution fields
 
-`to_phase_space_1d(segment, coord=0)` constructs raw `r=[X_raw,V_raw]`; `y` is never read. Train statistics are `m=(m_X,m_V)` and positive diagonal `S=diag(s_X,s_V)`, and the common evaluation state is `z=S^-1(r-m)=[X_n,V_n]`.
+Fields that previously mixed structure with prose are now typed JSON objects:
 
-I1 is fit and propagated only in raw `r`, where `dX_raw=V_raw dt`; normalized `z` is never passed to `SegmentConstantSDE`. After every registered evaluation-grid transition, each raw I1 path point is transformed to `z` before Energy, HDR, event, histogram, or delta calculations. Neural arms remain fit and propagated in normalized `z`. This preserves the I1 exact kernel and the common normalized evaluation scale without pretending independent z-scores preserve `dX=Vdt`. The affine statistics are fixed buffers, so I1 still has `5K` trainable elements.
+- splits state the single source file, keys, allowed roles, `file_id` leakage unit, and mandatory segment-overlap check;
+- RNG states paired scopes, `SeedSequence.spawn(3)`, stream order, deterministic dtype/algorithm, and that diagnostic reruns cannot replace a registered run;
+- I1 training states estimator/objective, maximum 50 iterations, the exact relative-NLL stopping comparison and tolerance, checkpoint rule, no validation search, and 1000 forecast samples;
+- neural training states the exact NLL components, complete Adam parameters, batching, no gradient clipping, maximum epochs, validation stopping/checkpoint rules, and 1000 forecast samples;
+- solar alignment states the timestamp column/conversion, hashed start source, duration expression, inclusive bounds, all-and-only row selection, and order invariance;
+- rollout/event state a one-second grid object and event reference/hit-rule object;
+- delta failure states every failure outcome, literal `NA`, and two explicit prohibitions against delta replacement/reselection.
 
-For I1 bridge conditioning, if `h` is expressed on normalized event coordinates, `grad_r log h=S^-T grad_z log h`. The raw correction is `a_r S^-T grad_z log h`; after transformation it is `S^-1 a_r S^-T grad_z log h`. Event `A`, domain `D`, and bins are evaluated after transforming to normalized X. The equivalent raw intervals are `m_X+s_X A` and `m_X+s_X D`; `s_X>0` preserves closed boundaries. Neural bridge correction remains `a_z grad_z log h` in X-then-V order.
+## Exact validation
 
-## Deterministic solar alignment
+`count_parameters.py` compares each object above for full equality, rather than checking selected tokens. It also retains all v5 field-specific checks and verifies a hard-coded SHA-256 of the canonical parsed `experiment_matrix.json` (`sort_keys=True`, UTF-8, compact separators). The digest is a backstop: any matrix field not covered by a named check still fails.
 
-The data manifest hashes two UTF-8 JSONL files:
+Negative tests independently mutate all 14 reviewer counterexamples:
 
-- `segment_start_map`: exactly `(segment_id,file_id,absolute_start_epoch)`, unique by segment ID, complete for every used segment, with matching trajectory file ID and finite integer Unix seconds.
-- `condition_file_manifest`: exactly `(file_id,relative_path,sha256)`, unique by file ID and complete for every used file. Paths resolve under `cond_root`; hashes must match. Runtime glob selection is forbidden, and zero or duplicate candidates fail.
+1. leakage unit;
+2. overlap check;
+3–5. I1 maximum iterations, stopping, forecast samples;
+6–9. neural objective, stopping, checkpoint, forecast samples;
+10. solar row selection;
+11–12. RNG stream reuse and diagnostic replacement;
+13. event grid reference;
+14. delta post-failure reselection.
 
-The inclusive window is `[absolute_start_epoch, absolute_start_epoch + segment duration]` after condition timestamps are converted to integer Unix seconds. It must contain at least one row, and **every** aligned `solar_elev` value must be finite; filtering nonfinite rows is forbidden. The feature is the arithmetic mean over all aligned rows. `day_fraction` and other columns are excluded. Its train-only population z-score is reused unchanged.
+Every mutation must make `validate_matrix()` nonempty with a category-specific error in addition to the full-matrix digest mismatch. A separate unlisted mutation proves the digest backstop.
 
-## Model, rollout, metrics, and event
+## Delivery gate
 
-Neural input remains `[X_n,V_n,solar_n]`, with two Tanh layers, Xavier-uniform tanh-gain weights, zero biases, `dt_scale=60s`, elementwise drift clipping at 10, frozen Adam options, and non-adaptive left-endpoint one-second Euler–Maruyama. I1 uses raw exact Gaussian transitions on the same grid.
-
-Energy remains the accepted complete normalized `[X,V]`, M=1000 U-statistic. HDR90 remains the accepted 2D Gaussian KDE with Scott covariance and closed density threshold. With `q=ceil(0.10*1000)=100`, `>=` contains 901/1000 forecast samples when densities are unique and at least that many with ties: the set has **at least 90.1% forecast-sample mass**, not exactly 90%.
-
-The accepted event remains `hit_X_origin_interval_v1`: normalized `A=[-0.5,0.5]`, `D=[-8,8]`, closed membership, start/one-second/end grid, and full-support terminal-X edges `[-inf,-8,-4,-2,-1,-0.5,0,0.5,1,2,4,8,+inf]`. Hit, histogram, and `DeltaX=X_T-X_0` read normalized coordinate zero only. Base/dilation/erosion remain distinct arm rows. The ambiguous `delta_probe_value` column is removed; direction-specific event/dual outputs are the probe results.
-
-## Crossed bootstrap and closed inference records
-
-Seeds and eval segments are crossed factors. Each of B=2000 replicates draws one length-5 seed index vector and one length-`N_eval` segment index vector with replacement, then evaluates their Cartesian product with multiplicity. The same two vectors are shared across all eight arms, both registered metrics, and all seven contrasts. All contrasts in a family therefore share replicate `b` before the max-C calculation.
-
-Only two inferential contrast metrics are registered: `energy_half` and `hdr90_abs_calibration_error`. The latter recomputes `abs(mean(HDR membership)-0.90)` inside each bootstrap arm. Effects are right minus left. Pointwise CIs are percentile 0.025/0.975 intervals with Hyndman–Fan type-7 linear interpolation. Raw p is the plus-one centered-bootstrap two-sided Monte-Carlo approximation, not an exact permutation/randomization p-value.
-
-Multiplicity families are separate by `(metric_id, contrast family)`: I1-capacity has exactly 3 contrasts, neural-capacity 3, and structure 1. Holm uses lexical `contrast_id` to break p-value ties. Simultaneous intervals use the type-7 0.95 quantile of `max_c |theta_b,c-theta_hat_c|` within those same fixed families.
-
-For either metric, the complete `8 arms × 5 seeds × N_eval segments` cube is mandatory. If any cell is missing, failed, or nonfinite, all seven contrast rows for that metric become `unavailable`, with estimate/CI/p/Holm fields literal `NA`; complete-case deletion and imputation are forbidden.
-
-The arm primary key is `(preregistration_id,execution_git_sha,dataset_id,global_splits_sha256,arm_id,seed,delta_probe_direction)`. The contrast primary key adds the same execution/data/split identity to `(contrast_id,metric_id)`. Exactly `7×2=14` contrast rows—the Cartesian product of registered contrasts and metrics—are required; no free metrics or extra/missing rows are allowed.
-
-## Gate
-
-The validator and negative tests lock every v5 clause above plus v4's accepted contracts. This document does not authorize training. Mathematical review must accept v5, the five-dimension reviewer must then accept S1/S2, the real PR link must be confirmed, and only then may CRO review.
+v6 changes validation only, so the accepted v5 mathematical review is inherited. Five-dimension differential review must close S1, and `multica issue pull-requests NEX-381` must show the real PR before CRO. Until both gates pass, NEX-381 stays `in_progress` and training remains forbidden.
