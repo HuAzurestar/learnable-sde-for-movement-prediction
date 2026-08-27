@@ -1,8 +1,8 @@
 {
-  "schema_version": "6.0",
-  "preregistration_id": "NEX-381-v6",
-  "approval_state": "draft_pending_v6_five_dimension_diff_review",
-  "supersedes": {"preregistration_id":"NEX-381-v5","git_sha":"1081a4ebb0a1f807b0b62799503bb98e1642763e","reason":"versioned validator-only replacement; v5 mathematical semantics are unchanged"},
+  "schema_version": "7.0",
+  "preregistration_id": "NEX-381-v7",
+  "approval_state": "draft_pending_v7_contrast_template_diff_review",
+  "supersedes": {"preregistration_id":"NEX-381-v6","git_sha":"646e62ec27d586a5793a0a4759b595d4ce758d3b","reason":"versioned validator-only replacement; v6 matrix and v5 mathematical semantics are unchanged"},
   "code_baseline": {"repository":"HuAzurestar/learnable-sde-for-movement-prediction","reviewed_git_sha":"740a563d923971a8d7c161733f829f09d2ff5c6e","execution_git_sha":"required_at_run_time"},
   "common_protocol": {
     "data_lock": {

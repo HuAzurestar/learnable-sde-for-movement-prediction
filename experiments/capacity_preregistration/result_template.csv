@@ -1,4 +1,4 @@
 preregistration_id,execution_git_sha,dataset_id,global_splits_sha256,arm_id,model_family,state_layout,state_adapter_id,environment_feature_id,registered_parameter_count,registered_effective_degrees_of_freedom,runtime_trainable_parameter_count,seed,run_status,failure_stage,failure_reason,converged,iterations_or_epochs,selected_checkpoint,train_objective_final,val_objective_best,energy_half_mean,hdr90_coverage,hdr90_abs_error,event_id,domain_D,region_A,full_support_bin_edges,dual_pi_plus_surv_abs_error,dual_reconstruction_l1,dual_hit_count,dual_non_hit_count,dual_undefined_stratum,dual_algebra_pass,fp_mc_l1,sigma_hist,delta,delta_probe_direction,delta_probe_status,wall_time_seconds,peak_memory_mb,notes
-NEX-381-v6,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,base,,,,
-NEX-381-v6,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,dilation,,,,
-NEX-381-v6,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,erosion,,,,
+NEX-381-v7,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,base,,,,
+NEX-381-v7,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,dilation,,,,
+NEX-381-v7,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,erosion,,,,

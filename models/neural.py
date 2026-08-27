@@ -1,6 +1,6 @@
 """C-7 neural SDE implementation placeholder.
 
-NEX-381-v6 does not permit this skeleton to run.  Its future implementation is
+NEX-381-v7 does not permit this skeleton to run.  Its future implementation is
 frozen to normalized state ``[X,V]`` plus one normalized, manifest-aligned
 window mean ``solar_elev`` input (never ``day_fraction``), two Tanh hidden layers, diagonal
 ``(ell_X, ell_V)`` diffusion, ``dt_scale=60 seconds`` and elementwise drift

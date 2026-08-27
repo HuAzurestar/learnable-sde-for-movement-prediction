@@ -1,4 +1,4 @@
-"""Count capacity and exact-validate the frozen NEX-381-v6 matrix."""
+"""Count capacity and exact-validate the frozen NEX-381-v7 contracts."""
 
 from __future__ import annotations
 
@@ -14,7 +14,11 @@ I1_PARAMETER_GROUPS = ("Gamma", "a", "c", "g", "prior_logits")
 FROZEN_STATE_LAYOUT = ("normalized_position_X", "normalized_velocity_V")
 FROZEN_STATE_LAYOUT_REF = "common_protocol.state_layout"
 FROZEN_SEEDS = (20260814, 20260815, 20260816, 20260817, 20260818)
-FROZEN_MATRIX_SHA256 = "07a7a47170e4756bd34dc5aa2c9928be74a50f7df7e2c19e3b59021198a626d4"
+FROZEN_MATRIX_SHA256 = "e96bb1db4ca5b0414900e229f4fb79e8f3d507ef792aafae17471d3fcff2b135"
+FROZEN_CONTRAST_TEMPLATE_SHA256 = "05db1811480bd629f93137630bcdcc7d7df3f542003602f0ae0aba4bd18044f5"
+FROZEN_CONTRAST_EFFECT_DEFINITION = "right_minus_left"
+FROZEN_REJECT_ALPHA = "0.05"
+FROZEN_BOOTSTRAP_B = "2000"
 FROZEN_SPLITS = {
     "source": "global_splits.json",
     "train": {"key": "train", "roles": ["fit_model", "fit_state_normalizer", "fit_environment_normalizer"]},
@@ -233,7 +237,7 @@ def _count_from_arm(arm: Mapping[str, Any]) -> int:
 
 def _expect(errors: list[str], actual: Any, expected: Any, label: str) -> None:
     if actual != expected:
-        errors.append(f"{label} must equal frozen v6 value {expected!r}; got {actual!r}")
+        errors.append(f"{label} must equal frozen v7 value {expected!r}; got {actual!r}")
 
 
 def canonical_matrix_sha256(document: Mapping[str, Any]) -> str:
@@ -245,16 +249,25 @@ def canonical_matrix_sha256(document: Mapping[str, Any]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def canonical_csv_sha256(rows: Sequence[Sequence[str]]) -> str:
+    """Hash parsed CSV cells so newline style and quoting cannot affect the lock."""
+
+    payload = json.dumps(
+        rows, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def validate_matrix(document: Mapping[str, Any]) -> list[str]:
     """Validate every field needed to resolve any arm without investigator choice."""
 
     errors: list[str] = []
-    _expect(errors, document.get("schema_version"), "6.0", "schema_version")
-    _expect(errors, document.get("preregistration_id"), "NEX-381-v6", "preregistration_id")
-    _expect(errors, document.get("approval_state"), "draft_pending_v6_five_dimension_diff_review", "approval_state")
+    _expect(errors, document.get("schema_version"), "7.0", "schema_version")
+    _expect(errors, document.get("preregistration_id"), "NEX-381-v7", "preregistration_id")
+    _expect(errors, document.get("approval_state"), "draft_pending_v7_contrast_template_diff_review", "approval_state")
     supersedes = document.get("supersedes", {})
-    _expect(errors, supersedes.get("preregistration_id"), "NEX-381-v5", "supersedes.preregistration_id")
-    _expect(errors, supersedes.get("git_sha"), "1081a4ebb0a1f807b0b62799503bb98e1642763e", "supersedes.git_sha")
+    _expect(errors, supersedes.get("preregistration_id"), "NEX-381-v6", "supersedes.preregistration_id")
+    _expect(errors, supersedes.get("git_sha"), "646e62ec27d586a5793a0a4759b595d4ce758d3b", "supersedes.git_sha")
 
     common = document.get("common_protocol", {})
     lock = common.get("data_lock", {})
@@ -449,7 +462,7 @@ def validate_matrix(document: Mapping[str, Any]) -> list[str]:
 
 
 def validate_result_templates(document: Mapping[str, Any], root: Path) -> list[str]:
-    """Lock CSV headers, delta records and the exact 7x2 contrast row set."""
+    """Lock CSV headers, delta records and every fixed contrast-template cell."""
 
     errors: list[str] = []
     schemas = document.get("common_protocol", {}).get("result_schemas", {})
@@ -469,8 +482,8 @@ def validate_result_templates(document: Mapping[str, Any], root: Path) -> list[s
             continue
         if any(len(row) != len(rows[0]) for row in rows[1:]):
             errors.append(f"{schema_name}: template row/header column count mismatch")
-        if any(row[0] != "NEX-381-v6" for row in rows[1:]):
-            errors.append(f"{schema_name}: template rows must identify NEX-381-v6")
+        if any(row[0] != "NEX-381-v7" for row in rows[1:]):
+            errors.append(f"{schema_name}: template rows must identify NEX-381-v7")
         if schema_name == "arm_results":
             if "delta_probe_value" in rows[0]:
                 errors.append("arm_results: delta_probe_value column is forbidden")
@@ -481,8 +494,14 @@ def validate_result_templates(document: Mapping[str, Any], root: Path) -> list[s
         else:
             contrast_index = rows[0].index("contrast_id")
             metric_index = rows[0].index("metric_id")
+            left_index = rows[0].index("left_arm_id")
+            right_index = rows[0].index("right_arm_id")
+            effect_index = rows[0].index("effect_definition")
+            seeds_index = rows[0].index("n_paired_seeds")
             family_index = rows[0].index("holm_family")
             size_index = rows[0].index("holm_family_size")
+            alpha_index = rows[0].index("reject_alpha")
+            bootstrap_index = rows[0].index("bootstrap_B")
             contrast_ids = [item[0] for item in EXPECTED_CONTRASTS]
             metric_ids = ["energy_half", "hdr90_abs_calibration_error"]
             expected_records = [(contrast_id, metric_id) for metric_id in metric_ids for contrast_id in contrast_ids]
@@ -490,14 +509,31 @@ def validate_result_templates(document: Mapping[str, Any], root: Path) -> list[s
             if actual_records != expected_records:
                 errors.append("contrast_results: rows must equal the ordered 7x2 contrast-metric Cartesian product")
             family_sizes = {"I1-capacity": "3", "neural-capacity": "3", "structure": "1"}
-            contrast_family = {item[0]: item[3] for item in EXPECTED_CONTRASTS}
-            for row in rows[1:]:
-                family = contrast_family.get(row[contrast_index])
-                metric_id = row[metric_index]
+            expected_rows = [
+                (contrast_id, left, right, family, metric_id)
+                for metric_id in metric_ids
+                for contrast_id, left, right, family in EXPECTED_CONTRASTS
+            ]
+            for row, expected in zip(rows[1:], expected_rows):
+                contrast_id, left, right, family, metric_id = expected
+                if row[left_index] != left:
+                    errors.append(f"contrast_results: left_arm_id must equal {left!r} for {contrast_id}")
+                if row[right_index] != right:
+                    errors.append(f"contrast_results: right_arm_id must equal {right!r} for {contrast_id}")
+                if row[effect_index] != FROZEN_CONTRAST_EFFECT_DEFINITION:
+                    errors.append("contrast_results: effect_definition must equal 'right_minus_left'")
+                if row[seeds_index] != str(len(FROZEN_SEEDS)):
+                    errors.append("contrast_results: n_paired_seeds must equal 5")
                 if family and row[family_index] != f"{metric_id}:{family}":
                     errors.append("contrast_results: Holm family id does not match metric and contrast family")
                 if family and row[size_index] != family_sizes[family]:
                     errors.append("contrast_results: Holm family size does not match frozen 3/3/1")
+                if row[alpha_index] != FROZEN_REJECT_ALPHA:
+                    errors.append("contrast_results: reject_alpha must equal 0.05")
+                if row[bootstrap_index] != FROZEN_BOOTSTRAP_B:
+                    errors.append("contrast_results: bootstrap_B must equal 2000")
+            if canonical_csv_sha256(rows) != FROZEN_CONTRAST_TEMPLATE_SHA256:
+                errors.append("contrast_results: canonical parsed-CSV sha256 does not match frozen v7 template")
     return errors
 
 

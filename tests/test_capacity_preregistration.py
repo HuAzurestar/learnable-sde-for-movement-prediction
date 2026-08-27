@@ -1,5 +1,7 @@
 import csv
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -22,6 +24,7 @@ from models.segment_constant import SegmentConstantSDE
 
 
 ROOT = Path(__file__).parents[1] / "experiments" / "capacity_preregistration"
+VALIDATOR = ROOT / "count_parameters.py"
 
 
 def load_matrix():
@@ -51,19 +54,19 @@ def test_neural_contract_rejects_unregistered_depth():
         count_neural_parameters((8,))
 
 
-def test_v6_matrix_and_templates_are_executable_contracts():
+def test_v7_matrix_and_templates_are_executable_contracts():
     document = load_matrix()
     assert validate_matrix(document) == []
     assert validate_result_templates(document, ROOT) == []
-    assert document["schema_version"] == "6.0"
-    assert document["preregistration_id"] == "NEX-381-v6"
-    assert document["approval_state"] == "draft_pending_v6_five_dimension_diff_review"
-    assert document["supersedes"]["preregistration_id"] == "NEX-381-v5"
-    assert document["supersedes"]["git_sha"] == "1081a4ebb0a1f807b0b62799503bb98e1642763e"
+    assert document["schema_version"] == "7.0"
+    assert document["preregistration_id"] == "NEX-381-v7"
+    assert document["approval_state"] == "draft_pending_v7_contrast_template_diff_review"
+    assert document["supersedes"]["preregistration_id"] == "NEX-381-v6"
+    assert document["supersedes"]["git_sha"] == "646e62ec27d586a5793a0a4759b595d4ce758d3b"
     assert TimeVaryingNeuralSDE().dt_scale == 60.0
 
 
-def test_v6_inherits_i1_raw_kernel_and_affine_evaluation_contract():
+def test_v7_inherits_i1_raw_kernel_and_affine_evaluation_contract():
     common = load_matrix()["common_protocol"]
     policy = common["state_adapter"]["model_coordinate_policy"]
     assert "only in raw" in policy["I1"]
@@ -76,7 +79,7 @@ def test_v6_inherits_i1_raw_kernel_and_affine_evaluation_contract():
     assert "A_raw=m_X+s_X*A" in dual["I1_event_transform"]
 
 
-def test_v6_inherits_hashed_solar_time_and_file_maps():
+def test_v7_inherits_hashed_solar_time_and_file_maps():
     common = load_matrix()["common_protocol"]
     assert common["data_lock"]["required_manifest_fields"] == list(FROZEN_MANIFEST_FIELDS)
     environment = common["environment_feature"]
@@ -88,7 +91,7 @@ def test_v6_inherits_hashed_solar_time_and_file_maps():
     assert "filtering nonfinite rows is forbidden" in environment["aggregation"]
 
 
-def test_v6_inherits_neural_contract_and_accepted_metrics():
+def test_v7_inherits_neural_contract_and_accepted_metrics():
     common = load_matrix()["common_protocol"]
     assert common["paired_seeds"] == list(FROZEN_SEEDS)
     assert common["state_layout"] == list(FROZEN_STATE_LAYOUT)
@@ -107,7 +110,7 @@ def test_v6_inherits_neural_contract_and_accepted_metrics():
     assert "at least 90.1% forecast-sample mass" in evaluation["hdr90"]["report"]
 
 
-def test_v6_inherits_crossed_bootstrap_and_failure_propagation():
+def test_v7_inherits_crossed_bootstrap_and_failure_propagation():
     inference = load_matrix()["common_protocol"]["evaluation"]["inference"]
     assert inference["contrast_metric_ids"] == [
         "energy_half", "hdr90_abs_calibration_error"
@@ -123,7 +126,7 @@ def test_v6_inherits_crossed_bootstrap_and_failure_propagation():
     assert "no complete-case deletion" in inference["complete_cube_policy"]
 
 
-def test_v6_result_contract_has_exact_14_rows_and_identity_keys():
+def test_v7_result_contract_has_exact_14_rows_and_identity_keys():
     document = load_matrix()
     schemas = document["common_protocol"]["result_schemas"]
     assert schemas["arm_results"]["primary_key"] == [
@@ -149,7 +152,7 @@ def test_v6_result_contract_has_exact_14_rows_and_identity_keys():
     }
 
 
-def test_v6_all_arms_and_contrasts_remain_frozen():
+def test_v7_all_arms_and_contrasts_remain_frozen():
     document = load_matrix()
     assert len(document["arms"]) == 8
     assert len(document["predeclared_contrasts"]) == 7
@@ -181,7 +184,7 @@ def test_v6_all_arms_and_contrasts_remain_frozen():
         ("delta_reselection", lambda d: d["common_protocol"]["evaluation"]["delta_probe"]["failure"].update(post_failure_reselection_allowed=True), "delta failure policy"),
     ],
 )
-def test_v6_rejects_each_reviewer_counterexample(case_id, mutation, expected_error):
+def test_v7_rejects_each_reviewer_counterexample(case_id, mutation, expected_error):
     document = load_matrix()
     mutation(document)
     errors = validate_matrix(document)
@@ -190,7 +193,7 @@ def test_v6_rejects_each_reviewer_counterexample(case_id, mutation, expected_err
     assert any("canonical full-matrix sha256" in error for error in errors), case_id
 
 
-def test_v6_canonical_digest_rejects_an_unlisted_field_mutation():
+def test_v7_canonical_digest_rejects_an_unlisted_field_mutation():
     document = load_matrix()
     document["code_baseline"]["execution_git_sha"] = "silently_drifted"
     errors = validate_matrix(document)
@@ -215,13 +218,13 @@ def test_v6_canonical_digest_rejects_an_unlisted_field_mutation():
         (lambda d: d["common_protocol"]["result_schemas"]["contrast_results"].update(required_record_count=7), "required record count"),
     ],
 )
-def test_v6_validator_rejects_inherited_mathematical_contract_drift(mutation, expected_error):
+def test_v7_validator_rejects_inherited_mathematical_contract_drift(mutation, expected_error):
     document = load_matrix()
     mutation(document)
     assert any(expected_error in error for error in validate_matrix(document))
 
 
-def test_v6_validator_rejects_missing_arm_reference_or_contrast_identity():
+def test_v7_validator_rejects_missing_arm_reference_or_contrast_identity():
     missing_ref = load_matrix()
     del missing_ref["arms"][4]["environment_feature"]
     assert any("missing executable keys" in error for error in validate_matrix(missing_ref))
@@ -230,7 +233,7 @@ def test_v6_validator_rejects_missing_arm_reference_or_contrast_identity():
     assert any("predeclared contrast identities" in error for error in validate_matrix(wrong_contrast))
 
 
-def test_v6_result_template_rejects_direction_and_record_set_drift(tmp_path):
+def test_v7_result_template_rejects_direction_and_record_set_drift(tmp_path):
     document = load_matrix()
     arm_source = (ROOT / "result_template.csv").read_text(encoding="utf-8")
     contrast_source = (ROOT / "contrast_result_template.csv").read_text(encoding="utf-8")
@@ -244,3 +247,59 @@ def test_v6_result_template_rejects_direction_and_record_set_drift(tmp_path):
     errors = validate_result_templates(document, tmp_path)
     assert any("base/dilation/erosion" in error for error in errors)
     assert any("7x2" in error for error in errors)
+
+
+def _write_contrast_template_mutation(tmp_path, field, replacement):
+    (tmp_path / "result_template.csv").write_text(
+        (ROOT / "result_template.csv").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    with (ROOT / "contrast_result_template.csv").open(
+        newline="", encoding="utf-8"
+    ) as source:
+        reader = csv.DictReader(source)
+        rows = list(reader)
+        fieldnames = reader.fieldnames
+    rows[0][field] = replacement
+    with (tmp_path / "contrast_result_template.csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as target:
+        writer = csv.DictWriter(target, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+@pytest.mark.parametrize(
+    "field, replacement, expected_error",
+    [
+        ("left_arm_id", "CAP-I1-K30", "left_arm_id"),
+        ("right_arm_id", "CAP-I1-K01", "right_arm_id"),
+        ("effect_definition", "left_minus_right", "effect_definition"),
+        ("n_paired_seeds", "1", "n_paired_seeds"),
+        ("reject_alpha", "0.90", "reject_alpha"),
+        ("bootstrap_B", "17", "bootstrap_B"),
+    ],
+)
+def test_v7_cli_rejects_each_contrast_fixed_field_drift(
+    tmp_path, field, replacement, expected_error
+):
+    _write_contrast_template_mutation(tmp_path, field, replacement)
+    completed = subprocess.run(
+        [sys.executable, str(VALIDATOR), "--templates-root", str(tmp_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 1, (field, completed.stdout, completed.stderr)
+    errors = json.loads(completed.stdout)["matrix_errors"]
+    assert any(expected_error in error for error in errors), (field, errors)
+    assert any("canonical parsed-CSV sha256" in error for error in errors), (
+        field,
+        errors,
+    )
+
+
+def test_v7_contrast_template_digest_rejects_an_unlisted_cell_mutation(tmp_path):
+    _write_contrast_template_mutation(tmp_path, "notes", "silent drift")
+    errors = validate_result_templates(load_matrix(), tmp_path)
+    assert any("canonical parsed-CSV sha256" in error for error in errors)
