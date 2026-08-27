@@ -15,14 +15,21 @@ from typing import Any, Mapping, Sequence
 
 
 I1_PARAMETER_GROUPS = ("Gamma", "a", "c", "g", "prior_logits")
+FROZEN_STATE_LAYOUT = ("normalized_position_X", "normalized_velocity_V")
+FROZEN_STATE_LAYOUT_REF = "common_protocol.state_layout"
 NEURAL_DIFFUSION_CONTRACT = {
-    "parameter": "ell in R^2",
-    "B": "diag(exp(ell))",
-    "a": "B @ B.T = diag(exp(2*ell))",
+    "parameter": "ell = (ell_X, ell_V) in R^2",
+    "parameter_order": ["ell_X", "ell_V"],
+    "B": "diag(exp(ell_X), exp(ell_V))",
+    "a": "B @ B.T = diag(exp(2*ell_X), exp(2*ell_V))",
+    "noise_coordinates": list(FROZEN_STATE_LAYOUT),
     "state_dependent": False,
     "time_dependent": False,
     "transform_modifiers": None,
-    "bridge_correction": "full a @ grad(log_h) in both state coordinates",
+    "bridge_correction": (
+        "a @ grad(log_h) in state order [X,V]; component 0 acts on X and "
+        "component 1 acts on V"
+    ),
 }
 FROZEN_STRUCTURE_CLAIM = "2.48×参数量、非参数匹配的 fitted-pipeline 比较"
 
@@ -145,8 +152,11 @@ def validate_matrix(document: Mapping[str, Any]) -> list[str]:
     arms = document.get("arms")
     if not isinstance(arms, list) or not arms:
         return ["arms must be a non-empty list"]
-    if document.get("preregistration_id") != "NEX-381-v2":
-        errors.append("preregistration_id must be NEX-381-v2")
+    if document.get("preregistration_id") != "NEX-381-v3":
+        errors.append("preregistration_id must be NEX-381-v3")
+    common_protocol = document.get("common_protocol", {})
+    if common_protocol.get("state_layout") != list(FROZEN_STATE_LAYOUT):
+        errors.append("common state layout must be frozen to [normalized_position_X, normalized_velocity_V]")
 
     for index, arm in enumerate(arms):
         label = arm.get("arm_id", f"index:{index}")
@@ -172,22 +182,36 @@ def validate_matrix(document: Mapping[str, Any]) -> list[str]:
                 errors.append(
                     f"{label}: effective DoF must be {expected_effective} beside stored count {actual}"
                 )
-        elif (
-            arm["model"].get("diffusion_contract")
-            != "common_protocol.neural_diffusion_contract"
-            or document.get("common_protocol", {}).get("neural_diffusion_contract")
-            != NEURAL_DIFFUSION_CONTRACT
-        ):
-            errors.append(f"{label}: neural diffusion contract is not frozen to v2")
+        else:
+            if arm["model"].get("state_layout") != FROZEN_STATE_LAYOUT_REF:
+                errors.append(f"{label}: neural state layout does not explicitly reference common_protocol.state_layout")
+            if (
+                arm["model"].get("diffusion_contract")
+                != "common_protocol.neural_diffusion_contract"
+                or common_protocol.get("neural_diffusion_contract")
+                != NEURAL_DIFFUSION_CONTRACT
+            ):
+                errors.append(f"{label}: neural diffusion contract is not frozen to v3 [X,V] semantics")
         if not arm["seeds"]:
             errors.append(f"{label}: seeds must not be empty")
+    evaluation = common_protocol.get("evaluation", {})
+    bridge_dual = evaluation.get("bridge_dual", {})
+    if bridge_dual.get("state_layout") != FROZEN_STATE_LAYOUT_REF:
+        errors.append("bridge dual check must explicitly reference the frozen state layout")
+    if bridge_dual.get("hit_event_coordinate") != "state[0] = normalized_position_X only":
+        errors.append("bridge hit event must read state[0] = X only")
+    delta_probe = evaluation.get("delta_probe", {})
+    if delta_probe.get("coordinate_index") != 0:
+        errors.append("delta probe coordinate_index must be 0")
+    if delta_probe.get("coordinate") != "state[0] = normalized_position_X":
+        errors.append("delta probe must read normalized position X from state[0]")
     contrasts = document.get("predeclared_contrasts", [])
     if len(contrasts) != 1:
         errors.append("exactly one predeclared structure contrast is required")
     else:
         contrast = contrasts[0]
         if contrast.get("claim_boundary") != FROZEN_STRUCTURE_CLAIM:
-            errors.append("structure contrast claim boundary is not the frozen v2 wording")
+            errors.append("structure contrast claim boundary is not the frozen wording")
         if contrast.get("parameter_ratio_right_over_left") != 2.48:
             errors.append("stored parameter ratio must be exactly 2.48")
         if contrast.get("secondary_ratio_right_over_i1_effective_dof") != 124 / 49:

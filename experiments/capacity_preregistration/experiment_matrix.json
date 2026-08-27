@@ -1,7 +1,12 @@
 {
-  "schema_version": "2.0",
-  "preregistration_id": "NEX-381-v2",
-  "approval_state": "draft_pending_v2_math_and_five_dimension_review",
+  "schema_version": "3.0",
+  "preregistration_id": "NEX-381-v3",
+  "approval_state": "draft_pending_v3_math_review",
+  "supersedes": {
+    "preregistration_id": "NEX-381-v2",
+    "git_sha": "5346377f4451c0c0e3774ba71a2b541a1c555f54",
+    "reason": "freeze the shared [X,V] state semantics without rewriting v2"
+  },
   "code_baseline": {
     "repository": "HuAzurestar/learnable-sde-for-movement-prediction",
     "reviewed_git_sha": "740a563d923971a8d7c161733f829f09d2ff5c6e",
@@ -29,14 +34,17 @@
       "normalization": "fit on train once per data manifest; reuse unchanged on val/eval and every arm"
     },
     "seeds": [20260814],
+    "state_layout": ["normalized_position_X", "normalized_velocity_V"],
     "neural_diffusion_contract": {
-      "parameter": "ell in R^2",
-      "B": "diag(exp(ell))",
-      "a": "B @ B.T = diag(exp(2*ell))",
+      "parameter": "ell = (ell_X, ell_V) in R^2",
+      "parameter_order": ["ell_X", "ell_V"],
+      "B": "diag(exp(ell_X), exp(ell_V))",
+      "a": "B @ B.T = diag(exp(2*ell_X), exp(2*ell_V))",
+      "noise_coordinates": ["normalized_position_X", "normalized_velocity_V"],
       "state_dependent": false,
       "time_dependent": false,
       "transform_modifiers": null,
-      "bridge_correction": "full a @ grad(log_h) in both state coordinates"
+      "bridge_correction": "a @ grad(log_h) in state order [X,V]; component 0 acts on X and component 1 acts on V"
     },
     "evaluation": {
       "forecast_samples_per_segment": 1000,
@@ -45,6 +53,9 @@
       "bootstrap": "paired segment-level block bootstrap, B=2000, resample identical segment_id blocks for every contrast",
       "convergence": "report converged flag, iterations/epochs, final objective, selected checkpoint and all numerical failures",
       "bridge_dual": {
+        "state_layout": "common_protocol.state_layout",
+        "bridge_correction_coordinates": "a @ grad(log_h) acts in order state[0]=X then state[1]=V",
+        "hit_event_coordinate": "state[0] = normalized_position_X only",
         "paths": "same sampled paths for existence and exclusion",
         "event": "one discrete per-path boolean hit event E; exclusion is the boolean complement not E",
         "scalar_identity": "abs(pi_exist + surv_excl - 1) <= 1e-12",
@@ -54,7 +65,9 @@
       },
       "delta_probe": {
         "scope": "one-dimensional position event only; a two-dimensional event requires a new preregistration",
-        "displacement": "DeltaX_i = X_T_i - X_0_i on the train split after frozen position normalization",
+        "coordinate_index": 0,
+        "coordinate": "state[0] = normalized_position_X",
+        "displacement": "DeltaX_i = state_i[T,0] - state_i[0,0] = X_T_i - X_0_i on the train split after frozen position normalization",
         "sigma_hist": "1.4826 * median_i(abs(DeltaX_i - median_j(DeltaX_j))); compute exactly once for the whole matrix",
         "delta": "0.3 * sigma_hist",
         "base_region": "normalize preregistered A to a union of mutually disjoint closed intervals [l_j,r_j]",
@@ -131,7 +144,7 @@
     {
       "arm_id": "CAP-NN-H008",
       "question": "within_neural_capacity_scan_and_equal_order_structure_contrast",
-      "model": {"family": "neural", "state_dim": 2, "env_dim": 1, "hidden": [8, 8], "diffusion_dim": 2, "diffusion_contract": "common_protocol.neural_diffusion_contract", "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
+      "model": {"family": "neural", "state_dim": 2, "state_layout": "common_protocol.state_layout", "env_dim": 1, "hidden": [8, 8], "diffusion_dim": 2, "diffusion_contract": "common_protocol.neural_diffusion_contract", "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
       "registered_parameter_count": 124,
       "data_lock": "common_protocol.data_lock",
       "splits": "common_protocol.splits",
@@ -144,7 +157,7 @@
     {
       "arm_id": "CAP-NN-H032",
       "question": "within_neural_capacity_scan",
-      "model": {"family": "neural", "state_dim": 2, "env_dim": 1, "hidden": [32, 32], "diffusion_dim": 2, "diffusion_contract": "common_protocol.neural_diffusion_contract", "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
+      "model": {"family": "neural", "state_dim": 2, "state_layout": "common_protocol.state_layout", "env_dim": 1, "hidden": [32, 32], "diffusion_dim": 2, "diffusion_contract": "common_protocol.neural_diffusion_contract", "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
       "registered_parameter_count": 1252,
       "data_lock": "common_protocol.data_lock",
       "splits": "common_protocol.splits",
@@ -157,7 +170,7 @@
     {
       "arm_id": "CAP-NN-H064",
       "question": "within_neural_capacity_scan",
-      "model": {"family": "neural", "state_dim": 2, "env_dim": 1, "hidden": [64, 64], "diffusion_dim": 2, "diffusion_contract": "common_protocol.neural_diffusion_contract", "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
+      "model": {"family": "neural", "state_dim": 2, "state_layout": "common_protocol.state_layout", "env_dim": 1, "hidden": [64, 64], "diffusion_dim": 2, "diffusion_contract": "common_protocol.neural_diffusion_contract", "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
       "registered_parameter_count": 4548,
       "data_lock": "common_protocol.data_lock",
       "splits": "common_protocol.splits",
@@ -170,7 +183,7 @@
     {
       "arm_id": "CAP-NN-H128",
       "question": "within_neural_capacity_scan",
-      "model": {"family": "neural", "state_dim": 2, "env_dim": 1, "hidden": [128, 128], "diffusion_dim": 2, "diffusion_contract": "common_protocol.neural_diffusion_contract", "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
+      "model": {"family": "neural", "state_dim": 2, "state_layout": "common_protocol.state_layout", "env_dim": 1, "hidden": [128, 128], "diffusion_dim": 2, "diffusion_contract": "common_protocol.neural_diffusion_contract", "time_is_input": false, "normalization_parameters_trainable": false, "dtype": "float64"},
       "registered_parameter_count": 17284,
       "data_lock": "common_protocol.data_lock",
       "splits": "common_protocol.splits",
