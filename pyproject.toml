@@ -23,6 +23,13 @@ Issues = "https://github.com/HuAzurestar/learnable-sde-for-movement-prediction/i
 
 [project.optional-dependencies]
 test = ["pytest>=7.4"]
+osm = [
+  "osmium>=4.0,<5",
+  "pyproj>=3.6,<4",
+  "rasterio>=1.4,<2",
+  "scipy>=1.14,<2",
+  "shapely>=2.0,<3",
+]
 
 [project.scripts]
 learnable-sde = "cli.__main__:main"

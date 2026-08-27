@@ -34,6 +34,11 @@ CONDITION_SPECS: Dict[str, Dict[str, Any]] = {
         "per_column_agg": {"landcover": "mode"},
         "filter": {"column": "has_map", "value": 1},
     },
+    "osm": {
+        "columns": ["road_dist", "water_dist", "building_dist"],
+        "agg": "mean",
+        "filter": {"column": "has_osm", "value": 1},
+    },
 }
 
 
