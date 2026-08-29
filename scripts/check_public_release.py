@@ -28,6 +28,30 @@ TEXT_PATTERNS = {
     ),
 }
 
+# These references are part of the already-reviewed public preregistration
+# record.  Keep the exception deliberately narrow: new internal work items and
+# role names remain release blockers everywhere else.
+PUBLIC_PREREGISTRATION = Path("experiments/capacity_preregistration")
+PUBLIC_PREREGISTRATION_ID = "NEX-381"
+PUBLIC_CRO_RECORD = Path("experiments/capacity_preregistration/PREREGISTRATION.md")
+PUBLIC_PREREGISTRATION_REFERENCES = {
+    Path("models/neural.py"),
+    Path("tests/test_capacity_preregistration.py"),
+}
+
+
+def is_approved_public_reference(label: str, relative: Path, matched: str) -> bool:
+    if (
+        label == "internal work item"
+        and (
+            relative.is_relative_to(PUBLIC_PREREGISTRATION)
+            or relative in PUBLIC_PREREGISTRATION_REFERENCES
+        )
+        and matched.upper() == PUBLIC_PREREGISTRATION_ID
+    ):
+        return True
+    return label == "internal role" and relative == PUBLIC_CRO_RECORD and matched == "CRO"
+
 
 def candidate_files() -> list[Path]:
     result = subprocess.run(
@@ -61,6 +85,8 @@ def main() -> int:
             continue
         for label, pattern in TEXT_PATTERNS.items():
             for match in pattern.finditer(content):
+                if is_approved_public_reference(label, relative, match.group(0)):
+                    continue
                 line = content.count("\n", 0, match.start()) + 1
                 problems.append(f"{label}: {relative}:{line}")
 
