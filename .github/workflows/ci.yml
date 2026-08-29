@@ -7,12 +7,35 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
-  test:
+  policy:
+    name: policy
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - name: Validate PR traceability
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BRANCH: ${{ github.head_ref }}
+        run: python scripts/check_pr_title.py "$PR_TITLE" "$PR_BRANCH"
+      - name: Public release scan
+        run: python scripts/check_public_release.py
+  python:
+    name: python / test (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -22,10 +45,21 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
       - name: Install
         run: python -m pip install -e ".[test]"
+      - name: Compile
+        run: python -m compileall -q application cli data domain estimation evaluation experiments inference infrastructure models transfer
       - name: Test
         run: python -m pytest -q
-      - name: Public release scan
-        run: python scripts/check_public_release.py
+  required:
+    name: ci / required
+    if: ${{ always() }}
+    needs: [policy, python]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require successful gates
+        env:
+          POLICY: ${{ needs.policy.result }}
+          PYTHON: ${{ needs.python.result }}
+        run: test "$POLICY" = success && test "$PYTHON" = success

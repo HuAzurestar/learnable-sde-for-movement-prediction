@@ -22,13 +22,37 @@ python -m pytest tests/test_architecture_contracts.py tests/test_application.py 
 
 ## Change workflow
 
-1. Open or reference a public GitHub issue for behavior-changing work.
-2. Keep one conceptual change per branch.
-3. Add success-path and failure-path tests for a new component.
-4. Run the test suite and relevant numerical smoke workflow.
-5. Run `python scripts/check_public_release.py`.
-6. Describe compatibility, numerical, data, and reproducibility effects in the
+1. Create or triage one actionable public GitHub Issue and select one primary
+   type: `feature`, `bug`, `documentation`, `refactor`, `performance`, `test`,
+   `build`, `ci`, or `maintenance`.
+2. Work from protected `main` on a short-lived branch named
+   `<prefix>/<issue>-<summary>` (for example, `feature/142-inference-route` or
+   `ci/203-python-matrix`). Use `hotfix/<issue>-<summary>` only for an urgent
+   bug from a deployed release, and `release/<version>` only for a documented
+   stabilization window.
+3. Keep one conceptual change per branch and commit. Ordinary commit and PR
+   titles use `#<issue> <type>(optional-scope): imperative summary`; the type
+   must agree with the branch prefix. `chore: repository bootstrap ...` is the
+   sole documented no-Issue exception.
+4. Add success-path and failure-path tests for a new component.
+5. Run the canonical checks below and `python scripts/check_public_release.py`.
+6. Open a focused PR to `main`; include `Refs: #<issue>` (or `Closes: #<issue>`
+   when merging should close it), validation results, and compatibility,
+   numerical, data, and reproducibility effects in the
    pull request.
+
+`main` must remain green and receive reviewed PRs only. Do not force-push or
+delete it. Prefer squash merge after the PR title and checks have been
+validated; delete the merged topic branch. See `GIT_WORKFLOW.md` for sync,
+conflict recovery, hotfix, and release procedures.
+
+## Canonical checks
+
+```bash
+python -m compileall -q application cli data domain estimation evaluation experiments inference infrastructure models transfer
+python -m pytest -q
+python scripts/check_public_release.py
+```
 
 New models, estimators, inference engines, and data sources implement their
 corresponding interface and are registered only at the composition root. CLI
@@ -37,10 +61,10 @@ algorithms. See `DESIGN.md` for the dependency rules.
 
 ## Commit messages
 
-Use the Conventional Commits shape:
+Use the Issue-first Conventional Commits shape:
 
 ```text
-<type>(optional-scope): imperative summary
+#<issue> <type>(optional-scope): imperative summary
 ```
 
 Supported types:
@@ -56,14 +80,15 @@ Supported types:
 Examples:
 
 ```text
-feat(inference): add Euler-Maruyama engine
-fix(data): reject non-monotonic segment timestamps
-docs: document the local dataset contract
+#142 feat(inference): add Euler-Maruyama engine
+#87 fix(data): reject non-monotonic segment timestamps
+#203 docs: document the local dataset contract
 ```
 
 Use a `BREAKING CHANGE:` footer when a public configuration key, import path,
-checkpoint format, or CLI contract changes. Reference public issues with
-`Closes #123`; do not include private ticket identifiers or workstation paths.
+checkpoint format, or CLI contract changes. Include `Refs: #123`; use
+`Closes: #123` only when landing on `main` should close the public Issue. Do
+not include private ticket identifiers or workstation paths.
 
 ## Data and artifacts
 
