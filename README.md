@@ -120,6 +120,9 @@ Contribution workflow, commit message format, and pull-request requirements are
 documented in [CONTRIBUTING.md](CONTRIBUTING.md). Known numerical and migration
 limitations are tracked in [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
 
+For the purpose, checks, triggers, and release assets of GitHub Actions, see
+[CI_CD.md](CI_CD.md).
+
 ## Related formalization
 
 The Lean proofs are maintained in
