@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Contribution and data policy
+    url: https://github.com/HuAzurestar/learnable-sde-for-movement-prediction/blob/main/CONTRIBUTING.md
+    about: Read the issue, branch, validation, and public-artifact requirements.

@@ -7,12 +7,41 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
-  test:
+  policy:
+    name: policy / traceability and public boundary
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - name: Explain policy validation
+        run: |
+          {
+            echo "## Policy gate"
+            echo "Validates PR traceability and rejects non-public artifacts or identifiers."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Validate PR traceability
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BRANCH: ${{ github.head_ref }}
+        run: python scripts/check_pr_title.py "$PR_TITLE" "$PR_BRANCH"
+      - name: Public release scan
+        run: python scripts/check_public_release.py
+  python:
+    name: python / compile and tests (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -22,10 +51,33 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
+      - name: Explain Python validation
+        run: |
+          {
+            echo "## Python gate"
+            echo "Installs the declared test extra, byte-compiles public packages, and runs pytest."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Install
         run: python -m pip install -e ".[test]"
+      - name: Compile
+        run: python -m compileall -q application cli data domain estimation evaluation experiments inference infrastructure models transfer
       - name: Test
         run: python -m pytest -q
-      - name: Public release scan
-        run: python scripts/check_public_release.py
+  required:
+    name: required
+    if: ${{ always() }}
+    needs: [policy, python]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Explain required-check result
+        run: |
+          {
+            echo "## Required gate"
+            echo "Passes only when the policy gate and the complete Python version matrix succeed."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Require successful gates
+        env:
+          POLICY: ${{ needs.policy.result }}
+          PYTHON: ${{ needs.python.result }}
+        run: test "$POLICY" = success && test "$PYTHON" = success

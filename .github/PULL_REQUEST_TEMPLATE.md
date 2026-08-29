@@ -2,6 +2,11 @@
 
 Describe the behavior or documentation changed by this pull request.
 
+## Traceability
+
+- [ ] Title is `#<issue> <type>(optional-scope): summary` and matches the branch.
+- [ ] `Refs: #<issue>` or `Closes: #<issue>` is included below.
+
 ## Verification
 
 - [ ] `python -m pytest -q`
@@ -13,3 +18,7 @@ Describe the behavior or documentation changed by this pull request.
 - [ ] No private data, row-level result, checkpoint, local path, or credential is included.
 - [ ] New claims are supported by a test, reproducible experiment, or citation.
 - [ ] Compatibility or numerical behavior changes are called out explicitly.
+
+## Issue reference
+
+Refs: #
