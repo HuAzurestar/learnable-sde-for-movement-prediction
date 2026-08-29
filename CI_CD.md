@@ -17,14 +17,19 @@ ordinary CI and non-tag manual runs cannot create a release.
 
 | Job shown in GitHub | What it verifies | Why it exists |
 | --- | --- | --- |
-| `policy` | On pull requests, the title and branch satisfy the traceability convention. On every trigger, `scripts/check_public_release.py` rejects files or identifiers that violate the public-release boundary. | Keeps each change reviewable and stops private material from entering a public build. |
-| `python / test (3.10)` | Installs the test extra, byte-compiles the public Python packages, then runs `pytest`. | Verifies the supported baseline interpreter and catches syntax or behavioural regressions. |
-| `python / test (3.12)` | Performs the same install, compilation, and test suite on Python 3.12. | Detects compatibility regressions on the newer supported interpreter. |
-| `ci / required` | Runs even if an upstream job fails and succeeds only when both `policy` and the complete Python matrix succeed. | Gives branch protection one unambiguous required check instead of requiring readers to interpret several job states. |
+| `policy / traceability and public boundary` | On pull requests, the title and branch satisfy the traceability convention. On every trigger, `scripts/check_public_release.py` rejects files or identifiers that violate the public-release boundary. | Keeps each change reviewable and stops private material from entering a public build. |
+| `python / compile and tests (3.10)` | Installs the test extra, byte-compiles the public Python packages, then runs `pytest`. | Verifies the supported baseline interpreter and catches syntax or behavioural regressions. |
+| `python / compile and tests (3.12)` | Performs the same install, compilation, and test suite on Python 3.12. | Detects compatibility regressions on the newer supported interpreter. |
+| `required` (shown by GitHub as `CI / required`) | Runs even if an upstream job fails and succeeds only when both `policy` and the complete Python matrix succeed. | Gives branch protection one unambiguous required check instead of requiring readers to interpret several job states. |
 
-The matrix is reported to the final job as one `python` result. Consequently,
-`ci / required` is failed whenever either Python version fails, is cancelled, or
+The matrix is reported to the final `required` job as one `python` result.
+Consequently, `required` fails whenever either Python version fails, is cancelled, or
 is skipped rather than successfully completing.
+
+The workflow now renders the aggregate as `CI / required` rather than the
+redundant `CI / ci / required`. GitHub branch protection/ruleset configuration
+is external to this repository: maintainers should update any required-check
+entry to the new displayed name after this workflow change lands.
 
 ## Release outputs
 

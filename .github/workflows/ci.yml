@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   policy:
-    name: policy
+    name: policy / traceability and public boundary
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -24,6 +24,12 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.10"
+      - name: Explain policy validation
+        run: |
+          {
+            echo "## Policy gate"
+            echo "Validates PR traceability and rejects non-public artifacts or identifiers."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Validate PR traceability
         if: github.event_name == 'pull_request'
         env:
@@ -33,7 +39,7 @@ jobs:
       - name: Public release scan
         run: python scripts/check_public_release.py
   python:
-    name: python / test (${{ matrix.python-version }})
+    name: python / compile and tests (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -45,6 +51,12 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Explain Python validation
+        run: |
+          {
+            echo "## Python gate"
+            echo "Installs the declared test extra, byte-compiles public packages, and runs pytest."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Install
         run: python -m pip install -e ".[test]"
       - name: Compile
@@ -52,12 +64,18 @@ jobs:
       - name: Test
         run: python -m pytest -q
   required:
-    name: ci / required
+    name: required
     if: ${{ always() }}
     needs: [policy, python]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Explain required-check result
+        run: |
+          {
+            echo "## Required gate"
+            echo "Passes only when the policy gate and the complete Python version matrix succeed."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Require successful gates
         env:
           POLICY: ${{ needs.policy.result }}
