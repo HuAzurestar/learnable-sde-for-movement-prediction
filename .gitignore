@@ -17,6 +17,7 @@ dist/
 
 # 虚拟环境
 .venv/
+.venv-*/
 venv/
 env/
 .env
@@ -25,6 +26,7 @@ env/
 
 # 本地数据与生成物
 .local/
+.tools/
 outputs/
 artifacts/
 checkpoints/
