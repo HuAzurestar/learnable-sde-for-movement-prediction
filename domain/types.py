@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Optional, Tuple
+from typing import Any, Mapping, NewType, Optional, Tuple
 
 import torch
 
@@ -173,6 +174,70 @@ class Forecast:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
+EvidenceId = NewType("EvidenceId", str)
+
+
+@dataclass(frozen=True)
+class SearchEvidence:
+    """Validated evidence context consumed by a conditioning component.
+
+    Coordinates use ``spatial_unit`` and an explicitly declared CRS when one is
+    known.  Times are offsets in seconds from the forecast origin.  ``None`` is
+    the deliberate missing state for CRS and confidence.
+    """
+
+    evidence_id: EvidenceId
+    kind: str
+    region: Tuple[float, float]
+    time_window: Tuple[float, float]
+    spatial_unit: str
+    crs: Optional[str] = None
+    confidence: Optional[float] = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def validate(self) -> None:
+        if not str(self.evidence_id).strip():
+            raise DataValidationError("evidence_id 不能为空")
+        if not self.kind.strip():
+            raise DataValidationError("evidence kind 不能为空")
+        if len(self.region) != 2 or not all(math.isfinite(v) for v in self.region):
+            raise DataValidationError("evidence region 必须为两个有限坐标")
+        if self.region[0] > self.region[1]:
+            raise DataValidationError("evidence region 下界不得大于上界")
+        if len(self.time_window) != 2 or not all(
+            math.isfinite(v) for v in self.time_window
+        ):
+            raise DataValidationError("evidence time_window 必须为两个有限秒数")
+        if self.time_window[0] > self.time_window[1]:
+            raise DataValidationError("evidence time_window 必须按时间递增")
+        if not self.spatial_unit.strip():
+            raise DataValidationError("evidence spatial_unit 不能为空")
+        if self.confidence is not None and not 0.0 <= self.confidence <= 1.0:
+            raise DataValidationError("evidence confidence 必须在 [0, 1]")
+
+
+@dataclass(frozen=True)
+class ConditionedForecast:
+    """A forecast conditioned by one or more immutable evidence facts."""
+
+    forecast: Forecast
+    evidence_ids: Tuple[EvidenceId, ...]
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ObservationSet:
+    """Observed states aligned with the horizons of one forecast."""
+
+    values: torch.Tensor
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def validate(self) -> None:
+        if self.values.ndim < 1 or self.values.numel() == 0:
+            raise DataValidationError("observation values 必须为非空张量")
+        _finite(self.values, "observation values")
+
+
 @dataclass(frozen=True)
 class FitResult:
     converged: bool
@@ -192,3 +257,7 @@ class FitResult:
             "final_objective": self.final_objective,
             "diagnostics": dict(self.diagnostics),
         }
+
+
+# The existing split-aware dataset remains the single training-data fact type.
+TrainingData = TrajectoryDataset
