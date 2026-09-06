@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping, NewType, Optional, Tuple
 
@@ -261,3 +263,209 @@ class FitResult:
 
 # The existing split-aware dataset remains the single training-data fact type.
 TrainingData = TrajectoryDataset
+
+
+@dataclass(frozen=True)
+class ArtifactReference:
+    """Auditable location and digest for one committed run artifact."""
+
+    path: str
+    sha256: str
+    size_bytes: int
+
+    def validate(self) -> None:
+        if not isinstance(self.path, str) or not self.path.strip():
+            raise DataValidationError("artifact path must not be empty")
+        if (
+            not isinstance(self.sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", self.sha256) is None
+        ):
+            raise DataValidationError("artifact sha256 must be 64 lowercase hex digits")
+        if not isinstance(self.size_bytes, int) or isinstance(self.size_bytes, bool):
+            raise DataValidationError("artifact size_bytes must be an integer")
+        if self.size_bytes < 0:
+            raise DataValidationError("artifact size_bytes must not be negative")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "path": self.path,
+            "sha256": self.sha256,
+            "size_bytes": self.size_bytes,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "ArtifactReference":
+        try:
+            reference = cls(
+                path=payload["path"],
+                sha256=payload["sha256"],
+                size_bytes=payload["size_bytes"],
+            )
+        except (KeyError, TypeError) as exc:
+            raise DataValidationError("invalid artifact reference") from exc
+        reference.validate()
+        return reference
+
+
+@dataclass(frozen=True)
+class RunRecord:
+    """Minimum audit record committed beside one run's visible artifacts."""
+
+    run_id: str
+    issue_id: str
+    experiment_id: str
+    code_version: str
+    data_id: str
+    split: str
+    config: Mapping[str, Any]
+    seed: int
+    components: Mapping[str, str]
+    reproducibility: str
+    missing_reproducibility: Tuple[str, ...]
+    artifacts: Mapping[str, ArtifactReference] = field(default_factory=dict)
+    status: str = "succeeded"
+    failure_stage: Optional[str] = None
+    failure_reason: Optional[str] = None
+
+    def validate(self) -> None:
+        required_strings = {
+            "run_id": self.run_id,
+            "issue_id": self.issue_id,
+            "experiment_id": self.experiment_id,
+            "code_version": self.code_version,
+            "data_id": self.data_id,
+            "split": self.split,
+        }
+        for name, value in required_strings.items():
+            if not isinstance(value, str) or not value.strip():
+                raise DataValidationError(f"RunRecord {name} must not be empty")
+        if not isinstance(self.seed, int) or isinstance(self.seed, bool):
+            raise DataValidationError("RunRecord seed must be an integer")
+        if not isinstance(self.config, Mapping):
+            raise DataValidationError("RunRecord config must be a mapping")
+        config = dict(self.config)
+        try:
+            encoded_config = json.dumps(config, ensure_ascii=False, allow_nan=False)
+            decoded_config = json.loads(encoded_config)
+        except (TypeError, ValueError) as exc:
+            raise DataValidationError("RunRecord config must be JSON serializable") from exc
+        if decoded_config != config:
+            raise DataValidationError("RunRecord config must preserve JSON round-trip")
+        if not isinstance(self.components, Mapping):
+            raise DataValidationError("RunRecord components must be a mapping")
+        if not self.components:
+            raise DataValidationError("RunRecord components must not be empty")
+        for name, value in self.components.items():
+            if (
+                not isinstance(name, str)
+                or not name.strip()
+                or not isinstance(value, str)
+                or not value.strip()
+            ):
+                raise DataValidationError(
+                    "RunRecord component names and values must be non-empty strings"
+                )
+        if not isinstance(self.status, str):
+            raise DataValidationError("RunRecord status must be a string")
+        if self.status not in {"succeeded", "failed"}:
+            raise DataValidationError("RunRecord status must be succeeded or failed")
+        if self.status == "failed":
+            if not isinstance(self.failure_stage, str):
+                raise DataValidationError("RunRecord failure_stage must be a string")
+            if not self.failure_stage.strip():
+                raise DataValidationError("failed RunRecord requires failure_stage")
+            if not isinstance(self.failure_reason, str):
+                raise DataValidationError("RunRecord failure_reason must be a string")
+            if not self.failure_reason.strip():
+                raise DataValidationError("failed RunRecord requires failure_reason")
+        elif self.failure_stage is not None or self.failure_reason is not None:
+            raise DataValidationError(
+                "successful RunRecord must not contain failure_stage or failure_reason"
+            )
+        if not isinstance(self.reproducibility, str):
+            raise DataValidationError("RunRecord reproducibility must be a string")
+        if self.reproducibility not in {"partial", "complete"}:
+            raise DataValidationError(
+                "RunRecord reproducibility must be partial or complete"
+            )
+        if not isinstance(self.missing_reproducibility, tuple):
+            raise DataValidationError(
+                "RunRecord missing_reproducibility must be a tuple"
+            )
+        if self.reproducibility == "partial" and not self.missing_reproducibility:
+            raise DataValidationError(
+                "partial reproducibility requires missing_reproducibility fields"
+            )
+        if self.reproducibility == "complete" and self.missing_reproducibility:
+            raise DataValidationError(
+                "complete reproducibility cannot list missing_reproducibility fields"
+            )
+        if any(
+            not isinstance(name, str) or not name.strip()
+            for name in self.missing_reproducibility
+        ):
+            raise DataValidationError(
+                "missing_reproducibility fields must be non-empty strings"
+            )
+        if not isinstance(self.artifacts, Mapping):
+            raise DataValidationError("RunRecord artifacts must be a mapping")
+        for name, reference in self.artifacts.items():
+            if not isinstance(name, str) or not name.strip():
+                raise DataValidationError("RunRecord artifact name must not be empty")
+            if not isinstance(reference, ArtifactReference):
+                raise DataValidationError(
+                    "RunRecord artifacts must contain ArtifactReference values"
+                )
+            reference.validate()
+
+    def to_dict(self) -> dict[str, Any]:
+        self.validate()
+        return {
+            "run_id": self.run_id,
+            "issue_id": self.issue_id,
+            "experiment_id": self.experiment_id,
+            "code_version": self.code_version,
+            "data_id": self.data_id,
+            "split": self.split,
+            "config": dict(self.config),
+            "seed": self.seed,
+            "components": dict(self.components),
+            "artifacts": {
+                name: reference.to_dict()
+                for name, reference in self.artifacts.items()
+            },
+            "status": self.status,
+            "failure_stage": self.failure_stage,
+            "failure_reason": self.failure_reason,
+            "reproducibility": self.reproducibility,
+            "missing_reproducibility": list(self.missing_reproducibility),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "RunRecord":
+        try:
+            artifact_payload = payload.get("artifacts", {})
+            record = cls(
+                run_id=payload["run_id"],
+                issue_id=payload["issue_id"],
+                experiment_id=payload["experiment_id"],
+                code_version=payload["code_version"],
+                data_id=payload["data_id"],
+                split=payload["split"],
+                config=dict(payload["config"]),
+                seed=payload["seed"],
+                components=dict(payload["components"]),
+                artifacts={
+                    name: ArtifactReference.from_dict(reference)
+                    for name, reference in artifact_payload.items()
+                },
+                status=payload["status"],
+                failure_stage=payload.get("failure_stage"),
+                failure_reason=payload.get("failure_reason"),
+                reproducibility=payload["reproducibility"],
+                missing_reproducibility=tuple(payload["missing_reproducibility"]),
+            )
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise DataValidationError("invalid RunRecord payload") from exc
+        record.validate()
+        return record

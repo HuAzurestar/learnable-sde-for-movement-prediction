@@ -21,8 +21,9 @@ prediction entry paths:
    during the migration.
 
 `submit_evidence()` validates and acknowledges an evidence identifier in Slice
-B; it does not persist evidence. Atomic artifact and run-record persistence is
-Slice C work. Evidence conditioning still requires an explicitly injected
+B; it does not persist evidence by itself. Slice C adds the explicit
+`commit_run()` boundary for atomically publishing selected run artifacts and a
+`RunRecord`. Evidence conditioning still requires an explicitly injected
 `EvidenceConditioner`, because there is no production implementation yet.
 
 ## 2. Architectural invariants
@@ -97,6 +98,7 @@ classDiagram
       +submit_evidence(SearchEvidence) EvidenceId
       +condition(Forecast, SearchEvidence) ConditionedForecast
       +evaluate(Forecast or ConditionedForecast, ObservationSet) EvaluationReport
+      +commit_run(RunRecord, ArtifactWriter) RunRecord
       +forecast(ForecastRequest) Forecast
       +save_checkpoint(path, metadata)
       +load_checkpoint(path) metadata
@@ -136,6 +138,14 @@ classDiagram
       +random
     }
 
+    class AtomicRunStore {
+      +commit(RunRecord, ArtifactWriter) RunRecord
+      +read(run_id) RunRecord
+    }
+
+    class RunRecord
+    class ArtifactReference
+
     class ForecastRequest
     class Forecast
     class SearchEvidence
@@ -159,6 +169,9 @@ classDiagram
     ExperimentApplication o-- InferenceEngine
     ExperimentApplication o-- RunContext
     ExperimentApplication o-- EvaluationPipeline
+    ExperimentApplication o-- AtomicRunStore
+    AtomicRunStore --> RunRecord
+    RunRecord o-- ArtifactReference
 ```
 
 `TrainingData` is an alias of the existing split-aware `TrajectoryDataset`, so
@@ -185,10 +198,12 @@ can be selected without changing the caller.
 | `DataSource[T]` | Generic `ABC` | `TrajectorySource` | Constructed by the legacy training CLI/data boundary | Application modules currently accept prepared values rather than importing the data package. |
 | `ConditionProvider` | `ABC` | `ConditionSource` | `features_for()` defines segment-identity-based lookup | No production caller currently wires `ConditionSource` into the application or CLI. It supplies model condition features and is distinct from search-evidence conditioning. |
 
-Infrastructure stores are concrete adapters at present. `TorchModelStore` and
-`JsonArtifactStore` do not implement a shared store abstraction, and this
-document does not invent one before Slice C defines the atomic commit and
-`RunRecord` requirements.
+Infrastructure stores remain focused concrete adapters rather than members of
+a broad shared store hierarchy. `TorchModelStore` owns checkpoint encoding,
+`JsonArtifactStore` owns JSON encoding, and `AtomicRunStore` owns one specific
+lifecycle rule: stage a run directory, inventory and hash its artifacts, write
+the `RunRecord`, then make that directory visible with a same-filesystem
+rename. This is intentionally not a general transaction or lifecycle platform.
 
 ### 5.1 Functional core and module-level functions
 
@@ -235,12 +250,12 @@ Slice A.
 The repository is a mixed object-oriented and functional architecture, **not highly OOP**
 as a whole. Its core model, estimator, inference, scoring, and data
 extension points have explicit contracts and several real implementations.
-Composition-root delegation for the approved Slice B use cases is present, but
-search-evidence conditioning has no production `EvidenceConditioner`, evidence
-submission has no persistence, infrastructure stores have no shared atomic
-commit contract, and legacy scientific workflows still combine specialized
-classes with module-level functions. Those are visible migration boundaries,
-not capabilities that the completed Slices A-B claim to provide.
+Composition-root delegation and the scoped Slice C run-commit boundary are
+present, but search-evidence conditioning has no production
+`EvidenceConditioner`, `submit_evidence()` remains a validation-only call, and
+legacy scientific workflows still combine specialized classes with
+module-level functions. Those are visible migration boundaries, not
+capabilities that the completed Slices A-C claim to provide.
 
 ## 6. Prediction, conditioning, and evaluation sequence
 
@@ -297,6 +312,40 @@ The pipeline creates `InferenceContext` from the explicitly supplied
 `RunContext`. The caller therefore owns the run lifecycle and the seed; the
 inference engine owns only the numerical prediction strategy.
 
+### 6.1 Atomic run commit sequence
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant App as ExperimentApplication
+    participant Store as AtomicRunStore
+    participant Stage as hidden staging directory
+    participant Run as visible run directory
+
+    Caller->>App: commit_run(RunRecord, ArtifactWriter)
+    App->>Store: commit(record, writer)
+    Store->>Stage: create unique staging directory
+    Store->>Stage: writer(stage) writes artifacts
+    Store->>Stage: validate files and compute SHA-256/size
+    Store->>Stage: write and read-check run_record.json
+    alt any write or validation fails
+        Store->>Stage: remove this transaction's staging directory
+        Store-->>App: ArtifactCommitError
+    else all staged content is valid
+        Store->>Run: same-filesystem directory rename
+        Store-->>App: finalized RunRecord
+    end
+```
+
+The visible destination is `<output_root>/<run_id>/`; a pre-existing run ID is
+never replaced, so a rerun must use a new ID. Atomic visibility is limited to
+that one directory on one filesystem. It is not a cross-root, distributed, or
+database transaction. A successful record requires at least one artifact; a
+failed `RunRecord` may contain only its stage and reason and is never labelled
+as successful. Current component selections are recorded, while exact component
+versions, dependency lock, and environment fingerprint can be named in
+`missing_reproducibility` so the record is truthfully marked `partial`.
+
 ## 7. State, mutation, and I/O boundaries
 
 | Concern | Owner | Current behavior |
@@ -304,15 +353,16 @@ inference engine owns only the numerical prediction strategy.
 | Model parameters | `SDEModel` | Standard `torch.nn.Module` parameters and `state_dict()` |
 | Training mutation | `Estimator` through model capabilities | Explicit model/data/context inputs |
 | Application-managed randomness | `RunContext.random` | Separate training, inference, and bootstrap generators; legacy experiment scripts and standalone helpers remain outside this application-path guarantee |
-| Forecast/evidence/truth values | Domain DTOs | Passed explicitly; `submit_evidence()` validates and returns an ID but does not persist it in Slice B |
+| Forecast/evidence/truth values | Domain DTOs | Passed explicitly; `submit_evidence()` validates and returns an ID but does not itself persist it. A caller may include validated evidence in an explicit run commit. |
 | Checkpoint I/O | `TorchModelStore` | Called by `ExperimentApplication`, never by a pipeline |
 | JSON artifact I/O | `JsonArtifactStore` | Infrastructure adapter only |
-| RunRecord and atomic artifact commit | Not implemented yet | Planned for Slice C |
+| RunRecord and atomic artifact commit | `RunRecord`, `ArtifactReference`, `AtomicRunStore` | Staged files and the record become visible together as one run directory; reads verify recorded size and SHA-256 |
 
 `EvaluationPipeline` has no path, environment, network, or persistence
 dependency. A conditioner implementation is also expected to compute and
 return a result. `ExperimentApplication.submit_evidence()` is currently a
-validation boundary only; durable evidence registration belongs to Slice C.
+validation boundary only; Slice C adds explicit run-artifact commits, not a
+dedicated mutable evidence repository.
 
 ## 8. Extension points
 
@@ -337,8 +387,8 @@ configuration defaults.
 | Approved slice | Status | Evidence in the repository |
 | --- | --- | --- |
 | A — contracts and pure pipeline | Implemented in PR #10 | `domain/types.py`, `application/pipelines.py`, `tests/test_use_case_contracts.py` |
-| B — compatibility and composition-root APIs | Implemented in PR #10 | `ExperimentApplication` delegates `predict`, `condition`, and `evaluate`, validates `submit_evidence`, adapts `TrainingData` to the existing `SegmentEMData` estimator input, and retains legacy `forecast`; `cli/predict.py` keeps its arguments and checkpoint format while using the new entry point. Production conditioning and evidence persistence remain later work. |
-| C — atomic artifact commit and RunRecord | Not implemented | Existing stores provide basic checkpoint/JSON I/O only |
+| B — compatibility and composition-root APIs | Implemented in PR #10 | `ExperimentApplication` delegates `predict`, `condition`, and `evaluate`, validates `submit_evidence`, adapts `TrainingData` to the existing `SegmentEMData` estimator input, and retains legacy `forecast`; `cli/predict.py` keeps its arguments and checkpoint format while using the new entry point. A production conditioner and dedicated evidence repository remain unimplemented. |
+| C — atomic artifact commit and RunRecord | Implemented in PR #10 | `RunRecord` and `ArtifactReference` capture minimum audit facts; `AtomicRunStore` stages, validates, hashes, and publishes one non-overwriting run directory; `ExperimentApplication.commit_run()` is the explicit application-boundary step. Full environment reconstruction remains deferred. |
 | D — representative-arm migration and cleanup | Partially protected, not migrated | Public I1 fixture compares the new pure prediction path with the legacy path; full 22-arm comparison remains out of scope |
 
 This table is part of the architecture contract: documentation must not label a
@@ -354,6 +404,11 @@ planned use case as implemented before its executable test exists.
 | Composition-root use cases compose end to end | `test_application_exposes_composable_predict_condition_and_evaluate_use_cases` |
 | Canonical `TrainingData` adapts to the legacy estimator input | `test_application_adapts_canonical_training_data_to_legacy_estimator_input` |
 | Existing predict CLI arguments and checkpoint flow use the new entry point | `test_legacy_predict_cli_uses_new_application_entrypoint` |
+| Artifacts and RunRecord become visible together and round-trip | `test_application_atomically_commits_artifact_and_run_record` |
+| Writer failure exposes no partial run and cleans its staging directory | `test_failed_atomic_commit_leaves_no_visible_partial_run` |
+| Existing runs cannot be overwritten and unsafe IDs cannot escape the root | `test_atomic_commit_never_overwrites_an_existing_run`, `test_run_store_rejects_a_run_id_that_can_escape_its_root` |
+| Committed artifact size/SHA-256 is verified on read | `test_run_store_detects_committed_artifact_tampering` |
+| Failed status and incomplete reproducibility are explicit | `test_failed_run_record_round_trips_without_a_success_artifact`, `test_run_record_rejects_inconsistent_status_and_reproducibility` |
 | Pipeline code performs no path I/O | `test_pipeline_methods_do_not_perform_file_io` plus dependency inspection |
 | Truth shape matches forecast horizon/state shape | `test_pipeline_rejects_truth_shape_that_does_not_match_forecast` |
 | Legacy and new I1 prediction agree | `test_public_i1_fixture_matches_locked_legacy_forecast` |

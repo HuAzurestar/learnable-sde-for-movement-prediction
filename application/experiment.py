@@ -18,6 +18,7 @@ from domain import (
     Forecast,
     ForecastRequest,
     ObservationSet,
+    RunRecord,
     SearchEvidence,
     TrainingData,
 )
@@ -25,7 +26,7 @@ from estimation.base import FitContext
 from estimation.em import SegmentEMData
 from evaluation import EnergyScore, EvaluationReport, Evaluator
 from inference.base import InferenceContext, InferenceEngine
-from infrastructure import TorchModelStore
+from infrastructure import ArtifactWriter, AtomicRunStore, TorchModelStore
 from models.base import SDEModel
 from registry import build_estimator, build_inference_engine, build_model
 
@@ -52,6 +53,7 @@ class ExperimentApplication:
         model_store: TorchModelStore,
         evaluator: Evaluator | None = None,
         conditioner: EvidenceConditioner | None = None,
+        run_store: AtomicRunStore | None = None,
     ) -> None:
         self.config = config
         self.model = model
@@ -61,6 +63,11 @@ class ExperimentApplication:
         self.model_store = model_store
         self.evaluator = evaluator if evaluator is not None else Evaluator([EnergyScore()])
         self.conditioner = conditioner
+        self.run_store = (
+            run_store
+            if run_store is not None
+            else AtomicRunStore(Path(config.paths.get("output_root", ".local/outputs")))
+        )
         self.evaluation_pipeline = EvaluationPipeline(
             inference_engine,
             self.evaluator,
@@ -74,6 +81,7 @@ class ExperimentApplication:
         *,
         evaluator: Evaluator | None = None,
         conditioner: EvidenceConditioner | None = None,
+        run_store: AtomicRunStore | None = None,
     ) -> "ExperimentApplication":
         config.validate()
         runtime = RunContext.create(
@@ -90,6 +98,7 @@ class ExperimentApplication:
             model_store=TorchModelStore(),
             evaluator=evaluator,
             conditioner=conditioner,
+            run_store=run_store,
         )
 
     def train(self, data: TrainingData | SegmentEMData) -> TrainingRun:
@@ -125,7 +134,7 @@ class ExperimentApplication:
         return self.evaluation_pipeline.predict(model, request, self.runtime)
 
     def submit_evidence(self, evidence: SearchEvidence) -> EvidenceId:
-        """Validate one evidence fact without persisting it before Slice C."""
+        """Validate evidence; persistence is an explicit ``commit_run`` step."""
 
         evidence.validate()
         return evidence.evidence_id
@@ -143,6 +152,15 @@ class ExperimentApplication:
         truth: ObservationSet,
     ) -> EvaluationReport:
         return self.evaluation_pipeline.evaluate(forecast, truth)
+
+    def commit_run(
+        self,
+        record: RunRecord,
+        write_artifacts: ArtifactWriter | None = None,
+    ) -> RunRecord:
+        """Atomically publish one run's artifacts and audit record."""
+
+        return self.run_store.commit(record, write_artifacts)
 
     def forecast(self, request: ForecastRequest) -> Forecast:
         if not self.inference_engine.supports(self.model):

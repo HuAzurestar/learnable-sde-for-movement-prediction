@@ -92,6 +92,8 @@ Core interfaces:
 - `Evaluator`: applies one canonical scoring-rule implementation.
 - `ExperimentApplication`: owns component assembly and the compatible
   train/predict/evidence/evaluate, legacy forecast, and checkpoint use cases.
+- `AtomicRunStore`: stages one run's artifacts and `RunRecord`, then publishes
+  the non-overwriting run directory with a same-filesystem atomic rename.
 
 See [OOP_ARCHITECTURE.md](OOP_ARCHITECTURE.md) for the code-anchored component
 map, object relationships, call sequence, I/O boundaries, and truthful

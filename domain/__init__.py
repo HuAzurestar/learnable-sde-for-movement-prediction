@@ -1,6 +1,7 @@
 """Stable domain values shared by all framework layers."""
 
 from .errors import (
+    ArtifactCommitError,
     CapabilityError,
     ConfigurationError,
     ConvergenceError,
@@ -9,6 +10,7 @@ from .errors import (
     SDEError,
 )
 from .types import (
+    ArtifactReference,
     ConditionedForecast,
     EvidenceId,
     FitResult,
@@ -17,6 +19,7 @@ from .types import (
     GaussianTransition,
     ModelContext,
     ObservationSet,
+    RunRecord,
     SearchEvidence,
     TrainingData,
     TrajectoryDataset,
@@ -25,6 +28,8 @@ from .types import (
 )
 
 __all__ = [
+    "ArtifactCommitError",
+    "ArtifactReference",
     "CapabilityError",
     "ConfigurationError",
     "ConvergenceError",
@@ -38,6 +43,7 @@ __all__ = [
     "ModelContext",
     "NumericalError",
     "ObservationSet",
+    "RunRecord",
     "SDEError",
     "SearchEvidence",
     "TrainingData",
