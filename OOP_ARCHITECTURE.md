@@ -9,18 +9,21 @@ the wider target design and scientific constraints.
 
 The framework uses object-oriented boundaries to make scientific components
 replaceable without changing their algorithms. It does **not** claim that the
-whole migration is complete. The current implementation has two application
-entry paths:
+whole migration is complete. The current implementation has two compatible
+prediction entry paths:
 
-1. `ExperimentApplication` is the existing composition root for training,
-   checkpoint operations, and legacy `forecast()` calls.
-2. `EvaluationPipeline` is the new pure-computation boundary for `predict()`,
-   evidence `condition()`, and `evaluate()`.
+1. `ExperimentApplication` is the composition root for training, checkpoint
+   operations, and the public `predict()`, `submit_evidence()`, `condition()`,
+   and `evaluate()` use cases. It delegates computation to its assembled
+   `EvaluationPipeline`.
+2. The legacy `ExperimentApplication.forecast()` entry point remains available
+   and independent so it can be used for numerical comparison and rollback
+   during the migration.
 
-The next migration slice will make `ExperimentApplication` delegate its public
-prediction, conditioning, and evaluation use cases to that pipeline. Until
-then, both paths intentionally coexist so the legacy forecast can be used as a
-numerical comparison and rollback path.
+`submit_evidence()` validates and acknowledges an evidence identifier in Slice
+B; it does not persist evidence. Atomic artifact and run-record persistence is
+Slice C work. Evidence conditioning still requires an explicitly injected
+`EvidenceConditioner`, because there is no production implementation yet.
 
 ## 2. Architectural invariants
 
@@ -37,8 +40,8 @@ numerical comparison and rollback path.
   substitutes a baseline implementation.
 - Application-managed training and prediction paths use random streams owned
   by one `RunContext`. Legacy experiment scripts and standalone numerical
-  helpers are outside this Slice A guarantee and may retain their existing
-  seed or process-global RNG behavior.
+  helpers are outside this application-path guarantee and may retain their
+  existing seed or process-global RNG behavior.
 
 ## 3. Package and dependency view
 
@@ -89,7 +92,11 @@ import filesystem or network adapters.
 classDiagram
     class ExperimentApplication {
       +from_config(config)
-      +train(SegmentEMData) TrainingRun
+      +train(TrainingData or SegmentEMData) TrainingRun
+      +predict(model, ForecastRequest) Forecast
+      +submit_evidence(SearchEvidence) EvidenceId
+      +condition(Forecast, SearchEvidence) ConditionedForecast
+      +evaluate(Forecast or ConditionedForecast, ObservationSet) EvaluationReport
       +forecast(ForecastRequest) Forecast
       +save_checkpoint(path, metadata)
       +load_checkpoint(path) metadata
@@ -151,6 +158,7 @@ classDiagram
     ExperimentApplication o-- SDEModel
     ExperimentApplication o-- InferenceEngine
     ExperimentApplication o-- RunContext
+    ExperimentApplication o-- EvaluationPipeline
 ```
 
 `TrainingData` is an alias of the existing split-aware `TrajectoryDataset`, so
@@ -166,7 +174,7 @@ can be selected without changing the caller.
 
 | Contract | Form | Production implementations | Construction or use | Current limit |
 | --- | --- | --- | --- | --- |
-| `EvidenceConditioner` | `Protocol` | **No production implementation in Slice A** | Optionally injected into `EvaluationPipeline` | The identity conditioner is a test double only. Existing bridge, existence, and exclusion classes expose domain-specific APIs such as `conditioned_drift()` or `hard_existence()`; they do not yet implement `supports()` plus `condition()` and need later adapters. |
+| `EvidenceConditioner` | `Protocol` | **No production implementation** | Optionally injected into `ExperimentApplication`, which passes it to `EvaluationPipeline` | The identity conditioner is a test double only. Existing bridge, existence, and exclusion classes expose domain-specific APIs such as `conditioned_drift()` or `hard_existence()`; they do not yet implement `supports()` plus `condition()` and need later adapters. |
 | `SDEModel` | `torch.nn.Module` plus `ABC` | `SegmentConstantSDE`; `TimeVaryingNeuralSDE` is a non-runnable skeleton | `MODEL_REGISTRY` currently constructs the operational I1 model | The neural model deliberately raises `NotImplementedError` pending its separately approved NEX wiring. |
 | `ExactTransitionProvider`, `AffineGaussianTransitionProvider`, `ExactGaussianKernelMixin` | Capability ABCs and reusable mixin | `SegmentConstantSDE` | `ExactGaussianEngine.supports()` checks the exact-transition capability | These contracts describe analytic transitions; they are not a general loss-function interface. |
 | `LatentRegimeModel` | Capability `ABC` | `SegmentConstantSDE` | The concrete model exposes the regime methods that `SegmentEM` calls | `SegmentEM` remains typed to `SegmentConstantSDE`; it does not yet depend on `LatentRegimeModel` as its abstraction boundary. |
@@ -227,48 +235,62 @@ Slice A.
 The repository is a mixed object-oriented and functional architecture, **not highly OOP**
 as a whole. Its core model, estimator, inference, scoring, and data
 extension points have explicit contracts and several real implementations.
-Composition-root coverage is partial, search-evidence conditioning has no
-production `EvidenceConditioner`, infrastructure stores have no shared atomic
+Composition-root delegation for the approved Slice B use cases is present, but
+search-evidence conditioning has no production `EvidenceConditioner`, evidence
+submission has no persistence, infrastructure stores have no shared atomic
 commit contract, and legacy scientific workflows still combine specialized
 classes with module-level functions. Those are visible migration boundaries,
-not capabilities that Slice A claims to have completed.
+not capabilities that the completed Slices A-B claim to provide.
 
 ## 6. Prediction, conditioning, and evaluation sequence
 
 ```mermaid
 sequenceDiagram
     participant Caller
+    participant App as ExperimentApplication
     participant Pipeline as EvaluationPipeline
     participant Engine as InferenceEngine
     participant Conditioner as EvidenceConditioner
     participant Evaluator
 
-    Caller->>Pipeline: predict(model, ForecastRequest, RunContext)
+    Caller->>App: predict(model, ForecastRequest)
+    App->>Pipeline: predict(model, request, RunContext)
     Pipeline->>Engine: supports(model)
     alt unsupported model/engine
-        Pipeline-->>Caller: CapabilityError
+        Pipeline-->>App: CapabilityError
+        App-->>Caller: CapabilityError
     else supported
         Pipeline->>Engine: forecast(model, request, InferenceContext)
         Engine-->>Pipeline: Forecast
-        Pipeline-->>Caller: Forecast
+        Pipeline-->>App: Forecast
+        App-->>Caller: Forecast
     end
 
-    Caller->>Pipeline: condition(Forecast, SearchEvidence)
+    Caller->>App: submit_evidence(SearchEvidence)
+    App->>App: evidence.validate()
+    App-->>Caller: EvidenceId
+
+    Caller->>App: condition(Forecast, SearchEvidence)
+    App->>Pipeline: condition(forecast, evidence)
     Pipeline->>Pipeline: evidence.validate()
     Pipeline->>Conditioner: supports(evidence)
     alt unsupported evidence component
-        Pipeline-->>Caller: CapabilityError
+        Pipeline-->>App: CapabilityError
+        App-->>Caller: CapabilityError
     else supported
         Pipeline->>Conditioner: condition(forecast, evidence)
         Conditioner-->>Pipeline: Forecast
-        Pipeline-->>Caller: ConditionedForecast
+        Pipeline-->>App: ConditionedForecast
+        App-->>Caller: ConditionedForecast
     end
 
-    Caller->>Pipeline: evaluate(Forecast or ConditionedForecast, ObservationSet)
+    Caller->>App: evaluate(Forecast or ConditionedForecast, ObservationSet)
+    App->>Pipeline: evaluate(forecast, truth)
     Pipeline->>Pipeline: truth.validate() and shape check
     Pipeline->>Evaluator: evaluate(forecast, truth)
     Evaluator-->>Pipeline: EvaluationReport
-    Pipeline-->>Caller: EvaluationReport
+    Pipeline-->>App: EvaluationReport
+    App-->>Caller: EvaluationReport
 ```
 
 The pipeline creates `InferenceContext` from the explicitly supplied
@@ -281,16 +303,16 @@ inference engine owns only the numerical prediction strategy.
 | --- | --- | --- |
 | Model parameters | `SDEModel` | Standard `torch.nn.Module` parameters and `state_dict()` |
 | Training mutation | `Estimator` through model capabilities | Explicit model/data/context inputs |
-| Application-managed randomness | `RunContext.random` | Separate training, inference, and bootstrap generators; legacy experiment scripts and standalone helpers remain outside the Slice A guarantee |
-| Forecast/evidence/truth values | Domain DTOs | Passed explicitly; no module-level current value |
+| Application-managed randomness | `RunContext.random` | Separate training, inference, and bootstrap generators; legacy experiment scripts and standalone helpers remain outside this application-path guarantee |
+| Forecast/evidence/truth values | Domain DTOs | Passed explicitly; `submit_evidence()` validates and returns an ID but does not persist it in Slice B |
 | Checkpoint I/O | `TorchModelStore` | Called by `ExperimentApplication`, never by a pipeline |
 | JSON artifact I/O | `JsonArtifactStore` | Infrastructure adapter only |
 | RunRecord and atomic artifact commit | Not implemented yet | Planned for Slice C |
 
 `EvaluationPipeline` has no path, environment, network, or persistence
 dependency. A conditioner implementation is also expected to compute and
-return a result; registering or persisting evidence belongs at the application
-boundary in a later slice.
+return a result. `ExperimentApplication.submit_evidence()` is currently a
+validation boundary only; durable evidence registration belongs to Slice C.
 
 ## 8. Extension points
 
@@ -315,7 +337,7 @@ configuration defaults.
 | Approved slice | Status | Evidence in the repository |
 | --- | --- | --- |
 | A — contracts and pure pipeline | Implemented in PR #10 | `domain/types.py`, `application/pipelines.py`, `tests/test_use_case_contracts.py` |
-| B — compatibility and composition-root APIs | Not implemented | `ExperimentApplication` still exposes legacy `forecast()` and accepts `SegmentEMData`; `predict`, `submit_evidence`, `condition`, and `evaluate` are not wired yet |
+| B — compatibility and composition-root APIs | Implemented in PR #10 | `ExperimentApplication` delegates `predict`, `condition`, and `evaluate`, validates `submit_evidence`, adapts `TrainingData` to the existing `SegmentEMData` estimator input, and retains legacy `forecast`; `cli/predict.py` keeps its arguments and checkpoint format while using the new entry point. Production conditioning and evidence persistence remain later work. |
 | C — atomic artifact commit and RunRecord | Not implemented | Existing stores provide basic checkpoint/JSON I/O only |
 | D — representative-arm migration and cleanup | Partially protected, not migrated | Public I1 fixture compares the new pure prediction path with the legacy path; full 22-arm comparison remains out of scope |
 
@@ -329,6 +351,9 @@ planned use case as implemented before its executable test exists.
 | Domain inputs reject invalid values | `tests/test_use_case_contracts.py`, `tests/test_validation.py` |
 | Unsupported combinations fail explicitly | `tests/test_use_case_contracts.py`, `tests/test_application.py` |
 | Pipeline use cases are independently callable | `tests/test_use_case_contracts.py` |
+| Composition-root use cases compose end to end | `test_application_exposes_composable_predict_condition_and_evaluate_use_cases` |
+| Canonical `TrainingData` adapts to the legacy estimator input | `test_application_adapts_canonical_training_data_to_legacy_estimator_input` |
+| Existing predict CLI arguments and checkpoint flow use the new entry point | `test_legacy_predict_cli_uses_new_application_entrypoint` |
 | Pipeline code performs no path I/O | `test_pipeline_methods_do_not_perform_file_io` plus dependency inspection |
 | Truth shape matches forecast horizon/state shape | `test_pipeline_rejects_truth_shape_that_does_not_match_forecast` |
 | Legacy and new I1 prediction agree | `test_public_i1_fixture_matches_locked_legacy_forecast` |

@@ -2,13 +2,30 @@
 
 from __future__ import annotations
 
+import json
+
 import torch
 import pytest
 
+from cli import predict as predict_cli
 from application.experiment import ExperimentApplication
 from application.synthetic import make_synthetic_em_data
 from config import Components, Config
-from domain import ConfigurationError, Forecast, ForecastRequest, ModelContext
+from domain import (
+    CapabilityError,
+    ConditionedForecast,
+    ConfigurationError,
+    DataValidationError,
+    FitResult,
+    Forecast,
+    ForecastRequest,
+    ModelContext,
+    ObservationSet,
+    SearchEvidence,
+    TrajectoryDataset,
+    TrajectorySegment,
+)
+from estimation.em import SegmentEMData
 from evaluation import EnergyScore, Evaluator
 from inference import CommonRandomNumberEngine, SplitStepEngine
 from registry import build_inference_engine
@@ -21,6 +38,64 @@ def _config(inference: str = "exact") -> Config:
         model={"I1": {"n_modes": 2, "kappa": 0.0, "dt_ref": 1.0}},
         protocol={"em": {"max_iter": 2}},
     )
+
+
+def _request() -> ForecastRequest:
+    return ForecastRequest(
+        initial_state=torch.tensor([1.0, 0.25], dtype=torch.float64),
+        horizons=torch.tensor([1.0, 2.0], dtype=torch.float64),
+        n_samples=3,
+        context=ModelContext(regime=0),
+    )
+
+
+def _evidence(evidence_id: str = "evidence-1") -> SearchEvidence:
+    return SearchEvidence(
+        evidence_id=evidence_id,
+        kind="existence",
+        region=(1.0, 2.0),
+        time_window=(0.0, 2.0),
+        spatial_unit="m",
+    )
+
+
+def _training_data() -> TrajectoryDataset:
+    return TrajectoryDataset(
+        train=(
+            TrajectorySegment(
+                t=torch.tensor([0.0, 1.0, 2.0], dtype=torch.float64),
+                x=torch.tensor(
+                    [[0.0, 0.0], [1.0, 0.5], [2.0, 0.5]],
+                    dtype=torch.float64,
+                ),
+                dt=1.0,
+                meta={"segment_id": "train-1"},
+            ),
+        )
+    )
+
+
+class _IdentityConditioner:
+    def supports(self, evidence: SearchEvidence) -> bool:
+        return evidence.kind == "existence"
+
+    def condition(self, forecast: Forecast, evidence: SearchEvidence) -> Forecast:
+        return Forecast(
+            samples=forecast.samples,
+            mean=forecast.mean,
+            covariance=forecast.covariance,
+            metadata={**forecast.metadata, "conditioned_by": evidence.evidence_id},
+        )
+
+
+class _CapturingEstimator:
+    def __init__(self) -> None:
+        self.data: SegmentEMData | None = None
+
+    def fit(self, model, data, context) -> FitResult:
+        data.validate()
+        self.data = data
+        return FitResult(converged=True, iterations=0)
 
 
 def test_application_train_checkpoint_predict_round_trip(tmp_path):
@@ -80,3 +155,92 @@ def test_evaluator_uses_canonical_sample_energy_score():
     )
 
     assert report.aggregate["energy_score"] == 0.5
+
+
+def test_application_exposes_composable_predict_condition_and_evaluate_use_cases():
+    config = _config()
+    legacy = ExperimentApplication.from_config(config).forecast(_request())
+    app = ExperimentApplication.from_config(
+        config,
+        conditioner=_IdentityConditioner(),
+    )
+    app.estimator = _CapturingEstimator()
+
+    training = app.train(_training_data())
+    forecast = app.predict(training.model, _request())
+    evidence = _evidence()
+    evidence_id = app.submit_evidence(evidence)
+    conditioned = app.condition(forecast, evidence)
+    report = app.evaluate(
+        conditioned,
+        ObservationSet(torch.tensor([[1.0, 0.25], [1.5, 0.25]], dtype=torch.float64)),
+    )
+
+    torch.testing.assert_close(forecast.samples, legacy.samples, rtol=0.0, atol=0.0)
+    assert evidence_id == evidence.evidence_id
+    assert isinstance(conditioned, ConditionedForecast)
+    assert conditioned.forecast.metadata["conditioned_by"] == evidence.evidence_id
+    assert set(report.aggregate) == {"energy_score"}
+
+
+def test_application_fails_fast_for_invalid_or_unsupported_evidence():
+    app = ExperimentApplication.from_config(_config())
+    forecast = Forecast(samples=torch.zeros((3, 2, 2), dtype=torch.float64))
+
+    with pytest.raises(DataValidationError):
+        app.submit_evidence(_evidence(""))
+    with pytest.raises(CapabilityError):
+        app.condition(forecast, _evidence())
+
+
+def test_application_adapts_canonical_training_data_to_legacy_estimator_input():
+    app = ExperimentApplication.from_config(_config())
+    estimator = _CapturingEstimator()
+    app.estimator = estimator
+    data = _training_data()
+    segment = data.train[0]
+
+    run = app.train(data)
+
+    assert run.model is app.model
+    assert isinstance(estimator.data, SegmentEMData)
+    assert estimator.data.dts == (1.0,)
+    assert torch.equal(estimator.data.segments[0], segment.x)
+
+
+def test_legacy_predict_cli_uses_new_application_entrypoint(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    config = _config()
+    checkpoint = tmp_path / "model.pt"
+    ExperimentApplication.from_config(config).save_checkpoint(checkpoint)
+    monkeypatch.setattr(predict_cli.Config, "from_yaml", lambda path: config)
+
+    def legacy_path_was_used(*args, **kwargs):
+        raise AssertionError("predict CLI called the legacy forecast entrypoint")
+
+    monkeypatch.setattr(ExperimentApplication, "forecast", legacy_path_was_used)
+
+    result = predict_cli.main(
+        [
+            "--config",
+            str(tmp_path / "config.yaml"),
+            "--checkpoint",
+            str(checkpoint),
+            "--x0",
+            "1.0",
+            "0.25",
+            "--horizons",
+            "1.0",
+            "2.0",
+            "--samples",
+            "3",
+        ]
+    )
+    report = json.loads(capsys.readouterr().out)
+
+    assert result == 0
+    assert report["command"] == "predict"
+    assert report["sample_shape"] == [3, 2, 2]

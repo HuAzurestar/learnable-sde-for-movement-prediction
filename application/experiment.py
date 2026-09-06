@@ -1,4 +1,4 @@
-"""Application service orchestrating train, checkpoint, and forecast use cases."""
+"""Application service orchestrating training, prediction, and persistence."""
 
 from __future__ import annotations
 
@@ -9,14 +9,27 @@ from typing import Any, Mapping
 import torch
 
 from config import Config
-from domain import CapabilityError, FitResult, Forecast, ForecastRequest
+from domain import (
+    CapabilityError,
+    ConditionedForecast,
+    DataValidationError,
+    EvidenceId,
+    FitResult,
+    Forecast,
+    ForecastRequest,
+    ObservationSet,
+    SearchEvidence,
+    TrainingData,
+)
 from estimation.base import FitContext
 from estimation.em import SegmentEMData
+from evaluation import EnergyScore, EvaluationReport, Evaluator
 from inference.base import InferenceContext, InferenceEngine
 from infrastructure import TorchModelStore
 from models.base import SDEModel
 from registry import build_estimator, build_inference_engine, build_model
 
+from .pipelines import EvidenceConditioner, EvaluationPipeline
 from .runtime import RunContext
 
 
@@ -37,6 +50,8 @@ class ExperimentApplication:
         inference_engine: InferenceEngine,
         runtime: RunContext,
         model_store: TorchModelStore,
+        evaluator: Evaluator | None = None,
+        conditioner: EvidenceConditioner | None = None,
     ) -> None:
         self.config = config
         self.model = model
@@ -44,9 +59,22 @@ class ExperimentApplication:
         self.inference_engine = inference_engine
         self.runtime = runtime
         self.model_store = model_store
+        self.evaluator = evaluator if evaluator is not None else Evaluator([EnergyScore()])
+        self.conditioner = conditioner
+        self.evaluation_pipeline = EvaluationPipeline(
+            inference_engine,
+            self.evaluator,
+            conditioner,
+        )
 
     @classmethod
-    def from_config(cls, config: Config) -> "ExperimentApplication":
+    def from_config(
+        cls,
+        config: Config,
+        *,
+        evaluator: Evaluator | None = None,
+        conditioner: EvidenceConditioner | None = None,
+    ) -> "ExperimentApplication":
         config.validate()
         runtime = RunContext.create(
             config.seed,
@@ -60,16 +88,31 @@ class ExperimentApplication:
             inference_engine=build_inference_engine(config),
             runtime=runtime,
             model_store=TorchModelStore(),
+            evaluator=evaluator,
+            conditioner=conditioner,
         )
 
-    def train(self, data: SegmentEMData) -> TrainingRun:
+    def train(self, data: TrainingData | SegmentEMData) -> TrainingRun:
+        if isinstance(data, TrainingData):
+            data.validate()
+            legacy_data = SegmentEMData(
+                tuple(segment.state for segment in data.train),
+                tuple(float(segment.dt) for segment in data.train),
+            )
+        elif isinstance(data, SegmentEMData):
+            legacy_data = data
+        else:
+            raise DataValidationError(
+                "training data must be TrajectoryDataset or SegmentEMData"
+            )
         prepared = SegmentEMData(
             tuple(
                 segment.to(device=self.runtime.device, dtype=self.runtime.dtype)
-                for segment in data.segments
+                for segment in legacy_data.segments
             ),
-            data.dts,
+            legacy_data.dts,
         )
+        prepared.validate()
         fit_context = FitContext(
             self.runtime.random.training,
             self.runtime.device,
@@ -77,6 +120,29 @@ class ExperimentApplication:
         )
         result = self.estimator.fit(self.model, prepared, fit_context)
         return TrainingRun(self.model, result)
+
+    def predict(self, model: SDEModel, request: ForecastRequest) -> Forecast:
+        return self.evaluation_pipeline.predict(model, request, self.runtime)
+
+    def submit_evidence(self, evidence: SearchEvidence) -> EvidenceId:
+        """Validate one evidence fact without persisting it before Slice C."""
+
+        evidence.validate()
+        return evidence.evidence_id
+
+    def condition(
+        self,
+        forecast: Forecast,
+        evidence: SearchEvidence,
+    ) -> ConditionedForecast:
+        return self.evaluation_pipeline.condition(forecast, evidence)
+
+    def evaluate(
+        self,
+        forecast: Forecast | ConditionedForecast,
+        truth: ObservationSet,
+    ) -> EvaluationReport:
+        return self.evaluation_pipeline.evaluate(forecast, truth)
 
     def forecast(self, request: ForecastRequest) -> Forecast:
         if not self.inference_engine.supports(self.model):
