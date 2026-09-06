@@ -157,7 +157,83 @@ classDiagram
 the use-case vocabulary does not create a second source of truth. The legacy
 `SegmentEMData` remains supported during migration.
 
-## 5. Prediction, conditioning, and evaluation sequence
+## 5. Abstract contracts and implementation coverage
+
+The number of classes is not a useful OOP maturity measure by itself: most
+domain classes are immutable value carriers, while an abstraction matters only
+when callers can depend on it and more than one implementation or capability
+can be selected without changing the caller.
+
+| Contract | Form | Production implementations | Construction or use | Current limit |
+| --- | --- | --- | --- | --- |
+| `EvidenceConditioner` | `Protocol` | **No production implementation in Slice A** | Optionally injected into `EvaluationPipeline` | The identity conditioner is a test double only. Existing bridge, existence, and exclusion classes expose domain-specific APIs such as `conditioned_drift()` or `hard_existence()`; they do not yet implement `supports()` plus `condition()` and need later adapters. |
+| `SDEModel` | `torch.nn.Module` plus `ABC` | `SegmentConstantSDE`; `TimeVaryingNeuralSDE` is a non-runnable skeleton | `MODEL_REGISTRY` currently constructs the operational I1 model | The neural model deliberately raises `NotImplementedError` pending its separately approved NEX wiring. |
+| `ExactTransitionProvider`, `AffineGaussianTransitionProvider`, `ExactGaussianKernelMixin` | Capability ABCs and reusable mixin | `SegmentConstantSDE` | `ExactGaussianEngine.supports()` checks the exact-transition capability | These contracts describe analytic transitions; they are not a general loss-function interface. |
+| `LatentRegimeModel` | Capability `ABC` | `SegmentConstantSDE` | The concrete model exposes the regime methods that `SegmentEM` calls | `SegmentEM` remains typed to `SegmentConstantSDE`; it does not yet depend on `LatentRegimeModel` as its abstraction boundary. |
+| `ParameterGroupProvider` | Capability `ABC` | `SegmentConstantSDE`; skeleton `TimeVaryingNeuralSDE` | Consumed by `transfer.init.ParameterInitializer` | The neural implementation currently returns empty groups because that model is not wired. |
+| `Estimator[ModelT, DataT]` | Generic `ABC` | `SegmentEM`, `CRPSEstimator` | `ESTIMATOR_REGISTRY` registers only `SegmentEM` | `CRPSEstimator` is an explicit unregistered research baseline and does not yet update an SDE model. |
+| `InferenceEngine` | `ABC` | `ExactGaussianEngine`, `EulerMaruyamaEngine`, `SplitStepEngine`, `CommonRandomNumberEngine` | All four are available through `INFERENCE_REGISTRY` | Capability support is checked before forecast production; selection remains configuration driven. |
+| `ScoringRule` | `ABC` | `EnergyScore`, `GaussianCRPS` | Rules are constructed directly and injected into `Evaluator` | There is no scoring-rule registry because current callers do not require one. |
+| `DataSource[T]` | Generic `ABC` | `TrajectorySource` | Constructed by the legacy training CLI/data boundary | Application modules currently accept prepared values rather than importing the data package. |
+| `ConditionProvider` | `ABC` | `ConditionSource` | `features_for()` defines segment-identity-based lookup | No production caller currently wires `ConditionSource` into the application or CLI. It supplies model condition features and is distinct from search-evidence conditioning. |
+
+Infrastructure stores are concrete adapters at present. `TorchModelStore` and
+`JsonArtifactStore` do not implement a shared store abstraction, and this
+document does not invent one before Slice C defines the atomic commit and
+`RunRecord` requirements.
+
+### 5.1 Functional core and module-level functions
+
+A module-level function is not automatically an abstraction failure. This
+repository keeps calculations and small orchestration helpers at module scope
+when they own no persistent object state, and uses objects for replaceable
+policy, owned state, resources, or lifecycle. Module-level ownership alone does
+not imply that a function is deterministic or free of an injected callback.
+
+| Function category | Examples | Current architectural treatment |
+| --- | --- | --- |
+| Deterministic formulas | `gaussian_transition_nll`, `crps_gaussian`, `energy_score_d2_closed` | Keep as functions because explicit tensor/scalar inputs determine the result and no selectable lifecycle is required. |
+| Stochastic numerical kernels | `energy_score_mc`; the multidimensional branch of `energy_score_gaussian` | Keep as functions because they own no persistent state. They accept a seed, but may consume the process RNG when seed is omitted; application-managed paths must provide explicit randomness when reproducibility is required. |
+| Callback orchestration | `poa`, `poa_crn` | Keep as functions for the current legacy surface, but their behavior is delegated to the supplied `rollout_fn` and is not claimed to be a pure deterministic formula. |
+| Validation and conversion | `ensure_finite`, `ensure_positive`, `validate_transitions`, `to_phase_space_1d` | Keep as functions; they express reusable checks or transformations rather than component identity. |
+| Private numerical helpers | `_finite`, `_kmeans_warmstart`, `_matrix_logm`, `_structure_project`, `_gaussian_pdf` | Keep private to the owning module or class implementation. |
+| Stateful or replaceable algorithms | model, estimator, inference-engine, scoring-rule, and data-source implementations | Implement an ABC or capability contract because callers select behavior or supply owned state. |
+| Legacy procedural workflows | `iterative_existence`, `iterative_exclusion`, `existence_dual_check`, `robustness_sweep`, and related simulation helpers | Remain function-oriented in the legacy scientific surface. Slice B may adapt the required behavior to `EvidenceConditioner`; it must not wrap every helper merely to increase the class count. |
+
+### 5.2 `estimation/nll.py` specifically
+
+`estimation/nll.py::gaussian_transition_nll` is a stateless Euler one-step,
+diagonal-Gaussian formula that accepts already-computed drift and log variance.
+It currently has **no production call sites**. The file is retained for the
+C-5/C-7 source-to-contract mapping and pending NEX work; retention is not proof
+that the function is integrated into the application pipeline.
+
+It must not be conflated with the similarly named model methods:
+
+| Symbol | Meaning and status |
+| --- | --- |
+| `gaussian_transition_nll` | Standalone diagonal Euler formula; currently uncalled by production code. |
+| `ExactGaussianKernelMixin.transition_nll` | Operational analytic-transition NLL using the model's exact mean and full covariance. |
+| `SegmentConstantSDE.segment_nll` | Computes one exact-transition NLL per regime by calling the inherited mixin method. |
+| `TimeVaryingNeuralSDE.transition_nll` | Frozen future signature only; currently raises `NotImplementedError`. |
+
+There is therefore no common NLL ABC or Protocol today. Introducing one before
+the neural path is implemented would hide different covariance and calling
+semantics behind a premature abstraction, so that decision remains outside
+Slice A.
+
+### 5.3 Current OOP maturity
+
+The repository is a mixed object-oriented and functional architecture, **not highly OOP**
+as a whole. Its core model, estimator, inference, scoring, and data
+extension points have explicit contracts and several real implementations.
+Composition-root coverage is partial, search-evidence conditioning has no
+production `EvidenceConditioner`, infrastructure stores have no shared atomic
+commit contract, and legacy scientific workflows still combine specialized
+classes with module-level functions. Those are visible migration boundaries,
+not capabilities that Slice A claims to have completed.
+
+## 6. Prediction, conditioning, and evaluation sequence
 
 ```mermaid
 sequenceDiagram
@@ -199,7 +275,7 @@ The pipeline creates `InferenceContext` from the explicitly supplied
 `RunContext`. The caller therefore owns the run lifecycle and the seed; the
 inference engine owns only the numerical prediction strategy.
 
-## 6. State, mutation, and I/O boundaries
+## 7. State, mutation, and I/O boundaries
 
 | Concern | Owner | Current behavior |
 | --- | --- | --- |
@@ -216,7 +292,7 @@ dependency. A conditioner implementation is also expected to compute and
 return a result; registering or persisting evidence belongs at the application
 boundary in a later slice.
 
-## 7. Extension points
+## 8. Extension points
 
 An extension is connected by implementing one focused contract and registering
 it at the composition root:
@@ -234,7 +310,7 @@ The application checks capabilities before producing FP/CF/ER values. Adding a
 component must not require a new branch inside a model or a silent change to
 configuration defaults.
 
-## 8. Implementation status
+## 9. Implementation status
 
 | Approved slice | Status | Evidence in the repository |
 | --- | --- | --- |
@@ -246,7 +322,7 @@ configuration defaults.
 This table is part of the architecture contract: documentation must not label a
 planned use case as implemented before its executable test exists.
 
-## 9. Verification map
+## 10. Verification map
 
 | Architectural claim | Test or check |
 | --- | --- |
@@ -259,7 +335,7 @@ planned use case as implemented before its executable test exists.
 | Existing numerical behavior remains stable | `tests/test_characterization.py` |
 | Public repository boundary remains clean | `scripts/check_public_release.py` |
 
-## 10. Deliberate non-goals
+## 11. Deliberate non-goals
 
 This architecture does not add an event bus, plugin platform, rules engine,
 distributed scheduler, GUI, new model family, new scoring formula, or new data
