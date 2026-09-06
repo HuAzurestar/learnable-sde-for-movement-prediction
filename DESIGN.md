@@ -6,6 +6,10 @@
 `experiments/`；新增 `domain/`、`application/`、`evaluation/`、`infrastructure/`
 和 `cli/` 承担缺失职责。迁移期间不得改变既有数学行为。
 
+当前代码对象关系、调用序列、I/O 边界和各迁移 Slice 的真实完成状态见
+[OOP_ARCHITECTURE.md](OOP_ARCHITECTURE.md)。本文保留整体目标设计和科学约束，
+不以目标状态代替当前实现状态。
+
 ## 1. 设计目标
 
 本项目需要提供一个可组合、可测试、可复现的 SDE 研究框架。框架应支持：

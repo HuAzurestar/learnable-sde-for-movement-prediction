@@ -91,8 +91,10 @@ Core interfaces:
 - `Evaluator`: applies one canonical scoring-rule implementation.
 - `ExperimentApplication`: owns component assembly and use-case orchestration.
 
-See [DESIGN.md](DESIGN.md) for dependency rules, capabilities, interfaces, and
-the remaining migration boundary.
+See [OOP_ARCHITECTURE.md](OOP_ARCHITECTURE.md) for the code-anchored component
+map, object relationships, call sequence, I/O boundaries, and truthful
+implemented-versus-planned status. [DESIGN.md](DESIGN.md) records the wider
+target design and scientific constraints.
 
 ## Repository layout
 
