@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 
-import torch
 import pytest
+import torch
 
+from cli import train as train_cli
 from cli import predict as predict_cli
 from application.experiment import ExperimentApplication
 from application.synthetic import make_synthetic_em_data
@@ -65,7 +66,7 @@ def _training_data() -> TrajectoryDataset:
             TrajectorySegment(
                 t=torch.tensor([0.0, 1.0, 2.0], dtype=torch.float64),
                 x=torch.tensor(
-                    [[0.0, 0.0], [1.0, 0.5], [2.0, 0.5]],
+                    [[0.0, 10.0], [2.0, 20.0], [8.0, 30.0]],
                     dtype=torch.float64,
                 ),
                 dt=1.0,
@@ -205,7 +206,51 @@ def test_application_adapts_canonical_training_data_to_legacy_estimator_input():
     assert run.model is app.model
     assert isinstance(estimator.data, SegmentEMData)
     assert estimator.data.dts == (1.0,)
-    assert torch.equal(estimator.data.segments[0], segment.x)
+    torch.testing.assert_close(
+        estimator.data.segments[0],
+        torch.tensor(
+            [[0.0, 2.0], [2.0, 6.0], [8.0, 6.0]],
+            dtype=torch.float64,
+        ),
+    )
+    assert not torch.equal(estimator.data.segments[0], segment.x)
+
+
+def test_real_data_cli_returns_canonical_training_data_for_application_adaptation(
+    monkeypatch,
+):
+    data = _training_data()
+
+    class _Source:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def load(self):
+            return list(data.train)
+
+    monkeypatch.setattr(train_cli, "TrajectorySource", _Source)
+
+    loaded = train_cli._real_data("train", 1, 19)
+
+    assert isinstance(loaded, TrajectoryDataset)
+    assert len(loaded.train) == 1
+    assert loaded.train[0] is data.train[0]
+
+
+def test_application_forwards_strategy_ownership_to_pipeline():
+    app = ExperimentApplication.from_config(_config())
+    replacement = SplitStepEngine(max_step=0.5)
+
+    assert app.inference_engine is app.evaluation_pipeline.inference_engine
+    assert app.evaluator is app.evaluation_pipeline.evaluator
+    assert app.conditioner is app.evaluation_pipeline.conditioner
+    with pytest.raises(AttributeError):
+        app.inference_engine = replacement
+
+    app.evaluation_pipeline.inference_engine = replacement
+
+    assert app.inference_engine is replacement
+    assert app.predict(app.model, _request()).metadata["engine"] == "split_step"
 
 
 def test_legacy_predict_cli_uses_new_application_entrypoint(

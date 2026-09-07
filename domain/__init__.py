@@ -26,6 +26,7 @@ from .types import (
     TrajectorySegment,
     TransitionBatch,
 )
+from .trajectory import to_phase_space_1d
 
 __all__ = [
     "ArtifactCommitError",
@@ -50,4 +51,5 @@ __all__ = [
     "TrajectoryDataset",
     "TrajectorySegment",
     "TransitionBatch",
+    "to_phase_space_1d",
 ]

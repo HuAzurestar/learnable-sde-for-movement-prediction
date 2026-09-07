@@ -167,7 +167,6 @@ classDiagram
     EvaluationPipeline --> EvaluationReport
 
     ExperimentApplication o-- SDEModel
-    ExperimentApplication o-- InferenceEngine
     ExperimentApplication o-- RunContext
     ExperimentApplication o-- EvaluationPipeline
     ExperimentApplication o-- AtomicRunStore
@@ -176,8 +175,17 @@ classDiagram
 ```
 
 `TrainingData` is an alias of the existing split-aware `TrajectoryDataset`, so
-the use-case vocabulary does not create a second source of truth. The legacy
-`SegmentEMData` remains supported during migration.
+the use-case vocabulary does not create a second source of truth. Its observed
+`[x, y]` positions are converted by the pure domain `to_phase_space_1d()`
+adapter before the I1/EM estimator receives `[X, V]`; the real-data CLI passes
+the same `TrainingData` contract to the application instead of maintaining a
+second conversion path. The legacy `SegmentEMData` remains supported for
+already-prepared phase-space input during migration.
+
+`EvaluationPipeline` is the single owner of its inference, conditioning, and
+evaluation strategies. `ExperimentApplication` exposes read-only forwarding
+properties for inspection, so replacing a strategy at the pipeline cannot
+leave a stale duplicate reference in the application object.
 
 ## 5. Abstract contracts and implementation coverage
 
@@ -192,7 +200,7 @@ can be selected without changing the caller.
 | `SDEModel` | `torch.nn.Module` plus `ABC` | `SegmentConstantSDE`; `TimeVaryingNeuralSDE` is a non-runnable skeleton | `MODEL_REGISTRY` currently constructs the operational I1 model | The neural model deliberately raises `NotImplementedError` pending its separately approved NEX wiring. |
 | `ExactTransitionProvider`, `AffineGaussianTransitionProvider`, `ExactGaussianKernelMixin` | Capability ABCs and reusable mixin | `SegmentConstantSDE` | `ExactGaussianEngine.supports()` checks the exact-transition capability | These contracts describe analytic transitions; they are not a general loss-function interface. |
 | `LatentRegimeModel` | Capability `ABC` | `SegmentConstantSDE` | The concrete model exposes the regime methods that `SegmentEM` calls | `SegmentEM` remains typed to `SegmentConstantSDE`; it does not yet depend on `LatentRegimeModel` as its abstraction boundary. |
-| `ParameterGroupProvider` | Capability `ABC` | `SegmentConstantSDE`; skeleton `TimeVaryingNeuralSDE` | Consumed by `transfer.init.ParameterInitializer` | The neural implementation currently returns empty groups because that model is not wired. |
+| `ParameterGroupProvider` | Capability `ABC` | `SegmentConstantSDE`; skeleton `TimeVaryingNeuralSDE` | Consumed by `transfer.init.C5FineTuner` | The neural implementation currently returns empty groups because that model is not wired. |
 | `Estimator[ModelT, DataT]` | Generic `ABC` | `SegmentEM`, `CRPSEstimator` | `ESTIMATOR_REGISTRY` registers only `SegmentEM` | `CRPSEstimator` is an explicit unregistered research baseline and does not yet update an SDE model. |
 | `InferenceEngine` | `ABC` | `ExactGaussianEngine`, `EulerMaruyamaEngine`, `SplitStepEngine`, `CommonRandomNumberEngine` | All four are available through `INFERENCE_REGISTRY` | Capability support is checked before forecast production; selection remains configuration driven. |
 | `ScoringRule` | `ABC` | `EnergyScore`, `GaussianCRPS` | Rules are constructed directly and injected into `Evaluator` | There is no scoring-rule registry because current callers do not require one. |
@@ -256,7 +264,7 @@ present, but search-evidence conditioning has no production
 `EvidenceConditioner`, `submit_evidence()` remains a validation-only call, and
 legacy scientific workflows still combine specialized classes with
 module-level functions. Those are visible migration boundaries, not
-capabilities that the completed Slices A-C claim to provide.
+capabilities that the completed Slices A-D claim to provide.
 
 ## 6. Prediction, conditioning, and evaluation sequence
 
@@ -403,7 +411,8 @@ planned use case as implemented before its executable test exists.
 | Unsupported combinations fail explicitly | `tests/test_use_case_contracts.py`, `tests/test_application.py` |
 | Pipeline use cases are independently callable | `tests/test_use_case_contracts.py` |
 | Composition-root use cases compose end to end | `test_application_exposes_composable_predict_condition_and_evaluate_use_cases` |
-| Canonical `TrainingData` adapts to the legacy estimator input | `test_application_adapts_canonical_training_data_to_legacy_estimator_input` |
+| Canonical position `TrainingData` adapts to I1 `[X, V]`, and CLI uses the same boundary | `test_application_adapts_canonical_training_data_to_legacy_estimator_input`, `test_real_data_cli_returns_canonical_training_data_for_application_adaptation` |
+| Pipeline is the single strategy owner | `test_application_forwards_strategy_ownership_to_pipeline` |
 | Existing predict CLI arguments and checkpoint flow use the new entry point | `test_legacy_predict_cli_uses_new_application_entrypoint` |
 | Artifacts and RunRecord become visible together and round-trip | `test_application_atomically_commits_artifact_and_run_record` |
 | Writer failure exposes no partial run and cleans its staging directory | `test_failed_atomic_commit_leaves_no_visible_partial_run` |

@@ -21,6 +21,7 @@ from domain import (
     RunRecord,
     SearchEvidence,
     TrainingData,
+    to_phase_space_1d,
 )
 from estimation.base import FitContext
 from estimation.em import SegmentEMData
@@ -58,11 +59,8 @@ class ExperimentApplication:
         self.config = config
         self.model = model
         self.estimator = estimator
-        self.inference_engine = inference_engine
         self.runtime = runtime
         self.model_store = model_store
-        self.evaluator = evaluator if evaluator is not None else Evaluator([EnergyScore()])
-        self.conditioner = conditioner
         self.run_store = (
             run_store
             if run_store is not None
@@ -70,9 +68,21 @@ class ExperimentApplication:
         )
         self.evaluation_pipeline = EvaluationPipeline(
             inference_engine,
-            self.evaluator,
+            evaluator if evaluator is not None else Evaluator([EnergyScore()]),
             conditioner,
         )
+
+    @property
+    def inference_engine(self) -> InferenceEngine:
+        return self.evaluation_pipeline.inference_engine
+
+    @property
+    def evaluator(self) -> Evaluator:
+        return self.evaluation_pipeline.evaluator
+
+    @property
+    def conditioner(self) -> EvidenceConditioner | None:
+        return self.evaluation_pipeline.conditioner
 
     @classmethod
     def from_config(
@@ -105,7 +115,7 @@ class ExperimentApplication:
         if isinstance(data, TrainingData):
             data.validate()
             legacy_data = SegmentEMData(
-                tuple(segment.state for segment in data.train),
+                tuple(to_phase_space_1d(segment) for segment in data.train),
                 tuple(float(segment.dt) for segment in data.train),
             )
         elif isinstance(data, SegmentEMData):
