@@ -9,16 +9,17 @@ the wider target design and scientific constraints.
 
 The framework uses object-oriented boundaries to make scientific components
 replaceable without changing their algorithms. It does **not** claim that the
-whole migration is complete. The current implementation has two compatible
-prediction entry paths:
+whole migration is complete. The current implementation exposes two compatible
+prediction names during migration:
 
 1. `ExperimentApplication` is the composition root for training, checkpoint
    operations, and the public `predict()`, `submit_evidence()`, `condition()`,
    and `evaluate()` use cases. It delegates computation to its assembled
    `EvaluationPipeline`.
 2. The legacy `ExperimentApplication.forecast()` entry point remains available
-   and independent so it can be used for numerical comparison and rollback
-   during the migration.
+   for callers, but is now a thin compatibility wrapper around `predict()`.
+   The former duplicate direct-inference orchestration has been removed after
+   the representative I1 parity check.
 
 `submit_evidence()` validates and acknowledges an evidence identifier in Slice
 B; it does not persist evidence by itself. Slice C adds the explicit
@@ -389,7 +390,7 @@ configuration defaults.
 | A — contracts and pure pipeline | Implemented in PR #10 | `domain/types.py`, `application/pipelines.py`, `tests/test_use_case_contracts.py` |
 | B — compatibility and composition-root APIs | Implemented in PR #10 | `ExperimentApplication` delegates `predict`, `condition`, and `evaluate`, validates `submit_evidence`, adapts `TrainingData` to the existing `SegmentEMData` estimator input, and retains legacy `forecast`; `cli/predict.py` keeps its arguments and checkpoint format while using the new entry point. A production conditioner and dedicated evidence repository remain unimplemented. |
 | C — atomic artifact commit and RunRecord | Implemented in PR #10 | `RunRecord` and `ArtifactReference` capture minimum audit facts; `AtomicRunStore` stages, validates, hashes, and publishes one non-overwriting run directory; `ExperimentApplication.commit_run()` is the explicit application-boundary step. Full environment reconstruction remains deferred. |
-| D — representative-arm migration and cleanup | Partially protected, not migrated | Public I1 fixture compares the new pure prediction path with the legacy path; full 22-arm comparison remains out of scope |
+| D — representative-arm migration and cleanup | Implemented for the public I1 arm | `forecast()` delegates to `predict()`; tests lock the delegation and exact old/new I1 output parity. Full 22-arm comparison remains out of scope |
 
 This table is part of the architecture contract: documentation must not label a
 planned use case as implemented before its executable test exists.
@@ -412,6 +413,7 @@ planned use case as implemented before its executable test exists.
 | Pipeline code performs no path I/O | `test_pipeline_methods_do_not_perform_file_io` plus dependency inspection |
 | Truth shape matches forecast horizon/state shape | `test_pipeline_rejects_truth_shape_that_does_not_match_forecast` |
 | Legacy and new I1 prediction agree | `test_public_i1_fixture_matches_locked_legacy_forecast` |
+| Legacy forecast is a compatibility wrapper for the new entry point | `test_legacy_forecast_delegates_to_new_predict_entrypoint`, `test_public_i1_application_entries_remain_numerically_identical` |
 | Existing numerical behavior remains stable | `tests/test_characterization.py` |
 | Public repository boundary remains clean | `scripts/check_public_release.py` |
 

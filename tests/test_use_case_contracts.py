@@ -188,3 +188,36 @@ def test_public_i1_fixture_matches_locked_legacy_forecast():
 
     torch.testing.assert_close(legacy.samples, expected_samples, rtol=1e-12, atol=1e-12)
     torch.testing.assert_close(current.samples, legacy.samples, rtol=0.0, atol=0.0)
+
+
+def test_legacy_forecast_delegates_to_new_predict_entrypoint(monkeypatch):
+    app = ExperimentApplication.from_config(_i1_config())
+    expected = Forecast(samples=torch.zeros((3, 2, 2), dtype=torch.float64))
+    calls = []
+
+    def migrated_predict(model, request):
+        calls.append((model, request))
+        return expected
+
+    monkeypatch.setattr(app, "predict", migrated_predict)
+
+    result = app.forecast(_request())
+
+    assert result is expected
+    assert len(calls) == 1
+    assert calls[0][0] is app.model
+    torch.testing.assert_close(calls[0][1].initial_state, _request().initial_state)
+    torch.testing.assert_close(calls[0][1].horizons, _request().horizons)
+    assert calls[0][1].n_samples == 3
+    assert calls[0][1].context == _request().context
+
+
+def test_public_i1_application_entries_remain_numerically_identical():
+    config = _i1_config()
+    legacy_app = ExperimentApplication.from_config(config)
+    current_app = ExperimentApplication.from_config(config)
+
+    legacy = legacy_app.forecast(_request())
+    current = current_app.predict(current_app.model, _request())
+
+    torch.testing.assert_close(current.samples, legacy.samples, rtol=0.0, atol=0.0)

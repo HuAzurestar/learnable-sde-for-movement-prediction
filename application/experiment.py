@@ -25,7 +25,7 @@ from domain import (
 from estimation.base import FitContext
 from estimation.em import SegmentEMData
 from evaluation import EnergyScore, EvaluationReport, Evaluator
-from inference.base import InferenceContext, InferenceEngine
+from inference.base import InferenceEngine
 from infrastructure import ArtifactWriter, AtomicRunStore, TorchModelStore
 from models.base import SDEModel
 from registry import build_estimator, build_inference_engine, build_model
@@ -163,19 +163,9 @@ class ExperimentApplication:
         return self.run_store.commit(record, write_artifacts)
 
     def forecast(self, request: ForecastRequest) -> Forecast:
-        if not self.inference_engine.supports(self.model):
-            raise CapabilityError(
-                f"{type(self.inference_engine).__name__} 不支持 {type(self.model).__name__}"
-            )
-        return self.inference_engine.forecast(
-            self.model,
-            request,
-            InferenceContext(
-                self.runtime.random.inference,
-                self.runtime.device,
-                self.runtime.dtype,
-            ),
-        )
+        """Compatibility wrapper for the migrated :meth:`predict` use case."""
+
+        return self.predict(self.model, request)
 
     def save_checkpoint(
         self,
