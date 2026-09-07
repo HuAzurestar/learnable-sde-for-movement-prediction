@@ -28,7 +28,8 @@ def main(argv: list[str] | None = None) -> int:
     config = Config.from_yaml(args.config)
     app = ExperimentApplication.from_config(config)
     metadata = app.load_checkpoint(args.checkpoint)
-    forecast = app.forecast(
+    forecast = app.predict(
+        app.model,
         ForecastRequest(
             initial_state=torch.tensor(args.x0, dtype=app.runtime.dtype),
             horizons=torch.tensor(args.horizons, dtype=app.runtime.dtype),

@@ -23,11 +23,9 @@ import numpy as np
 import pandas as pd
 import torch
 
-from domain import TrajectorySegment
+from domain import TrajectorySegment, to_phase_space_1d
 from .paths import resolve
 from .validation import (
-    ensure_finite,
-    ensure_monotonic_increasing,
     validate_segment,
     validate_transitions,
 )
@@ -47,28 +45,6 @@ def identifiability_diagnosis(dt: float) -> str:
     if dt < 300.0:
         return "segment_caution"    # 60<Δt<300: 可辨识性存疑，段级+诊断并行
     return "point_mixture"          # Δt≥300: 模式塌缩 → 路由点态混合/退化基线
-
-
-def _seg_label(seg: "Segment") -> str:
-    """段来源标签（fail-fast 消息定位用）。"""
-    return f"seg:{seg.meta.get('segment_id', '?')}"
-
-
-def to_phase_space_1d(seg: "Segment", coord: int = 0) -> torch.Tensor:
-    """1D 相位空间 [X, V]（I-1 段级常模式消费）: 取 coord 坐标，V = ΔX/Δt（末点回填）。
-
-    返回 (T+1, 2)。I-1 精确核在 (X,V) 上直接可辨识。
-    """
-    x = seg.x[:, coord].to(torch.float64)
-    t = seg.t.to(torch.float64)
-    label = _seg_label(seg)
-    ensure_finite(x, name="x", source=label)
-    ensure_finite(t, name="t", source=label)
-    ensure_monotonic_increasing(t, name="t", source=label)
-    dt = torch.diff(t).clamp(min=1e-6)
-    v = torch.diff(x) / dt
-    v = torch.cat([v, v[-1:]])
-    return torch.stack([x, v], dim=-1)
 
 
 class StateStats:

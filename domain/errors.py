@@ -17,6 +17,10 @@ class CapabilityError(SDEError):
     """A component requires a capability the selected model does not expose."""
 
 
+class ArtifactCommitError(SDEError):
+    """A run artifact transaction could not be committed completely."""
+
+
 class NumericalError(SDEError):
     """A numerical procedure failed after its declared recovery policy."""
 

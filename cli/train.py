@@ -9,21 +9,17 @@ from pathlib import Path
 from application.experiment import ExperimentApplication
 from application.synthetic import make_synthetic_em_data
 from config import Config
+from domain import TrajectoryDataset
 from data.source import TrajectorySource
-from data.loader import to_phase_space_1d
-from estimation.em import SegmentEMData
 
 
-def _real_data(split: str, max_segments: int | None, seed: int) -> SegmentEMData:
+def _real_data(split: str, max_segments: int | None, seed: int) -> TrajectoryDataset:
     segments = TrajectorySource(
         split=split,
         max_segments=max_segments,
         seed=seed,
     ).load()
-    return SegmentEMData(
-        tuple(to_phase_space_1d(segment) for segment in segments),
-        tuple(float(segment.dt) for segment in segments),
-    )
+    return TrajectoryDataset(train=tuple(segments))
 
 
 def main(argv: list[str] | None = None) -> int:

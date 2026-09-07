@@ -79,8 +79,9 @@ The public execution path is:
 
 ```text
 CLI -> ExperimentApplication -> registry -> model / estimator / inference
-                                      -> checkpoint and artifact adapters
-Forecast -> Evaluator -> scoring rules
+                          |      -> checkpoint and artifact adapters
+                          +-> EvaluationPipeline -> inference / conditioning
+                                                -> Evaluator -> scoring rules
 ```
 
 Core interfaces:
@@ -89,10 +90,15 @@ Core interfaces:
 - `Estimator.fit(model, data, context) -> FitResult`.
 - `InferenceEngine.forecast(model, request, context) -> Forecast`.
 - `Evaluator`: applies one canonical scoring-rule implementation.
-- `ExperimentApplication`: owns component assembly and use-case orchestration.
+- `ExperimentApplication`: owns component assembly and the compatible
+  train/predict/evidence/evaluate, legacy forecast, and checkpoint use cases.
+- `AtomicRunStore`: stages one run's artifacts and `RunRecord`, then publishes
+  the non-overwriting run directory with a same-filesystem atomic rename.
 
-See [DESIGN.md](DESIGN.md) for dependency rules, capabilities, interfaces, and
-the remaining migration boundary.
+See [OOP_ARCHITECTURE.md](OOP_ARCHITECTURE.md) for the code-anchored component
+map, object relationships, call sequence, I/O boundaries, and truthful
+implemented-versus-planned status. [DESIGN.md](DESIGN.md) records the wider
+target design and scientific constraints.
 
 ## Repository layout
 
