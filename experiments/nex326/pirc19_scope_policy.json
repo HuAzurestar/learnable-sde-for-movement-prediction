@@ -1,0 +1,28 @@
+{
+  "schema_version": "pirc19-reproduction-scope-v1",
+  "task_id": "PIRC-19",
+  "experiment_id": "NEX326",
+  "decision": "complete the empirical reconstruction for every execution outside the approved excluded arms",
+  "approved_excluded_arms": [
+    {
+      "arm_id": 13,
+      "reason": "No licensed, versioned animal trajectory cohort is available for animal-to-human pretraining."
+    },
+    {
+      "arm_id": 17,
+      "reason": "The current scope does not require condition-variant reproduction; aligned temperature and precipitation are unavailable. Existing successful variants remain supplemental evidence."
+    },
+    {
+      "arm_id": 22,
+      "reason": "Endpoint-prior bridges are an expert-assisted extension and are outside the current core reproduction."
+    }
+  ],
+  "required_rule": "Every frozen execution whose arm_id is not approved_excluded must succeed on the registered DSDE 20% pilot.",
+  "frozen_execution_count": 36,
+  "approved_excluded_execution_count": 8,
+  "required_execution_count": 28,
+  "scope_notes": [
+    "Approved exclusions preserve implementation and contract coverage; they change only the empirical reproduction requirement.",
+    "Scientific verdicts remain exploratory and are not implied by task completion."
+  ]
+}

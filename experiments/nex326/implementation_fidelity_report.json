@@ -1,0 +1,236 @@
+{
+  "schema_version": "nex326-fidelity-audit-v1",
+  "experiment_id": "NEX326",
+  "spec_version": "nex326-process-v2",
+  "overall_status": "bounded_reconstruction_with_declared_approximations",
+  "paper_equivalent": false,
+  "route_checks": [
+    {
+      "arm_id": 7,
+      "subconfig_id": "full",
+      "component": "estimator",
+      "expected": "crps_energy",
+      "actual": "crps_energy",
+      "passed": true
+    },
+    {
+      "arm_id": 8,
+      "subconfig_id": "qmle",
+      "component": "estimator",
+      "expected": "qmle",
+      "actual": "qmle",
+      "passed": true
+    },
+    {
+      "arm_id": 9,
+      "subconfig_id": "mixed",
+      "component": "estimator",
+      "expected": "mixed",
+      "actual": "mixed",
+      "passed": true
+    },
+    {
+      "arm_id": 9,
+      "subconfig_id": "pure_es",
+      "component": "estimator",
+      "expected": "pure_es",
+      "actual": "pure_es",
+      "passed": true
+    },
+    {
+      "arm_id": 11,
+      "subconfig_id": "full",
+      "component": "transfer",
+      "expected": "full_finetune",
+      "actual": "full_finetune",
+      "passed": true
+    },
+    {
+      "arm_id": 12,
+      "subconfig_id": "scratch",
+      "component": "transfer",
+      "expected": "scratch",
+      "actual": "scratch",
+      "passed": true
+    },
+    {
+      "arm_id": 13,
+      "subconfig_id": "animal_pretrain",
+      "component": "transfer",
+      "expected": "animal_pretrain",
+      "actual": "animal_pretrain",
+      "passed": true
+    },
+    {
+      "arm_id": 14,
+      "subconfig_id": "reptile",
+      "component": "transfer",
+      "expected": "meta_reptile",
+      "actual": "meta_reptile",
+      "passed": true
+    },
+    {
+      "arm_id": 15,
+      "subconfig_id": "drift_only",
+      "component": "finetune",
+      "expected": "drift_only",
+      "actual": "drift_only",
+      "passed": true
+    },
+    {
+      "arm_id": 15,
+      "subconfig_id": "two_step",
+      "component": "finetune",
+      "expected": "two_step",
+      "actual": "two_step",
+      "passed": true
+    },
+    {
+      "arm_id": 22,
+      "subconfig_id": "doob",
+      "component": "bridge",
+      "expected": "doob",
+      "actual": "doob",
+      "passed": true
+    },
+    {
+      "arm_id": 22,
+      "subconfig_id": "sb",
+      "component": "bridge",
+      "expected": "gaussian_schrodinger",
+      "actual": "gaussian_schrodinger",
+      "passed": true
+    },
+    {
+      "arm_id": 22,
+      "subconfig_id": "soft_endpoint",
+      "component": "bridge",
+      "expected": "soft_endpoint",
+      "actual": "soft_endpoint",
+      "passed": true
+    }
+  ],
+  "capabilities": [
+    {
+      "arms": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22
+      ],
+      "capability": "execution_environment_identity",
+      "implementation": "source bundle plus observed Python and direct dependency versions",
+      "fidelity": "exact_direct_environment_identity",
+      "remaining_limit": "transitive dependencies, OS, BLAS, and hardware are recorded only indirectly"
+    },
+    {
+      "arms": [
+        7
+      ],
+      "capability": "energy_objective",
+      "implementation": "validation-selected covariance scale grid",
+      "fidelity": "bounded_surrogate",
+      "remaining_limit": "the objective optimizes covariance scale while retaining fitted drift"
+    },
+    {
+      "arms": [
+        9
+      ],
+      "capability": "mixed_and_pure_energy_objectives",
+      "implementation": "joint validation grid over drift interpolation and covariance scale",
+      "fidelity": "bounded_joint_objective_optimization",
+      "remaining_limit": "the bounded grid is not an unconstrained gradient optimizer over every model parameter"
+    },
+    {
+      "arms": [
+        8
+      ],
+      "capability": "gaussian_qmle",
+      "implementation": "ridge-stabilized linear Gaussian closed-form fit",
+      "fidelity": "exact_for_bounded_linear_gaussian_model",
+      "remaining_limit": "not a nonlinear or large-cohort estimator"
+    },
+    {
+      "arms": [
+        11,
+        12,
+        13,
+        15
+      ],
+      "capability": "transfer_and_adaptation",
+      "implementation": "distinct pretrain, scratch, drift-only, and two-step parameter paths",
+      "fidelity": "implemented_for_bounded_model",
+      "remaining_limit": "animal execution remains data-dependent on the licensed split"
+    },
+    {
+      "arms": [
+        14
+      ],
+      "capability": "first_order_reptile",
+      "implementation": {
+        "inner_solution": "task-local gradient steps from current initialization",
+        "outer_update": "sequential first-order interpolation",
+        "meta_epochs": 4,
+        "initial_step": 0.35,
+        "inner_steps": 5,
+        "inner_rate": 0.5
+      },
+      "fidelity": "implemented_first_order_reptile_for_bounded_model",
+      "remaining_limit": "the inner loss is the bounded linear-Gaussian task loss, not a large neural model"
+    },
+    {
+      "arms": [
+        17
+      ],
+      "capability": "spatial_terrain_conditioning",
+      "implementation": {
+        "fit_lookup": "SRTM sampled at observed positions",
+        "inference_lookup": "SRTM sampled at each simulated position",
+        "future_route_point_index_used": false,
+        "fp_propagation": "local_gaussian_mean_closure",
+        "comparison_guard": "evaluation segment-ID fingerprint must match Full reference"
+      },
+      "fidelity": "implemented_spatial_condition_with_bounded_fp_closure",
+      "remaining_limit": "weather is unavailable; nonlinear C(x,y) finite propagation uses a declared local Gaussian mean closure"
+    },
+    {
+      "arms": [
+        22
+      ],
+      "capability": "endpoint_conditioning",
+      "implementation": {
+        "paths": [
+          "doob",
+          "finite_particle_schrodinger",
+          "soft_endpoint"
+        ],
+        "schrodinger_solver": "log-domain Sinkhorn/IPF endpoint coupling",
+        "reference_process": "isotropic Brownian",
+        "path_sampler": "conditional Brownian bridge",
+        "prior_contract": "exact-coverage independent feed adapter",
+        "failure_policy": "non-convergence raises RunError without fallback"
+      },
+      "fidelity": "implemented_finite_particle_schrodinger_bridge_extension",
+      "remaining_limit": "expert-assisted endpoint priors are outside the current PIRC-19 core evidence; no mock feed is used in core receipts"
+    }
+  ],
+  "failed_route_count": 0
+}

@@ -1,0 +1,61 @@
+{
+  "schema_version": "nex326-phase-space-segment-bootstrap-v1",
+  "analysis_id": "NEX326-PHASE-SPACE-V5-PAIRED-SEGMENT-BOOTSTRAP-v1",
+  "scientific_role": "supplemental_exploratory_uncertainty_not_final_evidence",
+  "assessment": "not_assessed",
+  "baseline_benchmark_id": "NEX326-PHASE-SPACE-4D-CONTOUR-DISTANCE-v3",
+  "candidate_benchmark_id": "NEX326-PHASE-SPACE-4D-TERRAIN-ALIGNED-RESIDUAL-v5",
+  "cohort_fingerprint": "c4eb7a337c13241928a543c839a21714da358d150de5befe6238b712fb4a7e48",
+  "replicate_seeds": [
+    20260814,
+    20260815,
+    20260816
+  ],
+  "prediction_samples_per_segment": 64,
+  "bootstrap_unit": "paired_evaluation_segment",
+  "evaluation_segment_count": 28,
+  "bootstrap_iterations": 10000,
+  "bootstrap_seed": 20260814,
+  "confidence_level": 0.95,
+  "sampling_seed_handling": "for every bootstrap resample, compute the paired metric delta within each matched prediction-sampling seed and then average the three deltas",
+  "uncertainty_scope": "heldout_segment_sampling_only",
+  "uncertainty": {
+    "position_energy_score_d2": {
+      "candidate_minus_baseline": -0.16277652373162144,
+      "ci_low": -0.34786999317170475,
+      "ci_high": 0.013029295758589032,
+      "interval_excludes_zero": false,
+      "bootstrap_fraction_below_zero": 0.9658
+    },
+    "position_cep50_error": {
+      "candidate_minus_baseline": -0.1262563752434147,
+      "ci_low": -1.0674172011719065,
+      "ci_high": 0.40763073610669665,
+      "interval_excludes_zero": false,
+      "bootstrap_fraction_below_zero": 0.7813
+    },
+    "velocity_endpoint_rmse": {
+      "candidate_minus_baseline": 0.0024474172506470104,
+      "ci_low": -0.0019381849752620247,
+      "ci_high": 0.008117842798454553,
+      "interval_excludes_zero": false,
+      "bootstrap_fraction_below_zero": 0.1857
+    }
+  },
+  "energy_segment_direction": {
+    "candidate_better_count": 16,
+    "candidate_worse_count": 12,
+    "median_candidate_minus_baseline": -0.11405851344330978
+  },
+  "coverage_uncertainty": {
+    "status": "not_computable_from_compact_reports",
+    "reason": "legacy per-segment rows do not retain the HDR90 inclusion indicator"
+  },
+  "interpretation_limit": "Prediction-sampling seeds share one fitted cohort and evaluation set; the interval does not quantify training-data or dataset-version uncertainty.",
+  "integrity": {
+    "protocol_sha256": "87c96f2af1ad450f001215d5818ca5c54b3529037516e816f6688ddecbbe0644",
+    "baseline_manifest_sha256": "1372cd1f84760665941aeb5b8cb38c2ed02d3b9a01282fcd5e33e696645f7df4",
+    "candidate_manifest_sha256": "91a61fcfde5da89a207f5513e34d43ec7209673a1ba6922b20b0784d458655ac",
+    "contrast_sha256": "041de71a508016b580ba9043f78c6a3ded8cbfd6b9f624b9307b1865b53219b8"
+  }
+}

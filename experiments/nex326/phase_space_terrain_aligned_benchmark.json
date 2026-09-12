@@ -1,0 +1,49 @@
+{
+  "schema_version": "nex326-phase-space-benchmark-spec-v1",
+  "benchmark_id": "NEX326-PHASE-SPACE-4D-TERRAIN-ALIGNED-v4",
+  "scientific_role": "preregistered_followup_exploratory_structural_model",
+  "base_benchmark": "NEX326-PHASE-SPACE-4D-CONTOUR-DISTANCE-v3",
+  "state_contract": {
+    "layout": ["x", "y", "vx", "vy"],
+    "dimension": 4,
+    "velocity_estimator": "causal_backward_difference",
+    "first_velocity": "copy_first_valid_backward_difference",
+    "position_dynamics": "dX=Vdt",
+    "position_integrator": "trapezoidal_velocity",
+    "noise_target": "velocity_only"
+  },
+  "condition_contract": {
+    "lookup_signature": "C(x,y)",
+    "condition_is_dynamic_state": false,
+    "spatial_position_required": true,
+    "registered_condition_names": ["terrain_elevation", "terrain_gradient_east", "terrain_gradient_north"],
+    "gradient_units": "metres_elevation_per_metre_horizontal",
+    "elevation_role": "registered raster identity only; the structural drift uses the signed gradient components",
+    "contour_tangent_semantics": "P_tangent is an unoriented subspace and is unchanged for tangent representatives t and -t",
+    "flat_gradient_convention": "P_normal*v=0 and P_tangent*v=v",
+    "current_status": "preregistered_directional_srtm_raster_field"
+  },
+  "velocity_model": {
+    "kind": "terrain_aligned_projection_drift",
+    "formula": "a=b+lambda_normal*P_normal*v+lambda_tangent*P_tangent*v+kappa*gradient",
+    "normal_projection": "P_normal=gradient*gradient^T/||gradient||^2 when ||gradient||>1e-12, otherwise zero",
+    "tangent_projection": "P_tangent=I-P_normal",
+    "learned_parameters": ["b_x", "b_y", "lambda_normal", "lambda_tangent", "kappa"],
+    "design_scaling": "one RMS scale per vector block before ridge; reported coefficients are restored to physical units",
+    "ridge": 1e-6,
+    "diffusion": "full_2x2_velocity_increment_covariance"
+  },
+  "protocol": {
+    "fit_splits": ["train", "adapt"],
+    "validation_split": "validation",
+    "evaluation_split": "evaluation",
+    "evaluation_cutoff": "max(2, segment_length // 2 - 1)",
+    "seed": 20260814,
+    "replicate_seeds": [20260814, 20260815, 20260816],
+    "prediction_samples": 64,
+    "primary_comparator": "NEX326-PHASE-SPACE-4D-CONTOUR-DISTANCE-v3",
+    "primary_metric": "position_energy_score_d2",
+    "exploratory_gain_rule": "negative mean paired primary-metric delta and improvement on at least 2 of 3 seeds"
+  },
+  "metrics": ["position_energy_score_d2", "position_hdr90_coverage", "position_cep50_error", "velocity_endpoint_rmse", "kinematic_identity_max_error"]
+}

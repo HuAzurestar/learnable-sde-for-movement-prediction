@@ -1,0 +1,1004 @@
+"""Supplemental four-dimensional underdamped benchmark for NEX326 cohorts."""
+
+from __future__ import annotations
+
+import hashlib
+import importlib.metadata
+import json
+import platform
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Mapping, Protocol, Sequence
+
+import numpy as np
+
+from .cohort import Cohort, Segment, load_cohort
+
+
+SPEC_PATH = Path(__file__).with_name("phase_space_benchmark.json")
+REPORT_SCHEMA_VERSION = "nex326-phase-space-benchmark-report-v1"
+IMPLEMENTATION_FILES = (
+    "cohort.py",
+    "environment.lock.json",
+    "phase_space.py",
+    "phase_space_benchmark.json",
+    "phase_space_terrain_benchmark.json",
+    "phase_space_directional_terrain_benchmark.json",
+    "phase_space_directional_ablation.json",
+    "phase_space_gradient_only_benchmark.json",
+    "phase_space_signed_uphill_benchmark.json",
+    "phase_space_contour_distance_benchmark.json",
+    "phase_space_terrain_aligned_benchmark.json",
+    "phase_space_terrain_aligned_residual_benchmark.json",
+    "spatial_conditions.py",
+)
+
+
+class PhaseSpaceError(ValueError):
+    """A phase-space execution violates the registered four-dimensional contract."""
+
+
+class ConditionField(Protocol):
+    """Spatial condition lookup used during off-observation rollout."""
+
+    @property
+    def names(self) -> tuple[str, ...]: ...
+
+    def evaluate(self, position: np.ndarray, time: float) -> np.ndarray: ...
+
+
+class ConditionFieldResolver(Protocol):
+    """Provide the coordinate-aware field belonging to one trajectory file."""
+
+    @property
+    def names(self) -> tuple[str, ...]: ...
+
+    def for_segment(self, segment: Segment) -> ConditionField: ...
+
+    def identity(self) -> Mapping[str, object]: ...
+
+
+@dataclass(frozen=True)
+class AffineVelocityModel:
+    """Coupled affine velocity SDE with diffusion confined to velocity."""
+
+    condition_names: tuple[str, ...]
+    feature_basis: str
+    feature_names: tuple[str, ...]
+    feature_mean: np.ndarray
+    feature_scale: np.ndarray
+    weights: np.ndarray
+    diffusion_covariance: np.ndarray
+    transition_count: int
+
+    def acceleration(
+        self,
+        velocity: np.ndarray,
+        conditions: np.ndarray | None = None,
+    ) -> np.ndarray:
+        velocity_values = np.asarray(velocity, dtype=float)
+        one = velocity_values.ndim == 1
+        velocity_matrix = np.atleast_2d(velocity_values)
+        if velocity_matrix.shape[1] != 2:
+            raise PhaseSpaceError("velocity must have shape (..., 2)")
+        raw, _ = _velocity_feature_matrix(
+            velocity_matrix,
+            conditions,
+            self.condition_names,
+            self.feature_basis,
+        )
+        normalized = (raw - self.feature_mean) / self.feature_scale
+        design = np.column_stack([np.ones(len(normalized)), normalized])
+        result = design @ self.weights
+        return result[0] if one else result
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "kind": "coupled_affine_velocity_ou",
+            "condition_names": list(self.condition_names),
+            "feature_basis": self.feature_basis,
+            "feature_names": list(self.feature_names),
+            "feature_mean": self.feature_mean.tolist(),
+            "feature_scale": self.feature_scale.tolist(),
+            "weights": self.weights.tolist(),
+            "diffusion_covariance": self.diffusion_covariance.tolist(),
+            "transition_count": self.transition_count,
+            "diffusion_state_support": ["vx", "vy"],
+        }
+
+
+@dataclass(frozen=True)
+class TerrainAlignedVelocityModel:
+    """Velocity drift resolved into terrain-normal and contour-tangent parts."""
+
+    condition_names: tuple[str, ...]
+    intercept: np.ndarray
+    normal_response: float
+    tangent_response: float
+    gradient_force: float
+    design_scales: np.ndarray
+    diffusion_covariance: np.ndarray
+    transition_count: int
+
+    def acceleration(
+        self,
+        velocity: np.ndarray,
+        conditions: np.ndarray | None = None,
+    ) -> np.ndarray:
+        velocity_values = np.asarray(velocity, dtype=float)
+        one = velocity_values.ndim == 1
+        velocity_matrix = np.atleast_2d(velocity_values)
+        condition_matrix = _validated_directional_conditions(
+            velocity_matrix, conditions, self.condition_names
+        )
+        gradient = condition_matrix[:, 1:3]
+        normal, tangent = terrain_aligned_velocity_components(
+            velocity_matrix, gradient
+        )
+        result = (
+            self.intercept
+            + self.normal_response * normal
+            + self.tangent_response * tangent
+            + self.gradient_force * gradient
+        )
+        return result[0] if one else result
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "kind": "terrain_aligned_projection_drift",
+            "condition_names": list(self.condition_names),
+            "drift_formula": "b + lambda_normal*P_normal*v + lambda_tangent*P_tangent*v + kappa*gradient",
+            "intercept": self.intercept.tolist(),
+            "normal_response": self.normal_response,
+            "tangent_response": self.tangent_response,
+            "gradient_force": self.gradient_force,
+            "design_scales": self.design_scales.tolist(),
+            "diffusion_covariance": self.diffusion_covariance.tolist(),
+            "transition_count": self.transition_count,
+            "diffusion_state_support": ["vx", "vy"],
+            "invariance": "P_tangent is unchanged when a contour tangent representative t is replaced by -t",
+            "flat_gradient_convention": "P_normal*v=0 and P_tangent*v=v",
+        }
+
+
+@dataclass(frozen=True)
+class TerrainAlignedResidualModel:
+    """Contour-distance affine drift plus one terrain-normal vector response."""
+
+    condition_names: tuple[str, ...]
+    feature_basis: str
+    feature_names: tuple[str, ...]
+    feature_mean: np.ndarray
+    feature_scale: np.ndarray
+    base_weights: np.ndarray
+    normal_response: float
+    normal_design_scale: float
+    diffusion_covariance: np.ndarray
+    transition_count: int
+
+    def acceleration(
+        self,
+        velocity: np.ndarray,
+        conditions: np.ndarray | None = None,
+    ) -> np.ndarray:
+        velocity_values = np.asarray(velocity, dtype=float)
+        one = velocity_values.ndim == 1
+        velocity_matrix = np.atleast_2d(velocity_values)
+        condition_matrix = _validated_directional_conditions(
+            velocity_matrix, conditions, self.condition_names
+        )
+        raw, _ = _velocity_feature_matrix(
+            velocity_matrix,
+            condition_matrix,
+            self.condition_names,
+            self.feature_basis,
+        )
+        normalized = (raw - self.feature_mean) / self.feature_scale
+        base = np.column_stack([np.ones(len(normalized)), normalized]) @ self.base_weights
+        normal, _ = terrain_aligned_velocity_components(
+            velocity_matrix, condition_matrix[:, 1:3]
+        )
+        result = base + self.normal_response * normal
+        return result[0] if one else result
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "kind": "terrain_aligned_residual_drift",
+            "condition_names": list(self.condition_names),
+            "base_feature_basis": self.feature_basis,
+            "base_feature_names": list(self.feature_names),
+            "base_feature_mean": self.feature_mean.tolist(),
+            "base_feature_scale": self.feature_scale.tolist(),
+            "base_weights": self.base_weights.tolist(),
+            "normal_response": self.normal_response,
+            "normal_design_scale": self.normal_design_scale,
+            "drift_formula": "affine_contour_distance(v,C) + lambda_normal*P_normal*v",
+            "nested_baseline": "lambda_normal=0 recovers contour-distance v3",
+            "diffusion_covariance": self.diffusion_covariance.tolist(),
+            "transition_count": self.transition_count,
+            "diffusion_state_support": ["vx", "vy"],
+            "invariance": "P_normal is unchanged when an uphill unit vector u is replaced by -u",
+            "flat_gradient_convention": "P_normal*v=0",
+        }
+
+
+@dataclass(frozen=True)
+class PhaseSpacePrediction:
+    segment_id: str
+    target_state: np.ndarray
+    paths: np.ndarray
+    cutoff: int
+
+
+def directional_terrain_velocity_terms(
+    velocity: np.ndarray,
+    gradient: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return signed uphill speed and distance to the unoriented contour line."""
+    velocity_matrix = np.atleast_2d(np.asarray(velocity, dtype=float))
+    gradient_matrix = np.atleast_2d(np.asarray(gradient, dtype=float))
+    if (
+        velocity_matrix.shape != gradient_matrix.shape
+        or velocity_matrix.shape[1] != 2
+        or not np.isfinite(velocity_matrix).all()
+        or not np.isfinite(gradient_matrix).all()
+    ):
+        raise PhaseSpaceError("velocity and terrain gradient must share shape (..., 2)")
+    magnitude = np.linalg.norm(gradient_matrix, axis=1)
+    uphill_unit = np.divide(
+        gradient_matrix,
+        magnitude[:, None],
+        out=np.zeros_like(gradient_matrix),
+        where=magnitude[:, None] > 1e-12,
+    )
+    signed_uphill_speed = np.einsum("ni,ni->n", velocity_matrix, uphill_unit)
+    return signed_uphill_speed, np.abs(signed_uphill_speed)
+
+
+def _validated_directional_conditions(
+    velocity: np.ndarray,
+    conditions: np.ndarray | None,
+    condition_names: Sequence[str],
+) -> np.ndarray:
+    required = (
+        "terrain_elevation",
+        "terrain_gradient_east",
+        "terrain_gradient_north",
+    )
+    if tuple(condition_names) != required:
+        raise PhaseSpaceError(
+            "terrain-aligned drift requires elevation/east-gradient/north-gradient"
+        )
+    if conditions is None:
+        raise PhaseSpaceError("terrain-aligned drift requires a spatial field")
+    matrix = np.atleast_2d(np.asarray(conditions, dtype=float))
+    if matrix.shape != (len(velocity), len(required)) or not np.isfinite(matrix).all():
+        raise PhaseSpaceError("condition field returned an incompatible shape")
+    return matrix
+
+
+def terrain_aligned_velocity_components(
+    velocity: np.ndarray,
+    gradient: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Project velocity onto uphill-normal and unoriented contour subspaces."""
+    velocity_matrix = np.atleast_2d(np.asarray(velocity, dtype=float))
+    gradient_matrix = np.atleast_2d(np.asarray(gradient, dtype=float))
+    if (
+        velocity_matrix.shape != gradient_matrix.shape
+        or velocity_matrix.shape[1] != 2
+        or not np.isfinite(velocity_matrix).all()
+        or not np.isfinite(gradient_matrix).all()
+    ):
+        raise PhaseSpaceError("velocity and terrain gradient must share shape (..., 2)")
+    squared_magnitude = np.einsum("ni,ni->n", gradient_matrix, gradient_matrix)
+    projection_scale = np.divide(
+        np.einsum("ni,ni->n", velocity_matrix, gradient_matrix),
+        squared_magnitude,
+        out=np.zeros(len(velocity_matrix), dtype=float),
+        where=squared_magnitude > 1e-24,
+    )
+    normal = projection_scale[:, None] * gradient_matrix
+    tangent = velocity_matrix - normal
+    return normal, tangent
+
+
+def _velocity_feature_matrix(
+    velocity: np.ndarray,
+    conditions: np.ndarray | None,
+    condition_names: Sequence[str],
+    feature_basis: str,
+) -> tuple[np.ndarray, tuple[str, ...]]:
+    velocity_matrix = np.atleast_2d(np.asarray(velocity, dtype=float))
+    names = tuple(condition_names)
+    if velocity_matrix.shape[1] != 2:
+        raise PhaseSpaceError("velocity must have shape (..., 2)")
+    if names:
+        if conditions is None:
+            raise PhaseSpaceError("registered conditions require a spatial field")
+        condition_matrix = np.atleast_2d(np.asarray(conditions, dtype=float))
+        if condition_matrix.shape != (len(velocity_matrix), len(names)):
+            raise PhaseSpaceError("condition field returned an incompatible shape")
+    else:
+        condition_matrix = np.empty((len(velocity_matrix), 0), dtype=float)
+    if feature_basis == "direct":
+        return (
+            np.column_stack([velocity_matrix, condition_matrix]),
+            ("vx", "vy", *names),
+        )
+    directional_bases = {
+        "directional_terrain_gradient_only": (),
+        "directional_terrain_signed_uphill": ("signed_uphill_speed",),
+        "directional_terrain_contour_distance": (
+            "velocity_to_contour_line_distance",
+        ),
+        "directional_terrain_v2": (
+            "signed_uphill_speed",
+            "velocity_to_contour_line_distance",
+        ),
+    }
+    if feature_basis not in directional_bases:
+        raise PhaseSpaceError(f"unsupported velocity feature basis: {feature_basis}")
+    required = (
+        "terrain_elevation",
+        "terrain_gradient_east",
+        "terrain_gradient_north",
+    )
+    if names != required:
+        raise PhaseSpaceError(
+            "directional terrain basis requires elevation/east-gradient/north-gradient"
+        )
+    gradient = condition_matrix[:, 1:3]
+    signed_uphill_speed, velocity_to_contour_distance = (
+        directional_terrain_velocity_terms(velocity_matrix, gradient)
+    )
+    derived_values = {
+        "signed_uphill_speed": signed_uphill_speed,
+        "velocity_to_contour_line_distance": velocity_to_contour_distance,
+    }
+    derived_names = directional_bases[feature_basis]
+    matrix = np.column_stack(
+        [velocity_matrix, condition_matrix]
+        + [derived_values[name] for name in derived_names]
+    )
+    feature_names = ("vx", "vy", *required, *derived_names)
+    return matrix, feature_names
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _implementation_identity() -> dict[str, object]:
+    root = Path(__file__).resolve().parent
+    files = [
+        {"path": name, "sha256": _sha256(root / name)}
+        for name in IMPLEMENTATION_FILES
+    ]
+    encoded = json.dumps(files, sort_keys=True, separators=(",", ":")).encode()
+    lock = json.loads((root / "environment.lock.json").read_text(encoding="utf-8"))
+    runtime = {
+        "python": platform.python_version(),
+        **{
+            package: importlib.metadata.version(package)
+            for package in sorted(lock["packages"])
+        },
+    }
+    return {
+        "source_bundle_sha256": hashlib.sha256(encoded).hexdigest(),
+        "files": files,
+        "runtime": runtime,
+        "environment_lock_conformant": runtime
+        == {"python": lock["python"], **dict(sorted(lock["packages"].items()))},
+    }
+
+
+def load_phase_space_spec(path: Path | str = SPEC_PATH) -> dict[str, object]:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if payload.get("schema_version") != "nex326-phase-space-benchmark-spec-v1":
+        raise PhaseSpaceError("unsupported phase-space specification")
+    state = payload.get("state_contract")
+    if not isinstance(state, Mapping) or state.get("layout") != ["x", "y", "vx", "vy"]:
+        raise PhaseSpaceError("phase-space state layout must be [x,y,vx,vy]")
+    if state.get("position_dynamics") != "dX=Vdt" or state.get("noise_target") != "velocity_only":
+        raise PhaseSpaceError("phase-space kinematic structure is not registered")
+    condition = payload.get("condition_contract")
+    if not isinstance(condition, Mapping) or condition.get("condition_is_dynamic_state") is not False:
+        raise PhaseSpaceError("conditions must remain external to the dynamic state")
+    protocol = payload.get("protocol")
+    if not isinstance(protocol, Mapping) or protocol.get("fit_splits") != ["train", "adapt"]:
+        raise PhaseSpaceError("unexpected phase-space split protocol")
+    return payload
+
+
+def phase_space_state(segment: Segment) -> np.ndarray:
+    """Create causal ``[x,y,vx,vy]`` states from irregular position observations."""
+    if len(segment.time) < 3:
+        raise PhaseSpaceError("phase-space conversion requires at least three observations")
+    elapsed = np.diff(segment.time)
+    if not np.isfinite(elapsed).all() or np.any(elapsed <= 0.0):
+        raise PhaseSpaceError("phase-space conversion requires positive finite intervals")
+    interval_velocity = np.diff(segment.state, axis=0) / elapsed[:, None]
+    velocity = np.empty_like(segment.state)
+    velocity[1:] = interval_velocity
+    velocity[0] = interval_velocity[0]
+    state = np.column_stack([segment.state, velocity])
+    if state.shape != (len(segment.time), 4) or not np.isfinite(state).all():
+        raise PhaseSpaceError("derived phase-space state is invalid")
+    return state
+
+
+def _transition_rows(
+    segments: Sequence[Segment],
+    condition_names: Sequence[str],
+    condition_resolver: ConditionFieldResolver | None = None,
+    feature_basis: str = "direct",
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    features: list[np.ndarray] = []
+    increments: list[np.ndarray] = []
+    elapsed_values: list[float] = []
+    for segment in segments:
+        phase = phase_space_state(segment)
+        field = (
+            condition_resolver.for_segment(segment)
+            if condition_resolver is not None
+            else None
+        )
+        for index in range(1, len(segment.time) - 1):
+            elapsed = float(segment.time[index + 1] - segment.time[index])
+            if field is not None:
+                condition = field.evaluate(
+                    phase[index : index + 1, :2], float(segment.time[index])
+                )[0]
+            else:
+                condition = np.asarray(
+                    [segment.conditions[name][index] for name in condition_names],
+                    dtype=float,
+                )
+            feature, _ = _velocity_feature_matrix(
+                phase[index : index + 1, 2:],
+                condition[None, :] if len(condition) else None,
+                condition_names,
+                feature_basis,
+            )
+            features.append(feature[0])
+            increments.append(phase[index + 1, 2:] - phase[index, 2:])
+            elapsed_values.append(elapsed)
+    if len(features) < 3:
+        raise PhaseSpaceError("phase-space fit requires at least three velocity transitions")
+    return np.stack(features), np.stack(increments), np.asarray(elapsed_values)
+
+
+def fit_affine_velocity_model(
+    segments: Sequence[Segment],
+    *,
+    condition_names: Sequence[str] = (),
+    condition_resolver: ConditionFieldResolver | None = None,
+    feature_basis: str = "direct",
+    ridge: float = 1e-6,
+) -> AffineVelocityModel:
+    """Fit ``dV=f(V,C)dt+GdW`` without learning the kinematic position row."""
+    if ridge <= 0.0:
+        raise PhaseSpaceError("ridge must be positive")
+    names = tuple(str(name) for name in condition_names)
+    if condition_resolver is not None and condition_resolver.names != names:
+        raise PhaseSpaceError("condition resolver names do not match the registered model")
+    if condition_resolver is None and any(
+        any(name not in segment.conditions for name in names) for segment in segments
+    ):
+        raise PhaseSpaceError("a registered training condition is unavailable")
+    raw, velocity_increment, elapsed = _transition_rows(
+        segments, names, condition_resolver, feature_basis
+    )
+    _, feature_names = _velocity_feature_matrix(
+        np.zeros((1, 2)),
+        np.zeros((1, len(names))) if names else None,
+        names,
+        feature_basis,
+    )
+    feature_mean = raw.mean(axis=0)
+    feature_scale = raw.std(axis=0)
+    feature_scale[feature_scale < 1e-10] = 1.0
+    normalized = (raw - feature_mean) / feature_scale
+    rate_design = np.column_stack([np.ones(len(normalized)), normalized])
+    increment_design = rate_design * elapsed[:, None]
+    penalty = ridge * np.eye(increment_design.shape[1])
+    penalty[0, 0] = 0.0
+    weights = np.linalg.solve(
+        increment_design.T @ increment_design + penalty,
+        increment_design.T @ velocity_increment,
+    )
+    residual = velocity_increment - increment_design @ weights
+    diffusion = np.einsum("ni,nj->ij", residual, residual) / elapsed.sum()
+    diffusion = 0.5 * (diffusion + diffusion.T) + 1e-10 * np.eye(2)
+    if float(np.linalg.eigvalsh(diffusion).min()) <= 0.0:
+        raise PhaseSpaceError("velocity diffusion fit is not positive definite")
+    return AffineVelocityModel(
+        condition_names=names,
+        feature_basis=feature_basis,
+        feature_names=feature_names,
+        feature_mean=feature_mean,
+        feature_scale=feature_scale,
+        weights=weights,
+        diffusion_covariance=diffusion,
+        transition_count=len(raw),
+    )
+
+
+def _terrain_aligned_transition_rows(
+    segments: Sequence[Segment],
+    condition_names: Sequence[str],
+    condition_resolver: ConditionFieldResolver,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    velocities: list[np.ndarray] = []
+    conditions: list[np.ndarray] = []
+    increments: list[np.ndarray] = []
+    elapsed_values: list[float] = []
+    for segment in segments:
+        phase = phase_space_state(segment)
+        field = condition_resolver.for_segment(segment)
+        for index in range(1, len(segment.time) - 1):
+            elapsed = float(segment.time[index + 1] - segment.time[index])
+            condition = field.evaluate(
+                phase[index : index + 1, :2], float(segment.time[index])
+            )
+            condition_matrix = _validated_directional_conditions(
+                phase[index : index + 1, 2:], condition, condition_names
+            )
+            velocities.append(phase[index, 2:])
+            conditions.append(condition_matrix[0])
+            increments.append(phase[index + 1, 2:] - phase[index, 2:])
+            elapsed_values.append(elapsed)
+    if len(velocities) < 3:
+        raise PhaseSpaceError("phase-space fit requires at least three velocity transitions")
+    return (
+        np.stack(velocities),
+        np.stack(conditions),
+        np.stack(increments),
+        np.asarray(elapsed_values),
+    )
+
+
+def _terrain_aligned_design(
+    velocity: np.ndarray,
+    gradient: np.ndarray,
+) -> np.ndarray:
+    normal, tangent = terrain_aligned_velocity_components(velocity, gradient)
+    count = len(velocity)
+    design = np.zeros((2 * count, 5), dtype=float)
+    design[0::2, 0] = 1.0
+    design[1::2, 1] = 1.0
+    design[0::2, 2] = normal[:, 0]
+    design[1::2, 2] = normal[:, 1]
+    design[0::2, 3] = tangent[:, 0]
+    design[1::2, 3] = tangent[:, 1]
+    design[0::2, 4] = gradient[:, 0]
+    design[1::2, 4] = gradient[:, 1]
+    return design
+
+
+def fit_terrain_aligned_velocity_model(
+    segments: Sequence[Segment],
+    *,
+    condition_names: Sequence[str],
+    condition_resolver: ConditionFieldResolver | None,
+    ridge: float = 1e-6,
+) -> TerrainAlignedVelocityModel:
+    """Fit a drift with separate terrain-normal and contour-tangent responses."""
+    if ridge <= 0.0:
+        raise PhaseSpaceError("ridge must be positive")
+    names = tuple(str(name) for name in condition_names)
+    if condition_resolver is None:
+        raise PhaseSpaceError("terrain-aligned drift requires a spatial condition resolver")
+    if condition_resolver.names != names:
+        raise PhaseSpaceError("condition resolver names do not match the registered model")
+    velocity, conditions, increments, elapsed = _terrain_aligned_transition_rows(
+        segments, names, condition_resolver
+    )
+    gradient = conditions[:, 1:3]
+    physical_design = _terrain_aligned_design(velocity, gradient)
+    # One shared scale per vector block preserves rotational meaning while avoiding
+    # a ridge penalty that depends on the units of velocity versus terrain gradient.
+    block_scales = np.asarray(
+        [
+            1.0,
+            1.0,
+            max(float(np.sqrt(np.mean(physical_design[:, 2] ** 2))), 1e-10),
+            max(float(np.sqrt(np.mean(physical_design[:, 3] ** 2))), 1e-10),
+            max(float(np.sqrt(np.mean(physical_design[:, 4] ** 2))), 1e-10),
+        ]
+    )
+    normalized_design = physical_design / block_scales
+    increment_design = normalized_design * np.repeat(elapsed, 2)[:, None]
+    target = increments.reshape(-1)
+    penalty = ridge * np.eye(increment_design.shape[1])
+    penalty[:2, :2] = 0.0
+    normalized_coefficients = np.linalg.solve(
+        increment_design.T @ increment_design + penalty,
+        increment_design.T @ target,
+    )
+    coefficients = normalized_coefficients / block_scales
+    predicted = (physical_design @ coefficients).reshape(-1, 2) * elapsed[:, None]
+    residual = increments - predicted
+    diffusion = np.einsum("ni,nj->ij", residual, residual) / elapsed.sum()
+    diffusion = 0.5 * (diffusion + diffusion.T) + 1e-10 * np.eye(2)
+    if float(np.linalg.eigvalsh(diffusion).min()) <= 0.0:
+        raise PhaseSpaceError("velocity diffusion fit is not positive definite")
+    return TerrainAlignedVelocityModel(
+        condition_names=names,
+        intercept=coefficients[:2],
+        normal_response=float(coefficients[2]),
+        tangent_response=float(coefficients[3]),
+        gradient_force=float(coefficients[4]),
+        design_scales=block_scales,
+        diffusion_covariance=diffusion,
+        transition_count=len(velocity),
+    )
+
+
+def fit_terrain_aligned_residual_model(
+    segments: Sequence[Segment],
+    *,
+    condition_names: Sequence[str],
+    condition_resolver: ConditionFieldResolver | None,
+    ridge: float = 1e-6,
+) -> TerrainAlignedResidualModel:
+    """Fit one normal-vector response on top of the contour-distance model."""
+    if ridge <= 0.0:
+        raise PhaseSpaceError("ridge must be positive")
+    names = tuple(str(name) for name in condition_names)
+    if condition_resolver is None:
+        raise PhaseSpaceError(
+            "terrain-aligned residual drift requires a spatial condition resolver"
+        )
+    if condition_resolver.names != names:
+        raise PhaseSpaceError("condition resolver names do not match the registered model")
+    velocity, conditions, increments, elapsed = _terrain_aligned_transition_rows(
+        segments, names, condition_resolver
+    )
+    feature_basis = "directional_terrain_contour_distance"
+    raw, feature_names = _velocity_feature_matrix(
+        velocity, conditions, names, feature_basis
+    )
+    feature_mean = raw.mean(axis=0)
+    feature_scale = raw.std(axis=0)
+    feature_scale[feature_scale < 1e-10] = 1.0
+    normalized = (raw - feature_mean) / feature_scale
+    base_design = np.column_stack([np.ones(len(normalized)), normalized])
+    normal, _ = terrain_aligned_velocity_components(
+        velocity, conditions[:, 1:3]
+    )
+    normal_scale = max(float(np.sqrt(np.mean(normal**2))), 1e-10)
+    parameter_count = 2 * base_design.shape[1] + 1
+    rate_design = np.zeros((2 * len(velocity), parameter_count), dtype=float)
+    width = base_design.shape[1]
+    rate_design[0::2, :width] = base_design
+    rate_design[1::2, width : 2 * width] = base_design
+    rate_design[0::2, -1] = normal[:, 0] / normal_scale
+    rate_design[1::2, -1] = normal[:, 1] / normal_scale
+    increment_design = rate_design * np.repeat(elapsed, 2)[:, None]
+    target = increments.reshape(-1)
+    penalty = ridge * np.eye(parameter_count)
+    penalty[0, 0] = 0.0
+    penalty[width, width] = 0.0
+    coefficients = np.linalg.solve(
+        increment_design.T @ increment_design + penalty,
+        increment_design.T @ target,
+    )
+    base_weights = np.column_stack(
+        [coefficients[:width], coefficients[width : 2 * width]]
+    )
+    normal_response = float(coefficients[-1] / normal_scale)
+    predicted = (
+        base_design @ base_weights + normal_response * normal
+    ) * elapsed[:, None]
+    residual = increments - predicted
+    diffusion = np.einsum("ni,nj->ij", residual, residual) / elapsed.sum()
+    diffusion = 0.5 * (diffusion + diffusion.T) + 1e-10 * np.eye(2)
+    if float(np.linalg.eigvalsh(diffusion).min()) <= 0.0:
+        raise PhaseSpaceError("velocity diffusion fit is not positive definite")
+    return TerrainAlignedResidualModel(
+        condition_names=names,
+        feature_basis=feature_basis,
+        feature_names=feature_names,
+        feature_mean=feature_mean,
+        feature_scale=feature_scale,
+        base_weights=base_weights,
+        normal_response=normal_response,
+        normal_design_scale=normal_scale,
+        diffusion_covariance=diffusion,
+        transition_count=len(velocity),
+    )
+
+
+def rollout_phase_space(
+    model: AffineVelocityModel | TerrainAlignedVelocityModel | TerrainAlignedResidualModel,
+    segment: Segment,
+    *,
+    cutoff: int,
+    n_samples: int,
+    rng: np.random.Generator,
+    condition_field: ConditionField | None = None,
+) -> np.ndarray:
+    """Roll out four-dimensional paths while preserving ``dX=Vdt`` by construction."""
+    if n_samples < 2:
+        raise PhaseSpaceError("phase-space rollout requires at least two samples")
+    if not 2 <= cutoff < len(segment.time) - 1:
+        raise PhaseSpaceError("phase-space evaluation cutoff is invalid")
+    if model.condition_names and (
+        condition_field is None or condition_field.names != model.condition_names
+    ):
+        raise PhaseSpaceError("rollout requires the registered spatial condition field")
+    initial = phase_space_state(segment)[cutoff]
+    step_count = len(segment.time) - cutoff - 1
+    paths = np.empty((n_samples, step_count + 1, 4), dtype=float)
+    paths[:, 0, :] = initial
+    for offset, index in enumerate(range(cutoff, len(segment.time) - 1), start=1):
+        elapsed = float(segment.time[index + 1] - segment.time[index])
+        current = paths[:, offset - 1, :]
+        conditions = (
+            condition_field.evaluate(current[:, :2], float(segment.time[index]))
+            if condition_field is not None
+            else None
+        )
+        acceleration = model.acceleration(current[:, 2:], conditions)
+        noise = rng.multivariate_normal(
+            np.zeros(2), model.diffusion_covariance * elapsed, size=n_samples
+        )
+        next_velocity = current[:, 2:] + acceleration * elapsed + noise
+        next_position = current[:, :2] + 0.5 * (
+            current[:, 2:] + next_velocity
+        ) * elapsed
+        paths[:, offset, :2] = next_position
+        paths[:, offset, 2:] = next_velocity
+    if not np.isfinite(paths).all():
+        raise PhaseSpaceError("phase-space rollout produced non-finite states")
+    return paths
+
+
+def _energy_score(samples: np.ndarray, target: np.ndarray) -> float:
+    first = np.linalg.norm(samples - target, axis=1).mean()
+    second = np.linalg.norm(samples - np.roll(samples, 1, axis=0), axis=1).mean()
+    return float(first - 0.5 * second)
+
+
+def _validation_velocity_rmse(
+    model: AffineVelocityModel | TerrainAlignedVelocityModel | TerrainAlignedResidualModel,
+    segments: Sequence[Segment],
+    condition_resolver: ConditionFieldResolver | None = None,
+) -> float:
+    if isinstance(model, (TerrainAlignedVelocityModel, TerrainAlignedResidualModel)):
+        if condition_resolver is None:
+            raise PhaseSpaceError(
+                "terrain-aligned validation requires a spatial condition resolver"
+            )
+        velocity, conditions, increments, elapsed = _terrain_aligned_transition_rows(
+            segments, model.condition_names, condition_resolver
+        )
+        predicted = model.acceleration(velocity, conditions) * elapsed[:, None]
+        return float(np.sqrt(np.mean((predicted - increments) ** 2)))
+    raw, increments, elapsed = _transition_rows(
+        segments,
+        model.condition_names,
+        condition_resolver,
+        model.feature_basis,
+    )
+    normalized = (raw - model.feature_mean) / model.feature_scale
+    predicted = (
+        np.column_stack([np.ones(len(normalized)), normalized]) @ model.weights
+    ) * elapsed[:, None]
+    return float(np.sqrt(np.mean((predicted - increments) ** 2)))
+
+
+def _prediction_metrics(
+    predictions: Sequence[PhaseSpacePrediction],
+) -> tuple[dict[str, float | int], list[dict[str, object]]]:
+    energy: list[float] = []
+    coverage: list[float] = []
+    position_error: list[float] = []
+    velocity_error: list[float] = []
+    rows: list[dict[str, object]] = []
+    for prediction in predictions:
+        endpoints = prediction.paths[:, -1, :]
+        position = endpoints[:, :2]
+        target_position = prediction.target_state[:2]
+        center = position.mean(axis=0)
+        radii = np.linalg.norm(position - center, axis=1)
+        target_radius = float(np.linalg.norm(target_position - center))
+        segment_energy = _energy_score(position, target_position)
+        segment_position_error = target_radius
+        segment_velocity_error = float(
+            np.linalg.norm(endpoints[:, 2:].mean(axis=0) - prediction.target_state[2:])
+        )
+        energy.append(segment_energy)
+        coverage.append(float(target_radius <= np.quantile(radii, 0.9)))
+        position_error.append(segment_position_error)
+        velocity_error.append(segment_velocity_error)
+        rows.append(
+            {
+                "segment_id": prediction.segment_id,
+                "cutoff": prediction.cutoff,
+                "position_energy_score_d2": segment_energy,
+                "position_endpoint_error": segment_position_error,
+                "velocity_endpoint_error": segment_velocity_error,
+            }
+        )
+    return (
+        {
+            "position_energy_score_d2": float(np.mean(energy)),
+            "position_hdr90_coverage": float(np.mean(coverage)),
+            "position_cep50_error": float(np.median(position_error)),
+            "velocity_endpoint_rmse": float(
+                np.sqrt(np.mean(np.square(velocity_error)))
+            ),
+            "evaluation_segment_count": len(predictions),
+        },
+        rows,
+    )
+
+
+def run_phase_space_benchmark(
+    cohort: Cohort,
+    spec: Mapping[str, object],
+    *,
+    n_samples: int,
+    seed: int,
+    condition_resolver: ConditionFieldResolver | None = None,
+) -> dict[str, object]:
+    """Run a supplemental four-dimensional benchmark with optional spatial fields."""
+    velocity_config = spec["velocity_model"]
+    condition_config = spec["condition_contract"]
+    condition_names = tuple(condition_config["registered_condition_names"])
+    if condition_names and condition_resolver is None:
+        raise PhaseSpaceError("registered conditions require a spatial condition resolver")
+    if condition_resolver is not None and condition_resolver.names != condition_names:
+        raise PhaseSpaceError("condition resolver names do not match the specification")
+    fit_segments = cohort.splits["train"] + cohort.splits["adapt"]
+    model_kind = str(velocity_config["kind"])
+    if model_kind == "terrain_aligned_projection_drift":
+        model = fit_terrain_aligned_velocity_model(
+            fit_segments,
+            condition_names=condition_names,
+            condition_resolver=condition_resolver,
+            ridge=float(velocity_config["ridge"]),
+        )
+    elif model_kind == "terrain_aligned_residual_drift":
+        model = fit_terrain_aligned_residual_model(
+            fit_segments,
+            condition_names=condition_names,
+            condition_resolver=condition_resolver,
+            ridge=float(velocity_config["ridge"]),
+        )
+    elif model_kind == "coupled_affine_velocity_ou":
+        model = fit_affine_velocity_model(
+            fit_segments,
+            condition_names=condition_names,
+            condition_resolver=condition_resolver,
+            feature_basis=str(velocity_config.get("feature_basis", "direct")),
+            ridge=float(velocity_config["ridge"]),
+        )
+    else:
+        raise PhaseSpaceError(f"unsupported velocity model kind: {model_kind}")
+    rng = np.random.default_rng(seed)
+    predictions: list[PhaseSpacePrediction] = []
+    for segment in cohort.splits["evaluation"]:
+        cutoff = max(2, len(segment.time) // 2 - 1)
+        condition_field = (
+            condition_resolver.for_segment(segment)
+            if condition_resolver is not None
+            else None
+        )
+        paths = rollout_phase_space(
+            model,
+            segment,
+            cutoff=cutoff,
+            n_samples=n_samples,
+            rng=rng,
+            condition_field=condition_field,
+        )
+        predictions.append(
+            PhaseSpacePrediction(
+                segment_id=segment.segment_id,
+                target_state=phase_space_state(segment)[-1],
+                paths=paths,
+                cutoff=cutoff,
+            )
+        )
+    metrics, per_segment = _prediction_metrics(predictions)
+    # Recompute the exact irregular-dt identity with the registered segment times.
+    exact_errors: list[float] = []
+    for prediction, segment in zip(predictions, cohort.splits["evaluation"]):
+        elapsed = np.diff(segment.time[prediction.cutoff :])
+        delta_position = np.diff(prediction.paths[:, :, :2], axis=1)
+        average_velocity = 0.5 * (
+            prediction.paths[:, :-1, 2:] + prediction.paths[:, 1:, 2:]
+        )
+        exact_errors.append(
+            float(np.max(np.abs(delta_position - average_velocity * elapsed[None, :, None])))
+        )
+    metrics["kinematic_identity_max_error"] = float(max(exact_errors))
+    return {
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "benchmark_id": spec["benchmark_id"],
+        "scientific_role": spec["scientific_role"],
+        "verdict": "not_assessed",
+        "base_benchmark": spec["base_benchmark"],
+        "implementation": _implementation_identity(),
+        "dataset": {
+            "dataset_id": cohort.dataset_id,
+            "data_version": cohort.data_version,
+            "fingerprint": cohort.fingerprint,
+            "purpose": cohort.purpose,
+            "split_counts": {name: len(values) for name, values in cohort.splits.items()},
+        },
+        "state_contract": spec["state_contract"],
+        "condition_contract": spec["condition_contract"],
+        "condition_field": (
+            condition_resolver.identity() if condition_resolver is not None else None
+        ),
+        "protocol": {
+            **spec["protocol"],
+            "executed_seed": seed,
+            "executed_prediction_samples": n_samples,
+        },
+        "model": model.to_dict(),
+        "validation": {
+            "velocity_increment_rmse": _validation_velocity_rmse(
+                model, cohort.splits["validation"], condition_resolver
+            )
+        },
+        "metrics": metrics,
+        "per_segment": per_segment,
+    }
+
+
+def write_phase_space_report(
+    cohort_path: Path | str,
+    output_path: Path | str,
+    *,
+    spec_path: Path | str = SPEC_PATH,
+    n_samples: int | None = None,
+    seed: int | None = None,
+    condition_resolver: ConditionFieldResolver | None = None,
+) -> dict[str, object]:
+    destination = Path(output_path)
+    if destination.exists():
+        raise PhaseSpaceError(f"output already exists: {destination}")
+    spec = load_phase_space_spec(spec_path)
+    protocol = spec["protocol"]
+    selected_samples = int(
+        protocol["prediction_samples"] if n_samples is None else n_samples
+    )
+    selected_seed = int(protocol["seed"] if seed is None else seed)
+    report = run_phase_space_benchmark(
+        load_cohort(cohort_path),
+        spec,
+        n_samples=selected_samples,
+        seed=selected_seed,
+        condition_resolver=condition_resolver,
+    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    return report
+
+
+__all__ = [
+    "AffineVelocityModel",
+    "ConditionField",
+    "ConditionFieldResolver",
+    "PhaseSpaceError",
+    "directional_terrain_velocity_terms",
+    "fit_affine_velocity_model",
+    "load_phase_space_spec",
+    "phase_space_state",
+    "rollout_phase_space",
+    "run_phase_space_benchmark",
+    "write_phase_space_report",
+]

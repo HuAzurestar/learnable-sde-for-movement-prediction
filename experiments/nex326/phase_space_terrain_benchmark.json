@@ -1,0 +1,45 @@
+{
+  "schema_version": "nex326-phase-space-benchmark-spec-v1",
+  "benchmark_id": "NEX326-PHASE-SPACE-4D-TERRAIN-v1",
+  "scientific_role": "supplemental_terrain_conditioned_benchmark_not_a_frozen_arm",
+  "base_benchmark": "NEX326-PHASE-SPACE-4D-v1",
+  "state_contract": {
+    "layout": ["x", "y", "vx", "vy"],
+    "dimension": 4,
+    "velocity_estimator": "causal_backward_difference",
+    "first_velocity": "copy_first_valid_backward_difference",
+    "position_dynamics": "dX=Vdt",
+    "position_integrator": "trapezoidal_velocity",
+    "noise_target": "velocity_only"
+  },
+  "condition_contract": {
+    "lookup_signature": "C(x,y)",
+    "condition_is_dynamic_state": false,
+    "spatial_position_required": true,
+    "registered_condition_names": ["terrain_elevation", "terrain_slope"],
+    "current_status": "registered_static_srtm_raster_field",
+    "anti_leakage": "condition slices recover only the file projection origin; feature values are sampled from the source raster and no trajectory-point nearest-neighbour index is constructed"
+  },
+  "velocity_model": {
+    "kind": "coupled_affine_velocity_ou",
+    "features": ["vx", "vy", "terrain_elevation", "terrain_slope"],
+    "time_is_a_learned_feature": false,
+    "ridge": 1e-6,
+    "diffusion": "full_2x2_velocity_increment_covariance"
+  },
+  "protocol": {
+    "fit_splits": ["train", "adapt"],
+    "validation_split": "validation",
+    "evaluation_split": "evaluation",
+    "evaluation_cutoff": "max(2, segment_length // 2 - 1)",
+    "seed": 20260814,
+    "prediction_samples": 64
+  },
+  "metrics": [
+    "position_energy_score_d2",
+    "position_hdr90_coverage",
+    "position_cep50_error",
+    "velocity_endpoint_rmse",
+    "kinematic_identity_max_error"
+  ]
+}

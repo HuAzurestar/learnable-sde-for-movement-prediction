@@ -1,0 +1,458 @@
+{
+  "schema_version": "nex326-phase-space-dsde-receipt-v1",
+  "benchmark_id": "NEX326-PHASE-SPACE-4D-SIGNED-UPHILL-v3",
+  "scientific_role": "supplemental_exploratory_benchmark",
+  "assessment": "not_assessed",
+  "replicate_seeds": [
+    20260814,
+    20260815,
+    20260816
+  ],
+  "replicate_count": 3,
+  "prediction_samples_per_segment": 64,
+  "cohort": {
+    "dataset_id": "NEX326-DSDE-ZHEJIANG-20P-PILOT-001",
+    "data_version": "nex313-zhejiang-349f06edc08f-20pct-pilot-v1",
+    "fingerprint": "c4eb7a337c13241928a543c839a21714da358d150de5befe6238b712fb4a7e48",
+    "purpose": "real_trajectory_20pct_pilot_not_final_scientific_evidence",
+    "split_counts": {
+      "train": 105,
+      "validation": 32,
+      "adapt": 32,
+      "evaluation": 28,
+      "animal_pretrain": 0
+    },
+    "source_file": "cohort.json",
+    "sha256": "646420b38d5110b6b9727b50447f96c59635ecfbade92210021c5d430b73dc04"
+  },
+  "implementation": {
+    "source_bundle_sha256": "c50dcc1cf9c9fa07bca4b3b6767e6ffc96d6944285e8f57c746837e66fc4b1d1",
+    "files": [
+      {
+        "path": "cohort.py",
+        "sha256": "e59617dc9b84fe5071ab94e2555f90af4199c3adb6c370c2cc206ba44f38af15"
+      },
+      {
+        "path": "environment.lock.json",
+        "sha256": "88cbe7947af98bf227242f909ed8355cae4af633a6863925fcd7bd1a1cc0774f"
+      },
+      {
+        "path": "phase_space.py",
+        "sha256": "760f2fa3f4a9dacc7920cb41b24fa2f0996f6aa3eb971962462584aab438d0f9"
+      },
+      {
+        "path": "phase_space_benchmark.json",
+        "sha256": "947db07a1e9fafb0da1cafc1edcc06d0393c0366ed7bcb8675fa8d9d8bca7b93"
+      },
+      {
+        "path": "phase_space_terrain_benchmark.json",
+        "sha256": "2926de3a2e1581ea2ec7660b3d4f89ab7e6f3efaf86136965c47c41479bfb0ff"
+      },
+      {
+        "path": "phase_space_directional_terrain_benchmark.json",
+        "sha256": "8fc03f976aaf9c15066320b1b3fadf4eef88147706aed3021b07cd2b82f5ef34"
+      },
+      {
+        "path": "phase_space_directional_ablation.json",
+        "sha256": "e93b8b1cea4655b20e1f82a8590aa88635e58bf335e5cec6c62157abe354b110"
+      },
+      {
+        "path": "phase_space_gradient_only_benchmark.json",
+        "sha256": "848545d54bd695ef4e5134f324648e478746acbec9da1b2a7249242bde612cee"
+      },
+      {
+        "path": "phase_space_signed_uphill_benchmark.json",
+        "sha256": "32d19e6680f77d2441778a5978532250897b1744ca9ef6fc34d04b2126087365"
+      },
+      {
+        "path": "phase_space_contour_distance_benchmark.json",
+        "sha256": "9442686f410e3d702238bc5ee7c41c82f42088dbf3ebe8ef6d1ee62c4cb90747"
+      },
+      {
+        "path": "spatial_conditions.py",
+        "sha256": "1eed09d983a094d64b0d844c97c83592c8791ba4b6da1b74da7c67b7d74de5af"
+      }
+    ],
+    "runtime": {
+      "python": "3.10.13",
+      "numpy": "1.26.4",
+      "pandas": "2.2.3",
+      "pyarrow": "24.0.0"
+    },
+    "environment_lock_conformant": true
+  },
+  "state_contract": {
+    "layout": [
+      "x",
+      "y",
+      "vx",
+      "vy"
+    ],
+    "dimension": 4,
+    "velocity_estimator": "causal_backward_difference",
+    "first_velocity": "copy_first_valid_backward_difference",
+    "position_dynamics": "dX=Vdt",
+    "position_integrator": "trapezoidal_velocity",
+    "noise_target": "velocity_only"
+  },
+  "condition_contract": {
+    "lookup_signature": "C(x,y)",
+    "condition_is_dynamic_state": false,
+    "spatial_position_required": true,
+    "registered_condition_names": [
+      "terrain_elevation",
+      "terrain_gradient_east",
+      "terrain_gradient_north"
+    ],
+    "gradient_units": "metres_elevation_per_metre_horizontal",
+    "current_status": "preregistered_directional_srtm_raster_field"
+  },
+  "condition_field": {
+    "schema_version": "nex326-dsde-raster-condition-resolver-v2",
+    "names": [
+      "terrain_elevation",
+      "terrain_gradient_east",
+      "terrain_gradient_north"
+    ],
+    "projection": "inverse NEX-313 file-mean equirectangular local projection; origin recovered from the registered condition slice",
+    "feature_source": "SRTM HGT raster sampled at each simulated position",
+    "future_route_point_index_used": false,
+    "condition_files": [
+      {
+        "path": "zhejiang_eval/11329836_2022_05_23_13_27_23_Lizhuang_Xingtang_cond.parquet",
+        "sha256": "e3a3445c5d2966bd0ecdf58ed7cf0131ab2ec5f748a940301725495d6245e791"
+      },
+      {
+        "path": "zhejiang_eval/11388933_2024_06_15_20_13_27.035_Xingweizhuang_part_cond.parquet",
+        "sha256": "40026a0d097dfe7f56827eb6dac296b081b149e0d2585affb864b96c8070e549"
+      },
+      {
+        "path": "zhejiang_eval/11389049_2023_06_19_16_41_40.753_Zgqfc_walk3_cond.parquet",
+        "sha256": "4051ad5513eee7432d7f568748ab20977504d56cd8a1ab9bcd2c65c0f7de45f7"
+      },
+      {
+        "path": "zhejiang_eval/11389053_2023_06_20_11_23_06.828_Zgqfc_walk5_cond.parquet",
+        "sha256": "aa44f0622a428f49e8704f6ecfd418db79d48487c734479385dce126973b1d1c"
+      },
+      {
+        "path": "zhejiang_eval/11731831_2024_12_21_18_12_10.686_XiangpanRd_N_ext_cond.parquet",
+        "sha256": "708603754b69d2742abb039c811b2413166c1bb5efc78ec36b083fa168786f07"
+      },
+      {
+        "path": "zhejiang_eval/11953482_2025_03_09_11_59_45.376_GuyuelongshanIndust_cond.parquet",
+        "sha256": "c412cd413b5da0ac8b30c2a32b716d823dfba5021e7d65d67d1aeae0c7b90163"
+      },
+      {
+        "path": "zhejiang_eval/11953522_2025_03_30_16_28_43.561_GuazhuLake_cond.parquet",
+        "sha256": "b2322059b41e72c45fef7aea4accf5b88a743526ccb8b1d6e57905710d31c24b"
+      },
+      {
+        "path": "zhejiang_eval/11972969_2025_04_13_12_08_03.700_DongdanHill_Wangfu_walking_cond.parquet",
+        "sha256": "549246a63d090a0a87a086b4713abd45f736ab805c18807d3c7667e6c7c536e0"
+      },
+      {
+        "path": "zhejiang_eval/11972981_2025_04_29_18_01_33.274_GuazhuLakeSouthPark_walking_cond.parquet",
+        "sha256": "34a7f0b26ee6e8ff2f14a57750028d8a230b78e5a7b1fe1d274b167413e6139d"
+      },
+      {
+        "path": "zhejiang_eval/12173712_20260119_171800_Walking_cond.parquet",
+        "sha256": "fd40e48f65dff5e3d5c299a1426fa4b0d66c6eaeb25006b9c1c050b01f89ada2"
+      },
+      {
+        "path": "zhejiang_eval/12189498_2026_01_09_10_52_40.148_Dongpu_Huangjiuxiaozheng_cut_cond.parquet",
+        "sha256": "42fc6e2cfe23aad50968be9135d82af03ae61616fe17f24201895c0571bd4614"
+      },
+      {
+        "path": "zhejiang_eval/12213804_2026_02_22_14_42_45.817_Huantan_Jishan_Travel_cond.parquet",
+        "sha256": "b6b51537178d81dbce9fef088c71fe00ac29494fa20bdae86c895a7e23817eb1"
+      },
+      {
+        "path": "zhejiang_finetune/11298371_2023_05_25_18h45_20h48_GuaZhuLake_waking_and_bicycle_cond.parquet",
+        "sha256": "adcfd59eb594c3ce518623d549b39f6bba0f94d509c78ba75d300bdd2d81d125"
+      },
+      {
+        "path": "zhejiang_finetune/11329753_2023_06_25_22_09_56.670_KeyanSquare_walking1_cond.parquet",
+        "sha256": "aa6c962ac077e8d64bc50a9a01a21fb8e0957bd9868fa16cd253d54b8c3d1dd6"
+      },
+      {
+        "path": "zhejiang_finetune/11360840_2024_05_20_18_32_50.278_JianhuPath_Haishan_walking_cond.parquet",
+        "sha256": "933873cbd01597f42268953823d3b9b4c7a140201264fd2530acba6f2c42d6cb"
+      },
+      {
+        "path": "zhejiang_finetune/11388930_2024_06_08_18_53_34.277_JingchangWenlv_cond.parquet",
+        "sha256": "1f99d5e9cd40dff342827f355cf17c824a5ac0741369cb372a3b244a4f31eef6"
+      },
+      {
+        "path": "zhejiang_finetune/11388931_2024_06_11_19_25_31.247_KeshuiPark_cond.parquet",
+        "sha256": "bc8b56b55b38af824885dbb5d8a482af9094fea86f09d2ce0db1caaf5ae34a28"
+      },
+      {
+        "path": "zhejiang_finetune/11388983_2024_05_07_17_36_37.139_GuazhuLake_ESW_cond.parquet",
+        "sha256": "1da31838d0df6578e27140432328617dc9a703c1cff895ab5d3fddcfd9007bfe"
+      },
+      {
+        "path": "zhejiang_finetune/11388996_2024_05_22_17_17_00.468_DiyangPede_KetingPath_cond.parquet",
+        "sha256": "2172c07c435a9cf356ab6b30bab3eb460698511c825b2448e3aa9cf75bd95ebf"
+      },
+      {
+        "path": "zhejiang_finetune/11389011_2023_06_10_19_23_55.131_Zhulingyuan_residents_cond.parquet",
+        "sha256": "ff12c101ab1ba5e9572279b4c52bb9103903d54efb959c272ff7b1f654b3b1e5"
+      },
+      {
+        "path": "zhejiang_finetune/11389036_2023_06_17_16_12_25.202_Zhousan_Heta_Xiangli_survey_rivername_cond.parquet",
+        "sha256": "3c21fe740313bf1245401c265f315a85fe064f240326e895cbdd8c046c43658c"
+      },
+      {
+        "path": "zhejiang_finetune/11389043_2023_06_18_22_46_08.610_Zgqfc_walk1_cond.parquet",
+        "sha256": "5022c4d469add56246cc5e3fa71de3eb575fcdf91608735f33f8b3d6c8d3b371"
+      },
+      {
+        "path": "zhejiang_finetune/11389048_2023_06_19_10_16_00.222_Zgqfc_walk2_cond.parquet",
+        "sha256": "e7925129f0677c885d0d4a5739a474027a547a9e828d37da820d6f3da83e9df3"
+      },
+      {
+        "path": "zhejiang_finetune/11455126_2024_07_13_17_20_22.131_KetingPark_KeqiaoOldtown_cond.parquet",
+        "sha256": "d83c010cf2204e5fadd2bbace30ebd86fd41b0413da38170d998eff2effbcbb2"
+      },
+      {
+        "path": "zhejiang_finetune/11455129_2024_07_14_17_53_39.057_KeqiaoLibrary_goHome_cond.parquet",
+        "sha256": "acabbf8feadf64dc70ec5914d395d635c9179c4dcf653539e2cc103f9cc80073"
+      },
+      {
+        "path": "zhejiang_finetune/11455134_2024_07_29_16_21_38.510_KeqiaoLibaray_close_cond.parquet",
+        "sha256": "4497db7975286e3b96ce8b7805a867d2816c75271955c933cb04da13034500de"
+      },
+      {
+        "path": "zhejiang_finetune/11455143_2024_07_02_19_29_37.999_MingZhuPark_walking_cond.parquet",
+        "sha256": "8853aa10b56550d9811ac0d35035f0348816823b391bc777b5df5a2ce79d1b48"
+      },
+      {
+        "path": "zhejiang_finetune/11455145_2024_08_10_18_34_17.098_GuazhuLake_walking_cond.parquet",
+        "sha256": "45aa716ea56aaf43e64e06074092536a66f622d24a88b57911c52fdad9b47745"
+      },
+      {
+        "path": "zhejiang_finetune/11471168_2024_09_22_19_48_57.437_GuazhuLake_cond.parquet",
+        "sha256": "50c5dc3371e242f362b8442b44380e7f853cfb984a8aba63640c93ea9b173e65"
+      },
+      {
+        "path": "zhejiang_finetune/11485685_2024_10_17_16_37_10.932_Pingshui_cond.parquet",
+        "sha256": "0b7ad05598dd2c71f5990ce776feb6aa16e64df3fb6ec02d39a51afa3895582a"
+      },
+      {
+        "path": "zhejiang_finetune/11731681_2024_10_20_18_21_12.573_Rengranya_and_Park_cond.parquet",
+        "sha256": "699b6bc1cf6a6c059e08f12d6bdd8abfd95863a129302e21dd1a974896be3ad4"
+      },
+      {
+        "path": "zhejiang_finetune/11731683_2024_10_21_13_11_18.197_Haishan_and_Park_cond.parquet",
+        "sha256": "c7a4c8003b6e7a6786ff7a048895edf66213bf4b7843cbe434613515007b7fd3"
+      },
+      {
+        "path": "zhejiang_finetune/11731733_2024_11_04_20_04_12.614_Walk_goHome_night_cond.parquet",
+        "sha256": "2cf90c3e1218653d92343f4dc15bfa4f31a76cfe5dc545f46241bf5dec8e092a"
+      },
+      {
+        "path": "zhejiang_finetune/11731745_2024_11_13_18_44_59.715_GuazhuLake_S_cond.parquet",
+        "sha256": "d6b631e98a341f04405f71cf1f206388aa0b5de22076febd66ae97b55cec52d9"
+      },
+      {
+        "path": "zhejiang_finetune/11731792_2024_12_03_16_36_44.241_Zhousan_walking_cond.parquet",
+        "sha256": "2a10a8fd70c4295890504beb036b74ff37818dc50c182201802701971530d474"
+      },
+      {
+        "path": "zhejiang_finetune/11731815_2024_12_14_16_56_05.361_KeyanSenceSpot_walking_cond.parquet",
+        "sha256": "7ca3a063582363e58aee82f9b5b56fdb01ca335979bd89387f1f79e743f4bc69"
+      },
+      {
+        "path": "zhejiang_finetune/11731817_2024_12_15_12_21_10.185_YangshanStonecity_travel_cond.parquet",
+        "sha256": "b29e2e4989632681a8606d72ee5e55080fe8df3970ce685ef800d3372b92805f"
+      },
+      {
+        "path": "zhejiang_finetune/11731821_2024_12_16_16_21_09.323_Zhoushan_walking_cond.parquet",
+        "sha256": "1d2796fa203b449a25d2ce1b274223f6ee8a8370ab9c7b31258e7a504f86fe0d"
+      },
+      {
+        "path": "zhejiang_finetune/11731824_2024_12_19_18_17_59.204_OldKeqiao_walking_cond.parquet",
+        "sha256": "58f0f0c4e3e0e87095b103389b6ba1d409363bb17d191bf618f4d31bcb172d79"
+      },
+      {
+        "path": "zhejiang_finetune/11734987_2025_02_09_13_44_55.998_XiazheDahengken_cond.parquet",
+        "sha256": "de731fb01f8889b6cb3ffdaba0453daf736c9a0f022833adef6a75c30478036d"
+      },
+      {
+        "path": "zhejiang_finetune/11953485_2025_03_11_15_48_05.140_Early2hours_cond.parquet",
+        "sha256": "d69d8dbc6d88c820830b8173c8fc00a6cd084a4be87c0a1c48f14a8203e13f9c"
+      },
+      {
+        "path": "zhejiang_finetune/11953527_2025_04_11_15_47_14.721_KeyanScenicespot_cond.parquet",
+        "sha256": "8f1988ff3feac4774b5b3e510416d0383ffeaf7122aacc0c32418e1b12791862"
+      },
+      {
+        "path": "zhejiang_finetune/11972977_2025_04_20_13_15_30.168_DawujianMoutain_takePhotobyCamera_cond.parquet",
+        "sha256": "4e47b674dfab0c56bbb1a898083715fb0d63e0c14b93f37e59c9d4aac45d090f"
+      },
+      {
+        "path": "zhejiang_finetune/11979763_2025_05_01_17_04_29.395_SubwayXihuStation_cond.parquet",
+        "sha256": "f0ebcbb94ff1515134ff5299298f787e62c0f39bcda2c7ff66147dc94d08e7be"
+      },
+      {
+        "path": "zhejiang_finetune/11979774_2025_05_05_19_41_05.724_LiPark_walking_cond.parquet",
+        "sha256": "47e241130a4434f3ca7fc3822a0e57a0d9b2fe08d54fcb639eaef9ebca8bdbc5"
+      },
+      {
+        "path": "zhejiang_finetune/12021609_20250712_122300_Walking_cond.parquet",
+        "sha256": "38ae0031425b1a0601ee6ff5a9d909f6d50d49014feab177ac871956f62a43e4"
+      },
+      {
+        "path": "zhejiang_finetune/12054420_2025_06_03_16_43_34.010_GuazhuLake_walking_bicycle_cond.parquet",
+        "sha256": "7fab17c86d871d69013dfffe2725b5beabce2c23fca3d8f692c0b6cb67c06fa4"
+      },
+      {
+        "path": "zhejiang_finetune/12054426_2025_06_20_14_49_07.664_DiyangPede_GuazhuLake_photo_cond.parquet",
+        "sha256": "32e81dab175265eda75613aea1c7324cbccfa670a04a113fac285ecb3181174f"
+      },
+      {
+        "path": "zhejiang_finetune/12189138_2025_09_28_12_02_08.243_GuazhuLake_photos_cond.parquet",
+        "sha256": "88c30ecd8259455c66d773cba8f435760473e0789c6c52d44b641e4678621390"
+      },
+      {
+        "path": "zhejiang_finetune/12189218_2025_11_15_11_59_46.442_Zhijiaozhongxin_Exam_lunch_cond.parquet",
+        "sha256": "0a4ce4068d6167765b14901a91319ec03abbd9a04a409885176551f4bb3036d6"
+      },
+      {
+        "path": "zhejiang_finetune/12189478_2026_01_06_15_50_29.210_GuazhuLake_walk_RedmiNote9Pro_cond.parquet",
+        "sha256": "5125f97c258173ab237d2e610b4245bcc34991d38300ee75bbba82ad60323474"
+      },
+      {
+        "path": "zhejiang_val/11360842_2024_05_23_18_03_28.571_DanbanLake_walking_cond.parquet",
+        "sha256": "59b6c361a4659fb63d9dacad5b37d6b26881ee3b35a5a49ac86f8751832617ba"
+      },
+      {
+        "path": "zhejiang_val/11388932_2024_06_14_18_24_14.385_GuazhuLake_SE_cond.parquet",
+        "sha256": "5090b778b84a7fa51dd5765410cb8e96862b4354f4ad70da9933cf18ad0a31d0"
+      },
+      {
+        "path": "zhejiang_val/11389079_2023_07_23_16_40_50.326_MiaoHall_climb_merge_cond.parquet",
+        "sha256": "9cbec163eb403faec996ce4c6476a979cee6fb95ba437201f7184268c2036fab"
+      },
+      {
+        "path": "zhejiang_val/11731727_2024_10_30_13_41_37.934_find_print_shop_cond.parquet",
+        "sha256": "265fb6af3f7adca7571e7b2f98b7663ecdc04a17594481e05d3b08f059b3aadf"
+      },
+      {
+        "path": "zhejiang_val/11953520_2025_03_20_10_39_40.709_XitianzuoTemple_cond.parquet",
+        "sha256": "e88eb18fbd65bc4465b6afedaa636c36a873241da10c3e02fbc6ae2b7a444923"
+      },
+      {
+        "path": "zhejiang_val/11972975_2025_04_19_16_17_46.768_Shuangye_buyTea_Travel_car_cond.parquet",
+        "sha256": "8703b4b9f0336cbcffaba662145ecf5913f9ecafc96ef94635744cc21f2ad26d"
+      },
+      {
+        "path": "zhejiang_val/11979770_2025_05_03_20_44_53.001_AnchangOldtown_car_cond.parquet",
+        "sha256": "5e22ce53daecf0d54f6a65509be2c8643d0492abbdc9a193089366ea48ca2c25"
+      },
+      {
+        "path": "zhejiang_val/12054437_2025_07_04_19_19_17.896_KeyanSence_walking_cond.parquet",
+        "sha256": "ca2ce7b94cac4797e0123e04f4b86d38a658ae31419e758f289b04bf2ee97dce"
+      },
+      {
+        "path": "zhejiang_val/12189474_2026_01_06_15_49_58.921_GuazhuLake_walk_HuaweiCX10_cond.parquet",
+        "sha256": "2ab47a09e310bbf66505741be469aa4218bccf775873bea4eb099f848a7ef84c"
+      },
+      {
+        "path": "zhejiang_val/12189509_2026_01_25_17_26_26.753_GuazhuLake_MingzhuSquare_walk_cond.parquet",
+        "sha256": "55502f26ede0383524a65c3bc794230a544f5dd0226ff86a7ca98883eb203f53"
+      }
+    ],
+    "terrain_tiles": [
+      {
+        "name": "N27E120.hgt",
+        "sha256": "1ede789fa294f42035cc1b7d6d7d450367d1665a16d030de2a96cdc30c6fc504"
+      },
+      {
+        "name": "N29E120.hgt",
+        "sha256": "9e88d84031a944fc62e3f4b79d478cbd717a4ba76a44f3a86114bb042ac79e2f"
+      },
+      {
+        "name": "N30E120.hgt",
+        "sha256": "1a585aeafd5c336309680c9c16fe9d7d202129fa35778061077be14d92ff22bb"
+      },
+      {
+        "name": "N30E122.hgt",
+        "sha256": "ba238b138fa2f25e48650313048a40447a6a081bf5c2a17a5fc67581f13ce6db"
+      }
+    ]
+  },
+  "registered_protocol": {
+    "fit_splits": [
+      "train",
+      "adapt"
+    ],
+    "validation_split": "validation",
+    "evaluation_split": "evaluation",
+    "evaluation_cutoff": "max(2, segment_length // 2 - 1)",
+    "seed": 20260814,
+    "replicate_seeds": [
+      20260814,
+      20260815,
+      20260816
+    ],
+    "prediction_samples": 64,
+    "primary_comparator": "NEX326-PHASE-SPACE-4D-GRADIENT-ONLY-v3",
+    "primary_metric": "position_energy_score_d2"
+  },
+  "metric_summary": {
+    "position_energy_score_d2": {
+      "mean": 125.88186074101094,
+      "sample_std": 1.7693785589558804,
+      "min": 123.92407690274014,
+      "max": 127.36672925728007
+    },
+    "position_hdr90_coverage": {
+      "mean": 0.7738095238095238,
+      "sample_std": 0.020619652471058052,
+      "min": 0.75,
+      "max": 0.7857142857142857
+    },
+    "position_cep50_error": {
+      "mean": 67.30246415165122,
+      "sample_std": 1.3283329286914327,
+      "min": 66.13224133227624,
+      "max": 68.74629686898544
+    },
+    "velocity_endpoint_rmse": {
+      "mean": 2.0612307512551205,
+      "sample_std": 0.015612233105697152,
+      "min": 2.045481498202528,
+      "max": 2.076702258309678
+    },
+    "kinematic_identity_max_error": {
+      "mean": 4.537111427301473e-13,
+      "sample_std": 1.2625990704234373e-15,
+      "min": 4.5230486023228877e-13,
+      "max": 4.547473508864641e-13
+    }
+  },
+  "integrity": {
+    "manifest_sha256": "e535134e98e77a91aca243924c91e0c5f8fa197e3abe5d14c50b2ca8fc5419d9",
+    "reports": [
+      {
+        "seed": 20260814,
+        "path": "seed-20260814/phase_space_report.json",
+        "sha256": "9342dfa501ba56f4bf21690a2fe827c3ab08d9b3d02259678bda7140c4e82946",
+        "size_bytes": 28014
+      },
+      {
+        "seed": 20260815,
+        "path": "seed-20260815/phase_space_report.json",
+        "sha256": "a4376acfdb6b05637a354f96e3a0d1ed9281dae1e2e075c1d5f77f6ce3a7fb24",
+        "size_bytes": 28020
+      },
+      {
+        "seed": 20260816,
+        "path": "seed-20260816/phase_space_report.json",
+        "sha256": "3ea218c50da0b3fbe00f6a52fcc3231fe26d80417b3da24afec5cc246c391b1d",
+        "size_bytes": 28027
+      }
+    ]
+  }
+}

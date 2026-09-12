@@ -1,0 +1,73 @@
+{
+  "schema_version": "nex326-experiment-spec-v2",
+  "experiment_id": "NEX326",
+  "spec_version": "nex326-process-v2",
+  "title": "15 ideas to 22-arm auditable experiment process",
+  "frozen_from": ["NEX-311-v0.3", "frozen-arms.py", "NEX-326"],
+  "full_config": {
+    "config_id": "NEX326-FULL-v2",
+    "components": {
+      "model": "seg_constant_mode",
+      "estimator": "crps_energy",
+      "transfer": "full_finetune",
+      "finetune": "all",
+      "condition": ["solar_elev"],
+      "integrator": "split",
+      "poa": "fp",
+      "bridge": "none",
+      "state_dim": 2,
+      "dt_seconds": 60
+    }
+  },
+  "protocol": {
+    "seed": 20260814,
+    "cohort_schema": "nex326-cohort-v1",
+    "split_unit": "segment_id",
+    "required_splits": ["train", "validation", "adapt", "evaluation", "animal_pretrain"],
+    "metrics": ["energy_score_d2", "hdr90_coverage", "cep50_error"],
+    "bootstrap_unit": "segment_id",
+    "bootstrap_replicates_formal": 2000,
+    "fixture_policy": "Registered fixtures validate implementation only; scientific verdicts require a versioned external cohort."
+  },
+  "arm_defaults": {
+    "lineage_confidence": "explicit",
+    "control": {"config_id": "NEX326-FULL-v2", "full_anchor": false},
+    "data_requirements": ["versioned_segment_cohort", "disjoint_train_validation_adapt_evaluation"],
+    "training_steps": ["load_versioned_data", "build_transition_samples", "adapt_features", "initialize_model", "fit_model", "write_checkpoint"],
+    "inference_steps": ["load_checkpoint", "predict_evaluation_segments", "compute_metrics", "compute_mechanism_statistics", "write_run_record"],
+    "metrics": ["energy_score_d2", "hdr90_coverage", "cep50_error"],
+    "mechanism_gate": {"operator": "ge", "threshold": 0.0},
+    "implementation_status": "implemented"
+  },
+  "unnumbered_ideas": [
+    {"idea_id": "C-4", "source_issue": "NEX-97", "role": "diagnostic_only", "reason": "ABM pretraining is an external synthetic diagnostic and was never assigned a frozen arm number."},
+    {"idea_id": "C-8", "source_issue": "NEX-100", "role": "theory_only", "reason": "KL versus Fisher regime comparison remains a theory reference and was never assigned a frozen arm number."}
+  ],
+  "historical_conflicts": [
+    {"artifact": "NEX326-ABL-FULL-001_results.json", "observed_arm_count": 8, "expected_arm_count": 22, "disposition": "conflict_only_not_input"}
+  ],
+  "arms": [
+    {"arm_id": 1, "group": "model", "slot": "M1", "variant": "seg_constant_mode", "idea_ids": ["I-1"], "sources": ["NEX-88", "NEX-311", "NEX-326", "Lean:affine_two_point"], "lineage_role": "primary", "control": {"full_anchor": true}, "unique_change": "Segment-level latent mode is held fixed within each trajectory segment.", "subconfigs": [{"subconfig_id": "full", "components": {}}], "mechanism_gate": {"statistic": "mode_entropy", "threshold": 0.01}},
+    {"arm_id": 2, "group": "model", "slot": "M1", "variant": "pointwise_mixture", "idea_ids": ["I-1"], "sources": ["NEX-88", "NEX-311", "NEX-326"], "lineage_role": "shared_control", "unique_change": "Resample the latent mixture component at every transition.", "subconfigs": [{"subconfig_id": "pointwise", "components": {"model": "pointwise_mixture"}}], "mechanism_gate": {"statistic": "mode_switch_rate", "threshold": 0.01}},
+    {"arm_id": 3, "group": "model", "slot": "M1", "variant": "single_gaussian_OU_CRW", "idea_ids": ["shared_control"], "sources": ["NEX-86", "NEX-311", "NEX-326"], "lineage_role": "shared_control", "unique_change": "Replace the latent mixture with one Gaussian transition law.", "subconfigs": [{"subconfig_id": "single_gaussian", "components": {"model": "single_gaussian"}}], "mechanism_gate": {"statistic": "covariance_min_eigenvalue", "threshold": 1e-10}},
+    {"arm_id": 4, "group": "model", "slot": "M1", "variant": "gmm_kernel", "idea_ids": ["I-3"], "sources": ["NEX-90", "NEX-311", "NEX-326", "Lean:moment_level_identifiability"], "lineage_role": "primary", "unique_change": "Use a transition-residual Gaussian-mixture kernel rather than a persistent segment mode.", "subconfigs": [{"subconfig_id": "gmm_kernel", "components": {"model": "gmm_kernel"}}], "mechanism_gate": {"statistic": "component_separation", "threshold": 0.01}},
+    {"arm_id": 5, "group": "model", "slot": "M1", "variant": "explicit_decomp", "idea_ids": ["S-1"], "sources": ["NEX-101", "NEX-311", "NEX-326", "Lean:ou_stationary_variance"], "lineage_role": "primary", "unique_change": "Add an explicit speed and radial/tangential decomposition to the drift design matrix.", "subconfigs": [{"subconfig_id": "explicit_decomp", "components": {"model": "explicit_decomp"}}], "mechanism_gate": {"statistic": "decomposition_coefficient_norm", "threshold": 1e-8}},
+    {"arm_id": 6, "group": "model", "slot": "M2", "variant": "dt_sensitivity", "idea_ids": ["I-1"], "sources": ["NEX-88", "NEX-311", "NEX-326"], "lineage_role": "expanded", "lineage_confidence": "conflict", "unique_change": "Resample both training and rollout at one registered observation interval.", "subconfigs": [{"subconfig_id": "dt30", "components": {"dt_seconds": 30}}, {"subconfig_id": "dt60", "components": {"dt_seconds": 60}}, {"subconfig_id": "dt120", "components": {"dt_seconds": 120}}, {"subconfig_id": "dt300", "components": {"dt_seconds": 300}}, {"subconfig_id": "dt600", "components": {"dt_seconds": 600}}], "mechanism_gate": {"statistic": "effective_mode_count", "threshold": 1.0}},
+    {"arm_id": 7, "group": "algorithm", "slot": "E1", "variant": "crps_energy", "idea_ids": ["C-1"], "sources": ["NEX-93", "NEX-311", "NEX-326", "Lean:influenceFn_abs_le"], "lineage_role": "primary", "control": {"full_anchor": true}, "unique_change": "Optimize a validation-selected strictly proper energy-score scale.", "subconfigs": [{"subconfig_id": "full", "components": {}}], "mechanism_gate": {"statistic": "validation_energy_improvement", "threshold": -1e-12}},
+    {"arm_id": 8, "group": "algorithm", "slot": "E1", "variant": "qmle", "idea_ids": ["shared_control"], "sources": ["NEX-93", "NEX-311", "NEX-326"], "lineage_role": "shared_control", "unique_change": "Fit Gaussian drift and covariance by quasi maximum likelihood.", "subconfigs": [{"subconfig_id": "qmle", "components": {"estimator": "qmle"}}], "mechanism_gate": {"statistic": "mean_log_likelihood", "threshold": -1000000.0}},
+    {"arm_id": 9, "group": "algorithm", "slot": "E1", "variant": "mixed_or_pure_energy", "idea_ids": ["C-2"], "sources": ["NEX-94", "NEX-311", "NEX-326", "Lean:hybrid_objective_strictlyProper"], "lineage_role": "expanded", "unique_change": "Use the registered mixed likelihood/energy objective or its pure-energy endpoint.", "subconfigs": [{"subconfig_id": "mixed", "components": {"estimator": "mixed", "objective_lambda": 0.5}}, {"subconfig_id": "pure_es", "components": {"estimator": "pure_es", "objective_lambda": "infinity"}}], "mechanism_gate": {"statistic": "objective_improvement", "threshold": -1e-12}},
+    {"arm_id": 10, "group": "algorithm", "slot": "E2", "variant": "d2_mc_or_closed", "idea_ids": ["C-1"], "sources": ["NEX-93", "NEX-311", "NEX-326"], "lineage_role": "expanded", "unique_change": "Train both spatial coordinates and compare Monte Carlo with closed Gaussian d=2 energy scoring.", "subconfigs": [{"subconfig_id": "d2_mc", "components": {"score": "d2_mc", "score_samples": 256}}, {"subconfig_id": "d2_closed", "components": {"score": "d2_closed"}}], "mechanism_gate": {"statistic": "closed_mc_relative_error", "operator": "le", "threshold": 0.2}},
+    {"arm_id": 11, "group": "learning", "slot": "T1", "variant": "c5_full_finetune", "idea_ids": ["C-5"], "sources": ["NEX-96", "NEX-311", "NEX-326", "Lean:bias_ordering"], "lineage_role": "primary", "control": {"full_anchor": true}, "unique_change": "Pretrain globally then update drift and diffusion on target adaptation data.", "subconfigs": [{"subconfig_id": "full", "components": {}}], "mechanism_gate": {"statistic": "adaptation_parameter_delta", "threshold": 1e-10}},
+    {"arm_id": 12, "group": "learning", "slot": "T1", "variant": "scratch", "idea_ids": ["shared_control"], "sources": ["NEX-96", "NEX-311", "NEX-326"], "lineage_role": "shared_control", "unique_change": "Initialize and train only on target adaptation data.", "subconfigs": [{"subconfig_id": "scratch", "components": {"transfer": "scratch"}}], "mechanism_gate": {"statistic": "adaptation_sample_count", "threshold": 1.0}},
+    {"arm_id": 13, "group": "learning", "slot": "T1", "variant": "c3_animal_pretrain", "idea_ids": ["C-3"], "sources": ["NEX-95", "NEX-311", "NEX-326", "Lean:covariate_shift_bound"], "lineage_role": "primary", "lineage_confidence": "conflict", "unique_change": "Pretrain on licensed animal trajectories then adapt to non-held-out human target segments.", "subconfigs": [{"subconfig_id": "animal_pretrain", "components": {"transfer": "animal_pretrain"}}], "data_requirements": ["versioned_segment_cohort", "licensed_animal_pretrain_split", "disjoint_human_evaluation"], "mechanism_gate": {"statistic": "animal_pretrain_sample_count", "threshold": 1.0}, "source_correction": {"original_ref": "C-4/NEX-97", "canonical_ref": "C-3/NEX-95", "basis": "NEX-311 v0.3 names animal-to-human transfer; C-4 is an unnumbered ABM diagnostic."}},
+    {"arm_id": 14, "group": "learning", "slot": "T1", "variant": "c6_metalearning", "idea_ids": ["C-6"], "sources": ["NEX-98", "NEX-311", "NEX-326", "Lean:th4_meta_generalization_bound"], "lineage_role": "primary", "unique_change": "Use registered first-order Reptile task initialization followed by target adaptation; do not claim second-order MAML.", "subconfigs": [{"subconfig_id": "reptile", "components": {"transfer": "meta_reptile"}}], "mechanism_gate": {"statistic": "meta_task_count", "threshold": 2.0}},
+    {"arm_id": 15, "group": "learning", "slot": "T2", "variant": "drift_only_or_two_step", "idea_ids": ["C-5"], "sources": ["NEX-96", "NEX-311", "NEX-326"], "lineage_role": "expanded", "unique_change": "Restrict target adaptation to drift or perform drift-then-diffusion two-step adaptation.", "subconfigs": [{"subconfig_id": "drift_only", "components": {"finetune": "drift_only"}}, {"subconfig_id": "two_step", "components": {"finetune": "two_step"}}], "mechanism_gate": {"statistic": "adaptation_parameter_delta", "threshold": 1e-10}},
+    {"arm_id": 16, "group": "model", "slot": "T3", "variant": "solar_elev_continuous", "idea_ids": ["C-7"], "sources": ["NEX-99", "NEX-311", "NEX-326", "Lean:identifiability"], "lineage_role": "primary", "control": {"full_anchor": true}, "unique_change": "Condition drift continuously on time-aligned solar elevation.", "subconfigs": [{"subconfig_id": "full", "components": {}}], "data_requirements": ["versioned_segment_cohort", "time_aligned_solar_elevation"], "mechanism_gate": {"statistic": "condition_coefficient_norm", "threshold": 1e-10}},
+    {"arm_id": 17, "group": "model", "slot": "T3", "variant": "condition_variants", "idea_ids": ["C-7"], "sources": ["NEX-99", "NEX-311", "NEX-326"], "lineage_role": "expanded", "lineage_confidence": "conflict", "unique_change": "Replace solar conditioning with none/daylight or add weather/terrain to solar conditioning.", "subconfigs": [{"subconfig_id": "uncond", "components": {"condition": []}, "mechanism_gate": {"statistic": "condition_feature_count", "threshold": 0.0}}, {"subconfig_id": "is_day", "components": {"condition": ["is_day"]}}, {"subconfig_id": "weather", "components": {"condition": ["solar_elev", "temperature", "precipitation"]}}, {"subconfig_id": "terrain", "components": {"condition": ["solar_elev", "terrain_elevation", "terrain_slope"], "coverage_mask": "has_terrain"}}], "data_requirements": ["versioned_segment_cohort", "time_aligned_conditions", "paired_coverage_mask"], "mechanism_gate": {"statistic": "condition_feature_variance", "threshold": 1e-10}},
+    {"arm_id": 18, "group": "inference", "slot": "R1", "variant": "j1_split", "idea_ids": ["J-1"], "sources": ["NEX-91", "NEX-311", "NEX-326", "Lean:em_amplification_lt_one_iff"], "lineage_role": "primary", "control": {"full_anchor": true}, "unique_change": "Use the registered drift/noise split integrator.", "subconfigs": [{"subconfig_id": "full", "components": {}}], "mechanism_gate": {"statistic": "split_exact_error", "operator": "le", "threshold": 2.0}},
+    {"arm_id": 19, "group": "inference", "slot": "R1", "variant": "em_or_euler_maruyama", "idea_ids": ["shared_control"], "sources": ["NEX-91", "NEX-311", "NEX-326"], "lineage_role": "shared_control", "unique_change": "Use Euler-Maruyama integration under either historical alias.", "subconfigs": [{"subconfig_id": "em", "components": {"integrator": "euler_maruyama"}}, {"subconfig_id": "euler", "components": {"integrator": "euler_maruyama"}}], "mechanism_gate": {"statistic": "euler_discretization_error", "threshold": 0.0}},
+    {"arm_id": 20, "group": "inference", "slot": "R2", "variant": "j2_fp", "idea_ids": ["J-2"], "sources": ["NEX-89", "NEX-311", "NEX-326", "Lean:ouVarStep_fixed_point"], "lineage_role": "primary", "control": {"full_anchor": true}, "unique_change": "Propagate the learned linear Gaussian density analytically as the finite-horizon FP solution.", "subconfigs": [{"subconfig_id": "full", "components": {}}], "mechanism_gate": {"statistic": "density_mass_error", "operator": "le", "threshold": 1e-8}},
+    {"arm_id": 21, "group": "inference", "slot": "R2", "variant": "mc_or_j3_crn", "idea_ids": ["J-3"], "sources": ["NEX-92", "NEX-311", "NEX-326", "Lean:vrf_le_one_of_nonneg_cov"], "lineage_role": "expanded", "unique_change": "Use ordinary Monte Carlo or common-random-number paths for registered multi-horizon contrasts.", "subconfigs": [{"subconfig_id": "mc", "components": {"poa": "mc"}}, {"subconfig_id": "crn", "components": {"poa": "crn"}}], "mechanism_gate": {"statistic": "variance_reduction_factor", "threshold": 1.0}},
+    {"arm_id": 22, "group": "inference", "slot": "R3", "variant": "i2_bridge", "idea_ids": ["I-2"], "sources": ["NEX-87", "NEX-311", "NEX-326", "Lean:smallT_tv_bound"], "lineage_role": "primary", "unique_change": "Condition on a registered external endpoint prior using Doob, finite-particle Schrödinger, or soft-endpoint dynamics.", "subconfigs": [{"subconfig_id": "doob", "components": {"bridge": "doob"}}, {"subconfig_id": "sb", "components": {"bridge": "gaussian_schrodinger", "bridge_epsilon_scale": 0.5, "bridge_time_steps": 8, "bridge_sinkhorn_iterations": 500, "bridge_sinkhorn_tolerance": 1e-8}}, {"subconfig_id": "soft_endpoint", "components": {"bridge": "soft_endpoint"}}], "data_requirements": ["versioned_segment_cohort", "external_endpoint_prior_with_provenance", "no_evaluation_truth_as_prior"], "mechanism_gate": {"statistic": "endpoint_prior_distance_reduction", "threshold": 0.0}}
+  ]
+}

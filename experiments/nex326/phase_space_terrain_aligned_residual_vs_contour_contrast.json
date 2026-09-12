@@ -1,0 +1,83 @@
+{
+  "schema_version": "nex326-phase-space-paired-contrast-v1",
+  "scientific_role": "supplemental_exploratory_contrast_not_final_evidence",
+  "baseline_benchmark_id": "NEX326-PHASE-SPACE-4D-CONTOUR-DISTANCE-v3",
+  "candidate_benchmark_id": "NEX326-PHASE-SPACE-4D-TERRAIN-ALIGNED-RESIDUAL-v5",
+  "cohort_fingerprint": "c4eb7a337c13241928a543c839a21714da358d150de5befe6238b712fb4a7e48",
+  "replicate_seeds": [
+    20260814,
+    20260815,
+    20260816
+  ],
+  "prediction_samples_per_segment": 64,
+  "primary_metric": "position_energy_score_d2",
+  "comparator_role": "registered_primary",
+  "metric_direction": {
+    "position_energy_score_d2": "lower_is_better",
+    "position_hdr90_coverage": "descriptive_calibration_rate",
+    "position_cep50_error": "lower_is_better",
+    "velocity_endpoint_rmse": "lower_is_better"
+  },
+  "paired_deltas": [
+    {
+      "seed": 20260814,
+      "candidate_minus_baseline": {
+        "position_energy_score_d2": -0.2212041873485333,
+        "position_hdr90_coverage": 0.0,
+        "position_cep50_error": -0.047255453228316924,
+        "velocity_endpoint_rmse": 0.0026586232489047568
+      }
+    },
+    {
+      "seed": 20260815,
+      "candidate_minus_baseline": {
+        "position_energy_score_d2": -0.15235216424848375,
+        "position_hdr90_coverage": 0.0,
+        "position_cep50_error": -0.18034986277274356,
+        "velocity_endpoint_rmse": 0.002611508652173189
+      }
+    },
+    {
+      "seed": 20260816,
+      "candidate_minus_baseline": {
+        "position_energy_score_d2": -0.11477321959790743,
+        "position_hdr90_coverage": 0.0,
+        "position_cep50_error": -0.15116380972918364,
+        "velocity_endpoint_rmse": 0.0020721198508630856
+      }
+    }
+  ],
+  "delta_summary": {
+    "position_energy_score_d2": {
+      "mean": -0.1627765237316415,
+      "candidate_better_seed_count": 3,
+      "seed_count": 3
+    },
+    "position_hdr90_coverage": {
+      "mean": 0.0,
+      "candidate_better_seed_count": 0,
+      "seed_count": 3
+    },
+    "position_cep50_error": {
+      "mean": -0.1262563752434147,
+      "candidate_better_seed_count": 3,
+      "seed_count": 3
+    },
+    "velocity_endpoint_rmse": {
+      "mean": 0.0024474172506470104,
+      "candidate_better_seed_count": 0,
+      "seed_count": 3
+    }
+  },
+  "conclusion": "observed_primary_metric_gain",
+  "exploratory_gain_rule": {
+    "mean_candidate_minus_baseline_below_zero": true,
+    "candidate_better_seed_count": 3,
+    "required_better_seed_count": 2
+  },
+  "interpretation": "The terrain field is operational, but this paired pilot does not by itself establish that terrain conditioning improves trajectory prediction.",
+  "integrity": {
+    "baseline_manifest_sha256": "1372cd1f84760665941aeb5b8cb38c2ed02d3b9a01282fcd5e33e696645f7df4",
+    "candidate_manifest_sha256": "91a61fcfde5da89a207f5513e34d43ec7209673a1ba6922b20b0784d458655ac"
+  }
+}

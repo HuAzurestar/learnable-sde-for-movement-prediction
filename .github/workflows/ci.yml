@@ -39,7 +39,8 @@ jobs:
       - name: Public release scan
         run: python scripts/check_public_release.py
   python:
-    name: python / compile and tests (${{ matrix.python-version }})
+    # Keep these check names aligned with the required status contexts on main.
+    name: test (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:

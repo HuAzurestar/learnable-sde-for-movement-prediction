@@ -1,0 +1,132 @@
+{
+  "schema_version": "nex326-phase-space-dsde-receipt-v1",
+  "benchmark_id": "NEX326-PHASE-SPACE-4D-v1",
+  "scientific_role": "supplemental_exploratory_benchmark",
+  "assessment": "not_assessed",
+  "replicate_seeds": [
+    20260814,
+    20260815,
+    20260816
+  ],
+  "replicate_count": 3,
+  "prediction_samples_per_segment": 64,
+  "cohort": {
+    "dataset_id": "NEX326-DSDE-ZHEJIANG-20P-PILOT-001",
+    "data_version": "nex313-zhejiang-349f06edc08f-20pct-pilot-v1",
+    "fingerprint": "c4eb7a337c13241928a543c839a21714da358d150de5befe6238b712fb4a7e48",
+    "purpose": "real_trajectory_20pct_pilot_not_final_scientific_evidence",
+    "split_counts": {
+      "train": 105,
+      "validation": 32,
+      "adapt": 32,
+      "evaluation": 28,
+      "animal_pretrain": 0
+    },
+    "source_file": "cohort.json",
+    "sha256": "646420b38d5110b6b9727b50447f96c59635ecfbade92210021c5d430b73dc04"
+  },
+  "implementation": {
+    "source_bundle_sha256": "c6740c566c5c6c65a5f3beb09ebb45bd063b80bc7998b94898ef9dc3a04b5ed4",
+    "files": [
+      {
+        "path": "cohort.py",
+        "sha256": "e59617dc9b84fe5071ab94e2555f90af4199c3adb6c370c2cc206ba44f38af15"
+      },
+      {
+        "path": "environment.lock.json",
+        "sha256": "88cbe7947af98bf227242f909ed8355cae4af633a6863925fcd7bd1a1cc0774f"
+      },
+      {
+        "path": "phase_space.py",
+        "sha256": "9399cc5e682fd09591e26ee03d6ee690996ca16a06df55087e34ae7d15f82da4"
+      },
+      {
+        "path": "phase_space_benchmark.json",
+        "sha256": "947db07a1e9fafb0da1cafc1edcc06d0393c0366ed7bcb8675fa8d9d8bca7b93"
+      }
+    ],
+    "runtime": {
+      "python": "3.10.13",
+      "numpy": "1.26.4",
+      "pandas": "2.2.3",
+      "pyarrow": "24.0.0"
+    },
+    "environment_lock_conformant": true
+  },
+  "state_contract": {
+    "layout": [
+      "x",
+      "y",
+      "vx",
+      "vy"
+    ],
+    "dimension": 4,
+    "velocity_estimator": "causal_backward_difference",
+    "first_velocity": "copy_first_valid_backward_difference",
+    "position_dynamics": "dX=Vdt",
+    "position_integrator": "trapezoidal_velocity",
+    "noise_target": "velocity_only"
+  },
+  "condition_contract": {
+    "lookup_signature": "C(x,y,t_optional)",
+    "condition_is_dynamic_state": false,
+    "spatial_position_required": true,
+    "registered_condition_names": [],
+    "current_status": "unconditioned_baseline_until_a_spatial_field_is_registered"
+  },
+  "metric_summary": {
+    "position_energy_score_d2": {
+      "mean": 125.87412043777512,
+      "sample_std": 1.8273768480972168,
+      "min": 123.83302526565095,
+      "max": 127.35808362425466
+    },
+    "position_hdr90_coverage": {
+      "mean": 0.7857142857142857,
+      "sample_std": 0.0357142857142857,
+      "min": 0.75,
+      "max": 0.8214285714285714
+    },
+    "position_cep50_error": {
+      "mean": 67.3004071488489,
+      "sample_std": 1.5179614124014649,
+      "min": 66.15615315539883,
+      "max": 69.02241194273111
+    },
+    "velocity_endpoint_rmse": {
+      "mean": 2.056310127539453,
+      "sample_std": 0.01573832100031113,
+      "min": 2.0404347338886004,
+      "max": 2.071907697420726
+    },
+    "kinematic_identity_max_error": {
+      "mean": 4.5422924680830573e-13,
+      "sample_std": 8.973825869789965e-16,
+      "min": 4.531930386519889e-13,
+      "max": 4.547473508864641e-13
+    }
+  },
+  "integrity": {
+    "manifest_sha256": "e20bc223ab9be1756d826a1e689138aab73ecf3cc9c5c2bda7a40c6aaf01bc7d",
+    "reports": [
+      {
+        "seed": 20260814,
+        "path": "seed-20260814/phase_space_report.json",
+        "sha256": "a93b2b90097ca968e871a67146e41b59658fcf5642d3367d988dc07f6656ed92",
+        "size_bytes": 11907
+      },
+      {
+        "seed": 20260815,
+        "path": "seed-20260815/phase_space_report.json",
+        "sha256": "c337bd97fe8fd4c771aefc37db136c6392a567b14d30c58b176160fa5d7839ec",
+        "size_bytes": 11917
+      },
+      {
+        "seed": 20260816,
+        "path": "seed-20260816/phase_space_report.json",
+        "sha256": "4e4f5f2e36684244dd9fa5bfd3a8256d36c3bc60ba7d8a64f1ba96acfe5231f8",
+        "size_bytes": 11919
+      }
+    ]
+  }
+}

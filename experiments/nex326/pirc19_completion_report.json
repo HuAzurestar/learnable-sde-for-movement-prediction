@@ -1,0 +1,161 @@
+{
+  "schema_version": "pirc19-nex326-completion-audit-v2",
+  "task_id": "PIRC-19",
+  "experiment_id": "NEX326",
+  "spec_version": "nex326-process-v2",
+  "overall_status": "pirc19_complete_with_approved_arm_exclusions",
+  "paper_equivalent": false,
+  "dimensions": {
+    "frozen_contract_implementation": {
+      "status": "complete",
+      "numerator": 36,
+      "denominator": 36,
+      "ratio": 1.0
+    },
+    "current_dsde_execution": {
+      "status": "complete_for_available_inputs",
+      "numerator": 31,
+      "denominator": 36,
+      "ratio": 0.8611111111111112
+    },
+    "required_empirical_reproduction_scope": {
+      "status": "complete",
+      "numerator": 28,
+      "denominator": 28,
+      "ratio": 1.0
+    },
+    "replicated_current_dsde_execution": {
+      "status": "complete_for_available_inputs",
+      "numerator": 93,
+      "denominator": 108,
+      "ratio": 0.8611111111111112
+    },
+    "scientifically_assessed_succeeded_executions": {
+      "status": "pending",
+      "numerator": 0,
+      "denominator": 31,
+      "ratio": 0.0
+    }
+  },
+  "checks": [
+    {
+      "name": "frozen_contract",
+      "passed": true,
+      "detail": "22 numbered arms and 36 execution slots"
+    },
+    {
+      "name": "approved_scope_policy",
+      "passed": true,
+      "detail": "Arms [13, 17, 22] exclude 8 of 36 frozen execution slots"
+    },
+    {
+      "name": "implementation_routing",
+      "passed": true,
+      "detail": "tracked fidelity report reproduces from the frozen spec with zero route failures"
+    },
+    {
+      "name": "implementation_gap_policy",
+      "passed": true,
+      "detail": "tracked gaps retain the no-mock/no-silent-fallback closure rule"
+    },
+    {
+      "name": "current_source_identity",
+      "passed": true,
+      "detail": "pilot receipt implementation hashes match the current execution sources"
+    },
+    {
+      "name": "receipt_identity",
+      "passed": true,
+      "detail": "single-seed and multi-seed receipts bind the same implementation"
+    },
+    {
+      "name": "current_dsde_matrix",
+      "passed": true,
+      "detail": "31 succeeded and 5 data-unavailable executions"
+    },
+    {
+      "name": "replicate_matrix",
+      "passed": true,
+      "detail": "93 succeeded of 108 across 3 seeds"
+    },
+    {
+      "name": "declared_unavailable_scope",
+      "passed": true,
+      "detail": "every data-unavailable execution is inside an approved excluded arm"
+    },
+    {
+      "name": "required_execution_scope",
+      "passed": true,
+      "detail": "28 of 28 required execution slots succeeded"
+    },
+    {
+      "name": "terrain_evidence",
+      "passed": true,
+      "detail": "Arm 17 terrain has a coverage-matched point comparison and paired bootstrap"
+    },
+    {
+      "name": "arm22_extension_scope",
+      "passed": true,
+      "detail": "Arm 22 remains implemented but excluded from current core evidence"
+    },
+    {
+      "name": "scientific_claim_boundary",
+      "passed": true,
+      "detail": "no pilot execution has been promoted to a scientific verdict"
+    }
+  ],
+  "check_summary": {
+    "passed": 13,
+    "total": 13,
+    "all_passed": true
+  },
+  "task_completion": {
+    "status": "complete",
+    "basis": "28/28 required execution slots succeeded; Arms 13, 17, and 22 are approved empirical exclusions."
+  },
+  "approved_empirical_exclusions": [
+    {
+      "arm_id": 13,
+      "execution_count": 1,
+      "disposition": "not_required_no_animal_cohort"
+    },
+    {
+      "arm_id": 17,
+      "execution_count": 4,
+      "disposition": "not_required_condition_variant_arm"
+    },
+    {
+      "arm_id": 22,
+      "execution_count": 3,
+      "disposition": "deferred_expert_assisted_extension"
+    }
+  ],
+  "scientific_followups": [
+    "the tracked DSDE cohort is a deterministic 20% pilot, not the full registered cohort",
+    "three replicate seeds over one cohort are descriptive, not independent scientific replications",
+    "all succeeded executions remain not_assessed"
+  ],
+  "evidence": [
+    {
+      "path": "implementation_fidelity_report.json",
+      "canonical_json_sha256": "51ce991e3e2c90ec0736a8e02cdb162c49c1cc65c90ec5bf0d720b897362985c"
+    },
+    {
+      "path": "implementation_gaps.json",
+      "canonical_json_sha256": "d87e78941bfcd54bcd9a04aa5bc47e5294e6c5355cb3ddb2bf7926edd997e68e"
+    },
+    {
+      "path": "dsde_20pct_pilot_receipt.json",
+      "canonical_json_sha256": "c7a93816b7ea53199ac8deeeb29e46afb882b03b67bf7d7f5ade09f63edb43ac"
+    },
+    {
+      "path": "dsde_20pct_multi_seed_receipt.json",
+      "canonical_json_sha256": "1bfadf450584a65602569b1b4e18028e4e7c1a4b014bb0bcb4840365c7a6c315"
+    },
+    {
+      "path": "pirc19_scope_policy.json",
+      "canonical_json_sha256": "ea8e5e9f02cdd2d8eac2aa4541a7727759baead1e6e2f23ae5e2549a8fbfec07"
+    }
+  ],
+  "next_core_step_requires_external_input": false
+}

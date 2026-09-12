@@ -39,8 +39,28 @@ PUBLIC_PREREGISTRATION_REFERENCES = {
     Path("tests/test_capacity_preregistration.py"),
 }
 
+# NEX326 identifiers and their NEX lineage are part of the reviewed public
+# experiment contract. Keep this exception scoped to the package, its explicit
+# command-line entry points, and their contract tests.
+PUBLIC_NEX326 = Path("experiments/nex326")
+PUBLIC_NEX326_REFERENCES = {
+    Path("experiments/nex326_multi_seed.py"),
+    Path("experiments/nex326_phase_space.py"),
+    Path("experiments/nex326_phase_space_contrast.py"),
+    Path("experiments/nex326_phase_space_multi_seed.py"),
+    Path("experiments/nex326_phase_space_uncertainty.py"),
+    Path("experiments/nex326_process.py"),
+    Path("tests/test_nex326.py"),
+    Path("tests/test_nex326_multi_seed_receipt.py"),
+}
+
 
 def is_approved_public_reference(label: str, relative: Path, matched: str) -> bool:
+    if label == "internal work item" and (
+        relative.is_relative_to(PUBLIC_NEX326)
+        or relative in PUBLIC_NEX326_REFERENCES
+    ):
+        return True
     if (
         label == "internal work item"
         and (
