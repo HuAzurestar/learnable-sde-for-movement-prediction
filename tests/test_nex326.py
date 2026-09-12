@@ -54,6 +54,7 @@ from experiments.nex326_phase_space_multi_seed import (
     run_phase_space_replicates,
     write_phase_space_contrast,
     write_phase_space_receipt,
+    write_phase_space_segment_bootstrap,
 )
 from experiments.nex326_multi_seed import MultiSeedError, validate_replicate_seeds
 from experiments.nex326.specification import FULL_ANCHORS, GROUP_COUNTS, load_experiment_spec
@@ -579,6 +580,45 @@ def test_phase_space_multi_seed_manifest_and_receipt_are_hash_bound(tmp_path):
     )
     assert contrast["conclusion"] == "no_observed_primary_metric_gain"
     assert contrast["delta_summary"]["position_energy_score_d2"]["mean"] == 0.0
+    uncertainty_protocol = {
+        "schema_version": "nex326-phase-space-uncertainty-protocol-v1",
+        "analysis_id": "fixture-paired-segment-bootstrap",
+        "target_contrast": {
+            "baseline_benchmark_id": manifest["benchmark_id"],
+            "candidate_benchmark_id": manifest["benchmark_id"],
+        },
+        "bootstrap_unit": "paired_evaluation_segment",
+        "bootstrap_iterations": 100,
+        "bootstrap_seed": 17,
+        "confidence_level": 0.95,
+        "sampling_seed_handling": "average matched sampling-seed deltas",
+        "metrics": [
+            "position_energy_score_d2",
+            "position_cep50_error",
+            "velocity_endpoint_rmse",
+        ],
+    }
+    protocol_path = tmp_path / "uncertainty-protocol.json"
+    protocol_path.write_text(json.dumps(uncertainty_protocol), encoding="utf-8")
+    uncertainty = write_phase_space_segment_bootstrap(
+        root / "phase_space_multi_seed_manifest.json",
+        candidate_root / "phase_space_multi_seed_manifest.json",
+        tmp_path / "phase-space-contrast.json",
+        tmp_path / "phase-space-uncertainty.json",
+        protocol_path=protocol_path,
+    )
+    assert uncertainty["bootstrap_unit"] == "paired_evaluation_segment"
+    assert uncertainty["evaluation_segment_count"] == 6
+    assert uncertainty["uncertainty"]["position_energy_score_d2"] == {
+        "candidate_minus_baseline": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "interval_excludes_zero": False,
+        "bootstrap_fraction_below_zero": 0.0,
+    }
+    assert uncertainty["coverage_uncertainty"]["status"] == (
+        "not_computable_from_compact_reports"
+    )
     manifest_path = root / "phase_space_multi_seed_manifest.json"
     tampered = json.loads(manifest_path.read_text(encoding="utf-8"))
     tampered["metric_summary"]["position_energy_score_d2"]["mean"] += 1.0

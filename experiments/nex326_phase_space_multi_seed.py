@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
+import random
 from pathlib import Path
-from statistics import mean, stdev
+from statistics import mean, median, stdev
 from typing import Mapping, Sequence
 
 from experiments.nex326.cohort import load_cohort
@@ -22,6 +24,11 @@ from experiments.nex326.spatial_conditions import DSDERasterConditionResolver
 
 class PhaseSpaceReplicateError(ValueError):
     """A phase-space replicate batch is incomplete or ambiguous."""
+
+
+UNCERTAINTY_PROTOCOL_PATH = Path(__file__).with_name("nex326") / (
+    "phase_space_uncertainty_protocol.json"
+)
 
 
 def _sha256(path: Path) -> str:
@@ -189,6 +196,8 @@ def write_phase_space_receipt(
         report = json.loads(path.read_text(encoding="utf-8"))
         if report.get("schema_version") != REPORT_SCHEMA_VERSION:
             raise PhaseSpaceReplicateError("phase-space report schema mismatch")
+        if report.get("benchmark_id") != manifest.get("benchmark_id"):
+            raise PhaseSpaceReplicateError("phase-space report benchmark mismatch")
         if report.get("protocol", {}).get("executed_seed") != entry.get("seed"):
             raise PhaseSpaceReplicateError("phase-space report seed mismatch")
         if (
@@ -271,6 +280,7 @@ def _verified_manifest_reports(
         report = json.loads(path.read_text(encoding="utf-8"))
         if (
             report.get("schema_version") != REPORT_SCHEMA_VERSION
+            or report.get("benchmark_id") != manifest.get("benchmark_id")
             or report.get("protocol", {}).get("executed_seed") != seed
             or report.get("dataset", {}).get("fingerprint")
             != manifest.get("cohort", {}).get("fingerprint")
@@ -400,6 +410,233 @@ def write_phase_space_contrast(
         encoding="utf-8",
     )
     return contrast
+
+
+def _percentile(values: Sequence[float], probability: float) -> float:
+    ordered = sorted(float(value) for value in values)
+    if not ordered or not 0.0 <= probability <= 1.0:
+        raise PhaseSpaceReplicateError("bootstrap percentile input is invalid")
+    position = probability * (len(ordered) - 1)
+    lower = int(math.floor(position))
+    upper = int(math.ceil(position))
+    fraction = position - lower
+    return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
+
+
+def _segment_metric_delta(
+    baseline_rows: Sequence[Mapping[str, object]],
+    candidate_rows: Sequence[Mapping[str, object]],
+    indices: Sequence[int],
+    metric: str,
+) -> float:
+    if metric == "position_energy_score_d2":
+        return mean(
+            float(candidate_rows[index][metric])
+            - float(baseline_rows[index][metric])
+            for index in indices
+        )
+    if metric == "position_cep50_error":
+        source = "position_endpoint_error"
+        return median(float(candidate_rows[index][source]) for index in indices) - median(
+            float(baseline_rows[index][source]) for index in indices
+        )
+    if metric == "velocity_endpoint_rmse":
+        source = "velocity_endpoint_error"
+        candidate = math.sqrt(
+            mean(float(candidate_rows[index][source]) ** 2 for index in indices)
+        )
+        baseline = math.sqrt(
+            mean(float(baseline_rows[index][source]) ** 2 for index in indices)
+        )
+        return candidate - baseline
+    raise PhaseSpaceReplicateError(f"unsupported segment bootstrap metric: {metric}")
+
+
+def write_phase_space_segment_bootstrap(
+    baseline_manifest_path: Path | str,
+    candidate_manifest_path: Path | str,
+    contrast_path: Path | str,
+    output_path: Path | str,
+    *,
+    protocol_path: Path | str = UNCERTAINTY_PROTOCOL_PATH,
+) -> dict[str, object]:
+    """Bootstrap paired evaluation segments while averaging sampling-seed noise."""
+    baseline_file = Path(baseline_manifest_path)
+    candidate_file = Path(candidate_manifest_path)
+    contrast_file = Path(contrast_path)
+    protocol_file = Path(protocol_path)
+    destination = Path(output_path)
+    if destination.exists():
+        raise PhaseSpaceReplicateError(f"output already exists: {destination}")
+    baseline = json.loads(baseline_file.read_text(encoding="utf-8"))
+    candidate = json.loads(candidate_file.read_text(encoding="utf-8"))
+    contrast = json.loads(contrast_file.read_text(encoding="utf-8"))
+    protocol = json.loads(protocol_file.read_text(encoding="utf-8"))
+    if protocol.get("schema_version") != "nex326-phase-space-uncertainty-protocol-v1":
+        raise PhaseSpaceReplicateError("unsupported phase-space uncertainty protocol")
+    if contrast.get("schema_version") != "nex326-phase-space-paired-contrast-v1":
+        raise PhaseSpaceReplicateError("unsupported phase-space contrast")
+    target = protocol.get("target_contrast", {})
+    if (
+        baseline.get("benchmark_id") != target.get("baseline_benchmark_id")
+        or candidate.get("benchmark_id") != target.get("candidate_benchmark_id")
+        or contrast.get("baseline_benchmark_id") != baseline.get("benchmark_id")
+        or contrast.get("candidate_benchmark_id") != candidate.get("benchmark_id")
+    ):
+        raise PhaseSpaceReplicateError("uncertainty target does not match the contrast")
+    integrity = contrast.get("integrity", {})
+    if (
+        integrity.get("baseline_manifest_sha256") != _sha256(baseline_file)
+        or integrity.get("candidate_manifest_sha256") != _sha256(candidate_file)
+    ):
+        raise PhaseSpaceReplicateError("contrast manifest binding is invalid")
+    if (
+        baseline.get("replicate_seeds") != candidate.get("replicate_seeds")
+        or baseline.get("cohort", {}).get("fingerprint")
+        != candidate.get("cohort", {}).get("fingerprint")
+    ):
+        raise PhaseSpaceReplicateError("bootstrap manifests do not share one protocol")
+    baseline_reports = _verified_manifest_reports(baseline_file, baseline)
+    candidate_reports = _verified_manifest_reports(candidate_file, candidate)
+    seeds = tuple(int(seed) for seed in baseline["replicate_seeds"])
+    baseline_rows: dict[int, list[Mapping[str, object]]] = {}
+    candidate_rows: dict[int, list[Mapping[str, object]]] = {}
+    segment_ids: tuple[str, ...] | None = None
+    for seed in seeds:
+        baseline_per_segment = baseline_reports[seed].get("per_segment")
+        candidate_per_segment = candidate_reports[seed].get("per_segment")
+        if not isinstance(baseline_per_segment, list) or not isinstance(
+            candidate_per_segment, list
+        ):
+            raise PhaseSpaceReplicateError("bootstrap reports lack per-segment metrics")
+        baseline_ids = tuple(str(row.get("segment_id")) for row in baseline_per_segment)
+        candidate_ids = tuple(str(row.get("segment_id")) for row in candidate_per_segment)
+        if baseline_ids != candidate_ids or len(baseline_ids) != len(set(baseline_ids)):
+            raise PhaseSpaceReplicateError("bootstrap segment pairing is invalid")
+        if segment_ids is None:
+            segment_ids = baseline_ids
+        elif baseline_ids != segment_ids:
+            raise PhaseSpaceReplicateError("bootstrap segment order differs across seeds")
+        baseline_rows[seed] = baseline_per_segment
+        candidate_rows[seed] = candidate_per_segment
+    if not segment_ids:
+        raise PhaseSpaceReplicateError("bootstrap requires evaluation segments")
+    iterations = int(protocol.get("bootstrap_iterations", 0))
+    bootstrap_seed = int(protocol.get("bootstrap_seed", -1))
+    confidence_level = float(protocol.get("confidence_level", 0.0))
+    metrics = tuple(str(metric) for metric in protocol.get("metrics", []))
+    if (
+        iterations < 100
+        or bootstrap_seed < 0
+        or not 0.0 < confidence_level < 1.0
+        or metrics
+        != (
+            "position_energy_score_d2",
+            "position_cep50_error",
+            "velocity_endpoint_rmse",
+        )
+    ):
+        raise PhaseSpaceReplicateError("uncertainty protocol parameters are invalid")
+
+    full_indices = tuple(range(len(segment_ids)))
+    point_estimates = {
+        metric: mean(
+            _segment_metric_delta(
+                baseline_rows[seed], candidate_rows[seed], full_indices, metric
+            )
+            for seed in seeds
+        )
+        for metric in metrics
+    }
+    for metric in metrics:
+        expected = float(contrast["delta_summary"][metric]["mean"])
+        if not math.isclose(point_estimates[metric], expected, rel_tol=1e-12, abs_tol=1e-12):
+            raise PhaseSpaceReplicateError(
+                f"segment-derived {metric} point estimate disagrees with contrast"
+            )
+
+    generator = random.Random(bootstrap_seed)
+    draws = {metric: [] for metric in metrics}
+    for _ in range(iterations):
+        indices = tuple(generator.randrange(len(segment_ids)) for _ in segment_ids)
+        for metric in metrics:
+            draws[metric].append(
+                mean(
+                    _segment_metric_delta(
+                        baseline_rows[seed], candidate_rows[seed], indices, metric
+                    )
+                    for seed in seeds
+                )
+            )
+    tail = (1.0 - confidence_level) / 2.0
+    uncertainty = {}
+    for metric in metrics:
+        low = _percentile(draws[metric], tail)
+        high = _percentile(draws[metric], 1.0 - tail)
+        uncertainty[metric] = {
+            "candidate_minus_baseline": point_estimates[metric],
+            "ci_low": low,
+            "ci_high": high,
+            "interval_excludes_zero": high < 0.0 or low > 0.0,
+            "bootstrap_fraction_below_zero": sum(
+                value < 0.0 for value in draws[metric]
+            )
+            / iterations,
+        }
+    energy_per_segment = [
+        mean(
+            float(candidate_rows[seed][index]["position_energy_score_d2"])
+            - float(baseline_rows[seed][index]["position_energy_score_d2"])
+            for seed in seeds
+        )
+        for index in full_indices
+    ]
+    result = {
+        "schema_version": "nex326-phase-space-segment-bootstrap-v1",
+        "analysis_id": protocol["analysis_id"],
+        "scientific_role": "supplemental_exploratory_uncertainty_not_final_evidence",
+        "assessment": "not_assessed",
+        "baseline_benchmark_id": baseline["benchmark_id"],
+        "candidate_benchmark_id": candidate["benchmark_id"],
+        "cohort_fingerprint": baseline["cohort"]["fingerprint"],
+        "replicate_seeds": list(seeds),
+        "prediction_samples_per_segment": baseline[
+            "prediction_samples_per_segment"
+        ],
+        "bootstrap_unit": "paired_evaluation_segment",
+        "evaluation_segment_count": len(segment_ids),
+        "bootstrap_iterations": iterations,
+        "bootstrap_seed": bootstrap_seed,
+        "confidence_level": confidence_level,
+        "sampling_seed_handling": protocol["sampling_seed_handling"],
+        "uncertainty_scope": "heldout_segment_sampling_only",
+        "uncertainty": uncertainty,
+        "energy_segment_direction": {
+            "candidate_better_count": sum(value < 0.0 for value in energy_per_segment),
+            "candidate_worse_count": sum(value > 0.0 for value in energy_per_segment),
+            "median_candidate_minus_baseline": median(energy_per_segment),
+        },
+        "coverage_uncertainty": {
+            "status": "not_computable_from_compact_reports",
+            "reason": "legacy per-segment rows do not retain the HDR90 inclusion indicator",
+        },
+        "interpretation_limit": (
+            "Prediction-sampling seeds share one fitted cohort and evaluation set; "
+            "the interval does not quantify training-data or dataset-version uncertainty."
+        ),
+        "integrity": {
+            "protocol_sha256": _sha256(protocol_file),
+            "baseline_manifest_sha256": _sha256(baseline_file),
+            "candidate_manifest_sha256": _sha256(candidate_file),
+            "contrast_sha256": _sha256(contrast_file),
+        },
+    }
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    return result
 
 
 def main(argv: Sequence[str] | None = None) -> int:

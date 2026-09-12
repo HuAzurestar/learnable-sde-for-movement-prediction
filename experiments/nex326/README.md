@@ -201,6 +201,25 @@ coefficient was small (`lambda_normal=-0.001384`). This supports retaining v5 as
 best bounded terrain variant, not claiming a scientific verdict: the three runs vary
 prediction sampling only and reuse the same fitted cohort and evaluation segments.
 
+`phase_space_uncertainty_protocol.json` freezes the uncertainty follow-up before its
+interval is read. It resamples the 28 paired evaluation segments 10,000 times. Inside
+each resample it computes the metric delta separately for the three matched prediction
+sampling seeds and then averages those deltas, so the seeds are not treated as 84
+independent observations. Run it with:
+
+```console
+python -m experiments.nex326_phase_space_uncertainty \
+  --baseline /path/to/contour-distance/phase_space_multi_seed_manifest.json \
+  --candidate /path/to/terrain-residual/phase_space_multi_seed_manifest.json \
+  --contrast experiments/nex326/phase_space_terrain_aligned_residual_vs_contour_contrast.json \
+  --output /tmp/nex326-phase-space-v5-segment-bootstrap.json
+```
+
+The equal-tailed percentile intervals quantify held-out segment sampling only. They do
+not cover training-data, fitted-cohort, or dataset-version uncertainty. HDR90 is not
+bootstrapped because the legacy compact per-segment report omitted its inclusion flag;
+the analysis records that limitation instead of reconstructing or inventing it.
+
 For a bounded run on the registered DSDE Zhejiang holdout, first materialize the
 deterministic 20%-by-segment pilot cohort without copying the source parquet into this
 repository:

@@ -1,0 +1,28 @@
+{
+  "schema_version": "nex326-phase-space-uncertainty-protocol-v1",
+  "analysis_id": "NEX326-PHASE-SPACE-V5-PAIRED-SEGMENT-BOOTSTRAP-v1",
+  "scientific_role": "preregistered_followup_exploratory_uncertainty",
+  "target_contrast": {
+    "baseline_benchmark_id": "NEX326-PHASE-SPACE-4D-CONTOUR-DISTANCE-v3",
+    "candidate_benchmark_id": "NEX326-PHASE-SPACE-4D-TERRAIN-ALIGNED-RESIDUAL-v5"
+  },
+  "bootstrap_unit": "paired_evaluation_segment",
+  "bootstrap_iterations": 10000,
+  "bootstrap_seed": 20260814,
+  "confidence_level": 0.95,
+  "sampling_seed_handling": "for every bootstrap resample, compute the paired metric delta within each matched prediction-sampling seed and then average the three deltas",
+  "metrics": [
+    "position_energy_score_d2",
+    "position_cep50_error",
+    "velocity_endpoint_rmse"
+  ],
+  "metric_estimators": {
+    "position_energy_score_d2": "mean over resampled evaluation segments",
+    "position_cep50_error": "median endpoint position error over resampled evaluation segments",
+    "velocity_endpoint_rmse": "root mean squared endpoint velocity error over resampled evaluation segments"
+  },
+  "interval": "equal-tailed percentile interval",
+  "coverage_metric_status": "not_bootstrapped because legacy compact per-segment rows omit the HDR90 inclusion indicator",
+  "interpretation_scope": "heldout_segment_sampling_only_not_training_seed_or_dataset_version_uncertainty",
+  "verdict_policy": "report interval and direction only; do not issue a final scientific verdict"
+}
