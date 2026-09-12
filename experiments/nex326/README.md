@@ -86,6 +86,43 @@ This remains a supplemental exploratory benchmark, not a 23rd frozen arm and not
 scientific verdict. Endpoint velocity is a causal finite-difference diagnostic and is
 expected to be noisier than endpoint position.
 
+### Static terrain-conditioned comparison
+
+`phase_space_terrain_benchmark.json` registers the first concrete `C(x,y)` field:
+SRTM elevation and slope sampled at every simulated position. The DSDE condition
+slice recovers only the file-level origin used by the NEX-313 local projection. The
+adapter does not build a nearest-neighbour index over trajectory points, which would
+expose the geometry of the held-out future route. Source slice and raster hashes are
+recorded in every report.
+
+Run the three matched seeds with explicit external roots:
+
+```console
+python -m experiments.nex326_phase_space_multi_seed \
+  --cohort .local/nex326-dsde-20pct-pilot/cohort.json \
+  --spec experiments/nex326/phase_space_terrain_benchmark.json \
+  --condition-root /path/to/cond_slices \
+  --srtm-root /path/to/map_data/srtm_zj_hgt \
+  --output .local/nex326-phase-space-terrain-replicates \
+  --seeds 20260814 20260815 20260816 \
+  --samples 64 \
+  --receipt /tmp/nex326-phase-space-terrain-receipt.json
+```
+
+Then compare it against the matched unconditioned manifest:
+
+```console
+python -m experiments.nex326_phase_space_contrast \
+  --baseline /path/to/unconditioned/phase_space_multi_seed_manifest.json \
+  --candidate /path/to/terrain/phase_space_multi_seed_manifest.json \
+  --output /tmp/nex326-phase-space-terrain-contrast.json
+```
+
+The committed DSDE 20% contrast is explicitly exploratory. Its primary Energy Score
+became worse on all three seeds, so it records `no_observed_primary_metric_gain`; it
+does not imply that terrain is generally irrelevant or that a nonlinear velocity model
+would behave the same way.
+
 For a bounded run on the registered DSDE Zhejiang holdout, first materialize the
 deterministic 20%-by-segment pilot cohort without copying the source parquet into this
 repository:

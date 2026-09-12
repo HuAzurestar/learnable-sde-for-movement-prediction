@@ -22,6 +22,8 @@ IMPLEMENTATION_FILES = (
     "environment.lock.json",
     "phase_space.py",
     "phase_space_benchmark.json",
+    "phase_space_terrain_benchmark.json",
+    "spatial_conditions.py",
 )
 
 
@@ -36,6 +38,17 @@ class ConditionField(Protocol):
     def names(self) -> tuple[str, ...]: ...
 
     def evaluate(self, position: np.ndarray, time: float) -> np.ndarray: ...
+
+
+class ConditionFieldResolver(Protocol):
+    """Provide the coordinate-aware field belonging to one trajectory file."""
+
+    @property
+    def names(self) -> tuple[str, ...]: ...
+
+    def for_segment(self, segment: Segment) -> ConditionField: ...
+
+    def identity(self) -> Mapping[str, object]: ...
 
 
 @dataclass(frozen=True)
@@ -164,18 +177,29 @@ def phase_space_state(segment: Segment) -> np.ndarray:
 def _transition_rows(
     segments: Sequence[Segment],
     condition_names: Sequence[str],
+    condition_resolver: ConditionFieldResolver | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     features: list[np.ndarray] = []
     increments: list[np.ndarray] = []
     elapsed_values: list[float] = []
     for segment in segments:
         phase = phase_space_state(segment)
+        field = (
+            condition_resolver.for_segment(segment)
+            if condition_resolver is not None
+            else None
+        )
         for index in range(1, len(segment.time) - 1):
             elapsed = float(segment.time[index + 1] - segment.time[index])
-            condition = np.asarray(
-                [segment.conditions[name][index] for name in condition_names],
-                dtype=float,
-            )
+            if field is not None:
+                condition = field.evaluate(
+                    phase[index : index + 1, :2], float(segment.time[index])
+                )[0]
+            else:
+                condition = np.asarray(
+                    [segment.conditions[name][index] for name in condition_names],
+                    dtype=float,
+                )
             features.append(np.concatenate([phase[index, 2:], condition]))
             increments.append(phase[index + 1, 2:] - phase[index, 2:])
             elapsed_values.append(elapsed)
@@ -188,15 +212,22 @@ def fit_affine_velocity_model(
     segments: Sequence[Segment],
     *,
     condition_names: Sequence[str] = (),
+    condition_resolver: ConditionFieldResolver | None = None,
     ridge: float = 1e-6,
 ) -> AffineVelocityModel:
     """Fit ``dV=f(V,C)dt+GdW`` without learning the kinematic position row."""
     if ridge <= 0.0:
         raise PhaseSpaceError("ridge must be positive")
     names = tuple(str(name) for name in condition_names)
-    if any(any(name not in segment.conditions for name in names) for segment in segments):
+    if condition_resolver is not None and condition_resolver.names != names:
+        raise PhaseSpaceError("condition resolver names do not match the registered model")
+    if condition_resolver is None and any(
+        any(name not in segment.conditions for name in names) for segment in segments
+    ):
         raise PhaseSpaceError("a registered training condition is unavailable")
-    raw, velocity_increment, elapsed = _transition_rows(segments, names)
+    raw, velocity_increment, elapsed = _transition_rows(
+        segments, names, condition_resolver
+    )
     feature_mean = raw.mean(axis=0)
     feature_scale = raw.std(axis=0)
     feature_scale[feature_scale < 1e-10] = 1.0
@@ -278,8 +309,11 @@ def _energy_score(samples: np.ndarray, target: np.ndarray) -> float:
 def _validation_velocity_rmse(
     model: AffineVelocityModel,
     segments: Sequence[Segment],
+    condition_resolver: ConditionFieldResolver | None = None,
 ) -> float:
-    raw, increments, elapsed = _transition_rows(segments, model.condition_names)
+    raw, increments, elapsed = _transition_rows(
+        segments, model.condition_names, condition_resolver
+    )
     conditions = raw[:, 2:] if model.condition_names else None
     predicted = model.acceleration(raw[:, :2], conditions) * elapsed[:, None]
     return float(np.sqrt(np.mean((predicted - increments) ** 2)))
@@ -338,27 +372,39 @@ def run_phase_space_benchmark(
     *,
     n_samples: int,
     seed: int,
+    condition_resolver: ConditionFieldResolver | None = None,
 ) -> dict[str, object]:
-    """Run the supplemental unconditioned four-dimensional benchmark."""
+    """Run a supplemental four-dimensional benchmark with optional spatial fields."""
     velocity_config = spec["velocity_model"]
     condition_config = spec["condition_contract"]
     condition_names = tuple(condition_config["registered_condition_names"])
+    if condition_names and condition_resolver is None:
+        raise PhaseSpaceError("registered conditions require a spatial condition resolver")
+    if condition_resolver is not None and condition_resolver.names != condition_names:
+        raise PhaseSpaceError("condition resolver names do not match the specification")
     fit_segments = cohort.splits["train"] + cohort.splits["adapt"]
     model = fit_affine_velocity_model(
         fit_segments,
         condition_names=condition_names,
+        condition_resolver=condition_resolver,
         ridge=float(velocity_config["ridge"]),
     )
     rng = np.random.default_rng(seed)
     predictions: list[PhaseSpacePrediction] = []
     for segment in cohort.splits["evaluation"]:
         cutoff = max(2, len(segment.time) // 2 - 1)
+        condition_field = (
+            condition_resolver.for_segment(segment)
+            if condition_resolver is not None
+            else None
+        )
         paths = rollout_phase_space(
             model,
             segment,
             cutoff=cutoff,
             n_samples=n_samples,
             rng=rng,
+            condition_field=condition_field,
         )
         predictions.append(
             PhaseSpacePrediction(
@@ -397,6 +443,9 @@ def run_phase_space_benchmark(
         },
         "state_contract": spec["state_contract"],
         "condition_contract": spec["condition_contract"],
+        "condition_field": (
+            condition_resolver.identity() if condition_resolver is not None else None
+        ),
         "protocol": {
             **spec["protocol"],
             "executed_seed": seed,
@@ -405,7 +454,7 @@ def run_phase_space_benchmark(
         "model": model.to_dict(),
         "validation": {
             "velocity_increment_rmse": _validation_velocity_rmse(
-                model, cohort.splits["validation"]
+                model, cohort.splits["validation"], condition_resolver
             )
         },
         "metrics": metrics,
@@ -420,6 +469,7 @@ def write_phase_space_report(
     spec_path: Path | str = SPEC_PATH,
     n_samples: int | None = None,
     seed: int | None = None,
+    condition_resolver: ConditionFieldResolver | None = None,
 ) -> dict[str, object]:
     destination = Path(output_path)
     if destination.exists():
@@ -435,6 +485,7 @@ def write_phase_space_report(
         spec,
         n_samples=selected_samples,
         seed=selected_seed,
+        condition_resolver=condition_resolver,
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(
@@ -447,6 +498,7 @@ def write_phase_space_report(
 __all__ = [
     "AffineVelocityModel",
     "ConditionField",
+    "ConditionFieldResolver",
     "PhaseSpaceError",
     "fit_affine_velocity_model",
     "load_phase_space_spec",

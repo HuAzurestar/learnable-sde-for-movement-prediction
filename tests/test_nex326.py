@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from experiments.nex326.cohort import load_cohort
+from experiments.nex326.cohort import Cohort, Segment, load_cohort
 from experiments.nex326.dsde_pilot import materialize_dsde_zhejiang_pilot
 from experiments.nex326.endpoint_prior import (
     EndpointPriorError,
@@ -38,10 +38,12 @@ from experiments.nex326.schrodinger import (
     SchrodingerBridgeError,
     solve_particle_schrodinger_bridge,
 )
+from experiments.nex326.spatial_conditions import DSDERasterConditionResolver
 from experiments.nex326_process import main
 from experiments.nex326_phase_space_multi_seed import (
     PhaseSpaceReplicateError,
     run_phase_space_replicates,
+    write_phase_space_contrast,
     write_phase_space_receipt,
 )
 from experiments.nex326_multi_seed import MultiSeedError, validate_replicate_seeds
@@ -299,6 +301,74 @@ def test_conditional_phase_space_rollout_requires_a_spatial_field():
         )
 
 
+def test_dsde_raster_conditions_query_position_without_route_point_index(tmp_path):
+    condition_root = tmp_path / "cond_slices"
+    srtm_root = tmp_path / "srtm"
+    srtm_root.mkdir()
+    terrain = np.asarray(
+        [
+            [14, 15, 16, 17, 18],
+            [13, 14, 15, 16, 17],
+            [12, 13, 14, 15, 16],
+            [11, 12, 13, 14, 15],
+            [10, 11, 12, 13, 14],
+        ],
+        dtype=">i2",
+    )
+    (srtm_root / "N30E120.hgt").write_bytes(terrain.tobytes())
+
+    splits = {}
+    for split, directory in {
+        "train": "zhejiang_finetune",
+        "adapt": "zhejiang_finetune",
+        "validation": "zhejiang_val",
+        "evaluation": "zhejiang_eval",
+    }.items():
+        target = condition_root / directory
+        target.mkdir(parents=True, exist_ok=True)
+        condition_path = target / "track_cond.parquet"
+        if not condition_path.exists():
+            pd.DataFrame(
+                {
+                    "file_id": ["track", "track"],
+                    "lat": [30.49, 30.51],
+                    "lon": [120.49, 120.51],
+                }
+            ).to_parquet(condition_path, index=False)
+        splits[split] = (
+            Segment(
+                segment_id=f"{split}:track:0_0",
+                source_domain="human",
+                region="zhejiang",
+                time=np.arange(4, dtype=float),
+                state=np.column_stack([np.arange(4, dtype=float), np.zeros(4)]),
+                conditions={},
+                has_terrain=True,
+            ),
+        )
+    splits["animal_pretrain"] = ()
+    cohort = Cohort(
+        schema_version="nex326-cohort-v1",
+        dataset_id="terrain-test",
+        data_version="v1",
+        purpose="test",
+        splits=splits,
+        unavailable_reasons={"animal_pretrain": "not used"},
+        fingerprint="test",
+    )
+    resolver = DSDERasterConditionResolver(cohort, condition_root, srtm_root)
+    field = resolver.for_segment(splits["evaluation"][0])
+    values = field.evaluate(np.asarray([[0.0, 0.0], [10.0, 10.0]]), 0.0)
+    assert field.names == ("terrain_elevation", "terrain_slope")
+    assert values.shape == (2, 2)
+    assert np.isfinite(values).all()
+    assert values[0, 0] == pytest.approx(14.0)
+    assert values[0, 1] > 0.0
+    identity = resolver.identity()
+    assert identity["future_route_point_index_used"] is False
+    assert len(identity["terrain_tiles"]) == 1
+
+
 def test_phase_space_multi_seed_manifest_and_receipt_are_hash_bound(tmp_path):
     root = tmp_path / "phase-space-replicates"
     manifest = run_phase_space_replicates(
@@ -317,6 +387,20 @@ def test_phase_space_multi_seed_manifest_and_receipt_are_hash_bound(tmp_path):
     )
     assert receipt["metric_summary"] == manifest["metric_summary"]
     assert len(receipt["integrity"]["reports"]) == 2
+    candidate_root = tmp_path / "phase-space-candidate"
+    run_phase_space_replicates(
+        NEX326 / "fixtures" / "registered_cohort.json",
+        candidate_root,
+        (101, 202),
+        n_samples=8,
+    )
+    contrast = write_phase_space_contrast(
+        root / "phase_space_multi_seed_manifest.json",
+        candidate_root / "phase_space_multi_seed_manifest.json",
+        tmp_path / "phase-space-contrast.json",
+    )
+    assert contrast["conclusion"] == "no_observed_primary_metric_gain"
+    assert contrast["delta_summary"]["position_energy_score_d2"]["mean"] == 0.0
     manifest_path = root / "phase_space_multi_seed_manifest.json"
     tampered = json.loads(manifest_path.read_text(encoding="utf-8"))
     tampered["metric_summary"]["position_energy_score_d2"]["mean"] += 1.0
