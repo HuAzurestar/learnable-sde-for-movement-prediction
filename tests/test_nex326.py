@@ -21,11 +21,14 @@ from experiments.nex326.model import build_transition_data, train_model
 from experiments.nex326.pilot_receipt import PilotReceiptError, build_pilot_receipt
 from experiments.nex326.phase_space import (
     PhaseSpaceError,
+    TerrainAlignedVelocityModel,
     directional_terrain_velocity_terms,
     fit_affine_velocity_model,
+    fit_terrain_aligned_velocity_model,
     load_phase_space_spec,
     phase_space_state,
     rollout_phase_space,
+    terrain_aligned_velocity_components,
     write_phase_space_report,
 )
 from experiments.nex326.runner import (
@@ -288,6 +291,52 @@ def test_directional_terrain_terms_distinguish_uphill_downhill_and_tangent():
     ]
 
 
+def test_terrain_aligned_projection_resolves_normal_and_tangent_velocity():
+    velocity = np.asarray([[3.0, 4.0], [-2.0, 5.0], [7.0, -1.0]])
+    gradient = np.asarray([[2.0, 0.0], [0.0, -3.0], [0.0, 0.0]])
+    normal, tangent = terrain_aligned_velocity_components(velocity, gradient)
+    assert np.allclose(normal, [[3.0, 0.0], [0.0, 5.0], [0.0, 0.0]])
+    assert np.allclose(tangent, [[0.0, 4.0], [-2.0, 0.0], [7.0, -1.0]])
+    assert np.allclose(normal + tangent, velocity)
+    flipped_normal, flipped_tangent = terrain_aligned_velocity_components(
+        velocity, -gradient
+    )
+    assert np.allclose(flipped_normal, normal)
+    assert np.allclose(flipped_tangent, tangent)
+
+    model = TerrainAlignedVelocityModel(
+        condition_names=DIRECTIONAL_TERRAIN_CONDITION_NAMES,
+        intercept=np.asarray([0.5, -0.25]),
+        normal_response=-2.0,
+        tangent_response=-0.5,
+        gradient_force=3.0,
+        design_scales=np.ones(5),
+        diffusion_covariance=np.eye(2),
+        transition_count=3,
+    )
+    conditions = np.column_stack([np.zeros(3), gradient])
+    expected = 0.5 * np.asarray([[1.0, -0.5]]) - 2.0 * normal - 0.5 * tangent + 3.0 * gradient
+    assert np.allclose(model.acceleration(velocity, conditions), expected)
+
+
+def test_terrain_aligned_v4_is_preregistered_as_structural_followup():
+    spec = load_phase_space_spec(
+        NEX326 / "phase_space_terrain_aligned_benchmark.json"
+    )
+    assert spec["velocity_model"]["kind"] == "terrain_aligned_projection_drift"
+    assert spec["velocity_model"]["learned_parameters"] == [
+        "b_x",
+        "b_y",
+        "lambda_normal",
+        "lambda_tangent",
+        "kappa",
+    ]
+    assert spec["protocol"]["primary_comparator"] == (
+        "NEX326-PHASE-SPACE-4D-CONTOUR-DISTANCE-v3"
+    )
+    assert "t and -t" in spec["condition_contract"]["contour_tangent_semantics"]
+
+
 def test_phase_space_benchmark_runs_without_rewriting_frozen_arms(tmp_path):
     cohort_path = NEX326 / "fixtures" / "registered_cohort.json"
     output = tmp_path / "phase-space.json"
@@ -413,6 +462,14 @@ def test_dsde_raster_conditions_query_position_without_route_point_index(tmp_pat
         "signed_uphill_speed",
         "velocity_to_contour_line_distance",
     )
+    terrain_aligned = fit_terrain_aligned_velocity_model(
+        splits["train"] + splits["adapt"],
+        condition_names=DIRECTIONAL_TERRAIN_CONDITION_NAMES,
+        condition_resolver=directional_resolver,
+    )
+    assert terrain_aligned.transition_count == 4
+    assert terrain_aligned.to_dict()["kind"] == "terrain_aligned_projection_drift"
+    assert np.linalg.eigvalsh(terrain_aligned.diffusion_covariance).min() > 0.0
     expected_derived = {
         "directional_terrain_gradient_only": (),
         "directional_terrain_signed_uphill": ("signed_uphill_speed",),

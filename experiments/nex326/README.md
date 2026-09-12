@@ -151,6 +151,23 @@ did not pass the gate (`+0.1324`), and adding it to contour distance also did no
 (`+0.1244`). These are feature-attribution results for this affine pilot only; they do
 not establish a general behavioral preference for contour-following movement.
 
+### Terrain-aligned drift v4
+
+`phase_space_terrain_aligned_benchmark.json` preregisters a structural follow-up to
+the contour-distance result. Instead of giving an unconstrained affine model another
+scalar feature, it decomposes velocity with the local terrain-gradient projection:
+`v_normal=P_normal v` and `v_tangent=(I-P_normal)v`. The velocity drift learns one
+shared response coefficient for each component plus a signed gradient force. This
+allows normal and contour-following motion to decay or persist differently, while the
+tangent projection is invariant to choosing `t` or `-t`. At a flat raster cell the
+registered convention is `v_normal=0` and `v_tangent=v`.
+
+The primary comparator is contour-distance v3 on the same DSDE 20% cohort, three
+seeds, cutoffs, and 64 samples. The exploratory gate is frozen before execution: mean
+paired Energy Score must improve and at least two of three seeds must improve. As with
+the earlier phase-space runs, secondary calibration, position, and velocity metrics
+must still be reported even if the primary gate passes.
+
 For a bounded run on the registered DSDE Zhejiang holdout, first materialize the
 deterministic 20%-by-segment pilot cohort without copying the source parquet into this
 repository:
