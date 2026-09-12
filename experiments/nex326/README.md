@@ -123,6 +123,23 @@ became worse on all three seeds, so it records `no_observed_primary_metric_gain`
 does not imply that terrain is generally irrelevant or that a nonlinear velocity model
 would behave the same way.
 
+### Directional terrain v2
+
+`phase_space_directional_terrain_benchmark.json` preregisters the follow-up before
+examining its three-seed result. It replaces scalar slope magnitude with signed east
+and north elevation gradients. If `u` is the normalized uphill direction, the velocity
+basis contains both `dot(v,u)` (positive uphill, negative downhill) and
+`abs(dot(v,u))`. The latter is the Euclidean distance from `v` to the contour tangent
+line; it is unchanged when the arbitrary tangent representative `t` is replaced by
+`-t`.
+
+The registered primary comparison is directional v2 versus scalar-terrain v1 on the
+same DSDE 20% cohort, seeds, cutoffs, and 64 samples. The exploratory gate requires a
+negative mean paired Energy Score delta and improvement on at least two of three
+seeds. The recorded pilot passed that gate on all three seeds, with mean Energy Score
+delta `-4.4971`. This is a pilot signal, not an inferential verdict; calibration and
+velocity diagnostics remain mixed.
+
 For a bounded run on the registered DSDE Zhejiang holdout, first materialize the
 deterministic 20%-by-segment pilot cohort without copying the source parquet into this
 repository:
