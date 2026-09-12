@@ -19,6 +19,14 @@ from experiments.nex326.endpoint_prior import (
 from experiments.nex326.fidelity import build_fidelity_report, write_fidelity_report
 from experiments.nex326.model import build_transition_data, train_model
 from experiments.nex326.pilot_receipt import PilotReceiptError, build_pilot_receipt
+from experiments.nex326.phase_space import (
+    PhaseSpaceError,
+    fit_affine_velocity_model,
+    load_phase_space_spec,
+    phase_space_state,
+    rollout_phase_space,
+    write_phase_space_report,
+)
 from experiments.nex326.runner import (
     NEX326Runner,
     RunError,
@@ -31,6 +39,11 @@ from experiments.nex326.schrodinger import (
     solve_particle_schrodinger_bridge,
 )
 from experiments.nex326_process import main
+from experiments.nex326_phase_space_multi_seed import (
+    PhaseSpaceReplicateError,
+    run_phase_space_replicates,
+    write_phase_space_receipt,
+)
 from experiments.nex326_multi_seed import MultiSeedError, validate_replicate_seeds
 from experiments.nex326.specification import FULL_ANCHORS, GROUP_COUNTS, load_experiment_spec
 
@@ -232,6 +245,91 @@ def test_particle_schrodinger_bridge_refuses_nonconvergence():
             time_steps=8,
             max_iterations=1,
             tolerance=1e-15,
+        )
+
+
+def test_phase_space_contract_uses_causal_four_dimensional_state():
+    spec = load_phase_space_spec()
+    assert spec["state_contract"]["layout"] == ["x", "y", "vx", "vy"]
+    assert spec["state_contract"]["position_dynamics"] == "dX=Vdt"
+    assert spec["condition_contract"]["condition_is_dynamic_state"] is False
+
+    cohort = load_cohort(NEX326 / "fixtures" / "registered_cohort.json")
+    segment = cohort.splits["train"][0]
+    phase = phase_space_state(segment)
+    expected_velocity = np.diff(segment.state, axis=0) / np.diff(segment.time)[:, None]
+    assert phase.shape == (len(segment.time), 4)
+    assert np.allclose(phase[1:, 2:], expected_velocity)
+    assert np.allclose(phase[0, 2:], expected_velocity[0])
+
+
+def test_phase_space_benchmark_runs_without_rewriting_frozen_arms(tmp_path):
+    cohort_path = NEX326 / "fixtures" / "registered_cohort.json"
+    output = tmp_path / "phase-space.json"
+    report = write_phase_space_report(cohort_path, output, n_samples=16)
+    assert report["benchmark_id"] == "NEX326-PHASE-SPACE-4D-v1"
+    assert report["scientific_role"] == "supplemental_benchmark_not_a_frozen_arm"
+    assert report["state_contract"]["layout"] == ["x", "y", "vx", "vy"]
+    assert report["condition_contract"]["registered_condition_names"] == []
+    assert report["model"]["diffusion_state_support"] == ["vx", "vy"]
+    assert report["metrics"]["evaluation_segment_count"] == 6
+    assert report["metrics"]["kinematic_identity_max_error"] < 1e-10
+    assert all(
+        math.isfinite(value)
+        for key, value in report["metrics"].items()
+        if key != "evaluation_segment_count"
+    )
+    with pytest.raises(PhaseSpaceError, match="output already exists"):
+        write_phase_space_report(cohort_path, output, n_samples=16)
+
+
+def test_conditional_phase_space_rollout_requires_a_spatial_field():
+    cohort = load_cohort(NEX326 / "fixtures" / "registered_cohort.json")
+    model = fit_affine_velocity_model(
+        cohort.splits["train"], condition_names=("solar_elev",)
+    )
+    segment = cohort.splits["evaluation"][0]
+    with pytest.raises(PhaseSpaceError, match="spatial condition field"):
+        rollout_phase_space(
+            model,
+            segment,
+            cutoff=max(2, len(segment.time) // 2 - 1),
+            n_samples=8,
+            rng=np.random.default_rng(3),
+        )
+
+
+def test_phase_space_multi_seed_manifest_and_receipt_are_hash_bound(tmp_path):
+    root = tmp_path / "phase-space-replicates"
+    manifest = run_phase_space_replicates(
+        NEX326 / "fixtures" / "registered_cohort.json",
+        root,
+        (101, 202),
+        n_samples=8,
+    )
+    assert manifest["replicate_seeds"] == [101, 202]
+    assert manifest["replicate_count"] == 2
+    assert len(manifest["reports"]) == 2
+    assert set(manifest["metric_summary"]) == set(load_phase_space_spec()["metrics"])
+    receipt = write_phase_space_receipt(
+        root / "phase_space_multi_seed_manifest.json",
+        tmp_path / "phase-space-receipt.json",
+    )
+    assert receipt["metric_summary"] == manifest["metric_summary"]
+    assert len(receipt["integrity"]["reports"]) == 2
+    manifest_path = root / "phase_space_multi_seed_manifest.json"
+    tampered = json.loads(manifest_path.read_text(encoding="utf-8"))
+    tampered["metric_summary"]["position_energy_score_d2"]["mean"] += 1.0
+    tampered_path = root / "tampered-manifest.json"
+    tampered_path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(PhaseSpaceReplicateError, match="metric summary mismatch"):
+        write_phase_space_receipt(tampered_path, tmp_path / "tampered-receipt.json")
+    with pytest.raises(PhaseSpaceReplicateError, match="at least two unique"):
+        run_phase_space_replicates(
+            NEX326 / "fixtures" / "registered_cohort.json",
+            tmp_path / "invalid",
+            (101, 101),
+            n_samples=8,
         )
 
 

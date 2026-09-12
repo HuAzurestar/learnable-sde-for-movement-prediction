@@ -50,6 +50,42 @@ The CLI never chooses the fixture implicitly. Scientific execution must pass an
 explicit `--cohort`; `--implementation-fixture` keeps the non-scientific intent visible
 in both the command and every resulting RunRecord.
 
+## Supplemental four-dimensional benchmark
+
+The frozen 36-execution matrix remains the direct two-dimensional position-transition
+benchmark. `phase_space_benchmark.json` registers a separate, unnumbered comparison
+whose dynamic state is `[x, y, vx, vy]`. Velocities use causal backward differences on
+the cohort's irregular timestamps, position obeys `dX=Vdt` by construction, and both
+drift uncertainty and diffusion are confined to the coupled velocity equation.
+
+The first registered phase-space version is deliberately unconditioned. Its condition
+contract requires a spatial lookup `C(x,y,t_optional)` during off-observation rollout;
+time-aligned values from the held-out trajectory are not silently reused as a spatial
+field. Run one seed with:
+
+```console
+python -m experiments.nex326_phase_space \
+  --cohort .local/nex326-dsde-20pct-pilot/cohort.json \
+  --output /tmp/nex326-phase-space-report.json \
+  --samples 64 \
+  --seed 20260814
+```
+
+For descriptive sampling-seed replication and a compact hash-bound receipt:
+
+```console
+python -m experiments.nex326_phase_space_multi_seed \
+  --cohort .local/nex326-dsde-20pct-pilot/cohort.json \
+  --output .local/nex326-phase-space-dsde20-replicates \
+  --seeds 20260814 20260815 20260816 \
+  --samples 64 \
+  --receipt experiments/nex326/phase_space_dsde_20pct_receipt.json
+```
+
+This remains a supplemental exploratory benchmark, not a 23rd frozen arm and not a
+scientific verdict. Endpoint velocity is a causal finite-difference diagnostic and is
+expected to be noisier than endpoint position.
+
 For a bounded run on the registered DSDE Zhejiang holdout, first materialize the
 deterministic 20%-by-segment pilot cohort without copying the source parquet into this
 repository:
