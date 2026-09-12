@@ -287,6 +287,19 @@ coverage increases by `+0.11905` on average. The per-seed paired-segment Energy 
 CEP50 intervals all cross zero, so this mixed result remains exploratory and
 `not_assessed`.
 
+Regenerate the dimensioned PIRC-19 completion audit from the tracked spec, fidelity
+report, implementation gaps, and both DSDE receipts with:
+
+```console
+python -m experiments.nex326.completion \
+  --output experiments/nex326/pirc19_completion_report.json
+```
+
+The audit deliberately does not publish one blended completion percentage. It reports
+the frozen-contract implementation, current-data execution coverage, replicated
+execution coverage, and scientific-assessment coverage separately, and fails if source
+hashes, receipt identities, unavailable scopes, or the Arm 22 extension boundary drift.
+
 After aggregating each seed independently, produce a descriptive cross-replicate table:
 
 ```console

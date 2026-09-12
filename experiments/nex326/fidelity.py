@@ -115,6 +115,19 @@ def build_fidelity_report(spec: ExperimentSpec | None = None) -> dict[str, objec
             "remaining_limit": "the inner loss is the bounded linear-Gaussian task loss, not a large neural model",
         },
         {
+            "arms": [17],
+            "capability": "spatial_terrain_conditioning",
+            "implementation": {
+                "fit_lookup": "SRTM sampled at observed positions",
+                "inference_lookup": "SRTM sampled at each simulated position",
+                "future_route_point_index_used": False,
+                "fp_propagation": "local_gaussian_mean_closure",
+                "comparison_guard": "evaluation segment-ID fingerprint must match Full reference",
+            },
+            "fidelity": "implemented_spatial_condition_with_bounded_fp_closure",
+            "remaining_limit": "weather is unavailable; nonlinear C(x,y) finite propagation uses a declared local Gaussian mean closure",
+        },
+        {
             "arms": [22],
             "capability": "endpoint_conditioning",
             "implementation": {
@@ -125,8 +138,8 @@ def build_fidelity_report(spec: ExperimentSpec | None = None) -> dict[str, objec
                 "prior_contract": "exact-coverage independent feed adapter",
                 "failure_policy": "non-convergence raises RunError without fallback",
             },
-            "fidelity": "implemented_finite_particle_schrodinger_bridge",
-            "remaining_limit": "the registered solver is a finite-particle approximation under an isotropic Brownian reference; the DSDE pilot has no external prior feed yet",
+            "fidelity": "implemented_finite_particle_schrodinger_bridge_extension",
+            "remaining_limit": "expert-assisted endpoint priors are outside the current PIRC-19 core evidence; no mock feed is used in core receipts",
         },
     ]
     failures = [check for check in route_checks if not check["passed"]]

@@ -10,6 +10,11 @@ import pandas as pd
 import pytest
 
 from experiments.nex326.cohort import Cohort, Segment, load_cohort
+from experiments.nex326.completion import (
+    CompletionAuditError,
+    build_completion_report,
+    write_completion_report,
+)
 from experiments.nex326.dsde_pilot import materialize_dsde_zhejiang_pilot
 from experiments.nex326.endpoint_prior import (
     EndpointPriorError,
@@ -825,9 +830,57 @@ def test_critical_algorithm_paths_are_checkpointed_and_auditable(tmp_path):
 
     report = write_fidelity_report(tmp_path / "fidelity.json")
     assert report == build_fidelity_report(spec)
+    terrain = next(
+        item
+        for item in report["capabilities"]
+        if item["capability"] == "spatial_terrain_conditioning"
+    )
+    assert terrain["implementation"]["future_route_point_index_used"] is False
+    endpoint = next(
+        item
+        for item in report["capabilities"]
+        if item["capability"] == "endpoint_conditioning"
+    )
+    assert endpoint["fidelity"].endswith("_extension")
     assert report["failed_route_count"] == 0
     assert report["overall_status"] == "bounded_reconstruction_with_declared_approximations"
     assert report["paper_equivalent"] is False
+
+
+def test_pirc19_completion_audit_separates_engineering_and_scientific_status(
+    tmp_path,
+):
+    report = write_completion_report(tmp_path / "completion.json")
+    assert report == build_completion_report()
+    assert report["check_summary"] == {
+        "passed": 11,
+        "total": 11,
+        "all_passed": True,
+    }
+    assert report["dimensions"]["frozen_contract_implementation"]["ratio"] == 1.0
+    assert report["dimensions"]["current_dsde_execution"]["numerator"] == 31
+    assert report["dimensions"]["replicated_current_dsde_execution"] == {
+        "status": "complete_for_available_inputs",
+        "numerator": 93,
+        "denominator": 108,
+        "ratio": 93 / 108,
+    }
+    assert report["dimensions"][
+        "scientifically_assessed_succeeded_executions"
+    ]["numerator"] == 0
+    assert report["next_core_step_requires_external_input"] is True
+
+    broken_multi = json.loads(
+        (NEX326 / "dsde_20pct_multi_seed_receipt.json").read_text(encoding="utf-8")
+    )
+    broken_multi["total_execution_count"] = 107
+    broken_path = tmp_path / "broken-multi.json"
+    broken_path.write_text(json.dumps(broken_multi), encoding="utf-8")
+    with pytest.raises(CompletionAuditError, match="replicate_matrix"):
+        write_completion_report(
+            tmp_path / "broken-completion.json",
+            multi_seed_path=broken_path,
+        )
 
 
 def test_cli_requires_an_explicit_scientific_cohort_or_fixture(tmp_path, capsys):
