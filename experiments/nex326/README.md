@@ -240,8 +240,17 @@ python -m experiments.nex326.dsde_pilot \
   --fraction 0.2
 python -m experiments.nex326_process \
   --cohort /tmp/nex326-dsde-20pct-cohort.json \
+  --condition-root /path/to/cond_slices \
+  --srtm-root /path/to/map_data/srtm_zj_hgt \
   --output /tmp/nex326-dsde-20pct-runs
 ```
+
+The two terrain arguments are optional as a pair. When present, the frozen Arm 17
+terrain execution samples SRTM at observed positions during fitting and at each
+simulated position during inference. It never indexes terrain by a future route point.
+The frozen finite-propagation (`fp`) setting is retained as a local Gaussian
+mean-closure approximation and is declared in the RunRecord. Without the pair, Arm 17
+terrain remains `data_unavailable` rather than receiving fabricated columns.
 
 For training/prediction-replicate evidence, keep the frozen protocol seed in the spec
 and provide distinct replicate seeds explicitly:
@@ -249,6 +258,8 @@ and provide distinct replicate seeds explicitly:
 ```console
 python -m experiments.nex326_multi_seed \
   --cohort .local/nex326-dsde-20pct-pilot/cohort.json \
+  --condition-root /path/to/cond_slices \
+  --srtm-root /path/to/map_data/srtm_zj_hgt \
   --output .local/nex326-dsde-20pct-replicates \
   --seeds 20260814 20260815 20260816 \
   --strict-environment
@@ -261,6 +272,11 @@ are still recorded and remain part of the execution identity.
 Each seed gets a complete 36-execution directory and the batch manifest binds every
 per-seed manifest by SHA-256. Multi-seed runs remain `not_combined_verdict` until TSDE
 performs an explicitly registered cross-replicate analysis.
+
+The tracked 20% DSDE receipt uses seeds `20260814..20260816`: all three replicas contain
+31 succeeded and 5 `data_unavailable` executions (93 succeeded of 108 total). Arm 17
+terrain is the additional succeeded execution. The remaining unavailable set is Arm 13
+animal transfer, Arm 17 weather, and the three expert-prior Arm 22 variants.
 
 After aggregating each seed independently, produce a descriptive cross-replicate table:
 
@@ -293,9 +309,10 @@ The adapter preserves the DSDE validation/evaluation file partitions, divides th
 finetune files into disjoint train/adapt partitions, and records source hashes. Solar
 elevation is a declared Zhejiang-centroid approximation derived from timestamps. It
 uses the DSDE city label as the meta-learning task unit, with region as fallback. It
-does not fabricate missing animal, weather, terrain, or endpoint-prior data; affected
-executions emit `data_unavailable`. The pilot purpose remains
-`not_final_scientific_evidence`.
+does not fabricate missing animal, weather, or endpoint-prior data. Terrain is available
+only when both registered condition slices and SRTM tiles are supplied; its file and
+tile hashes are bound into the Arm 17 RunRecord. Other affected executions emit
+`data_unavailable`. The pilot purpose remains `not_final_scientific_evidence`.
 
 When an independent endpoint-prior feed becomes available, attach it without modifying
 the original DSDE pilot cohort:
@@ -329,6 +346,11 @@ Arm 22's `sb` subconfig freezes the finite-particle dynamic solver at epsilon sc
 iterations, and marginal tolerance 1e-8. Prediction artifacts retain each sampled
 path and convergence diagnostics. Failure to meet the registered tolerance aborts that
 execution; it never falls back to the soft-endpoint transform.
+
+Arm 22 is retained in the reconstructed 22-arm contract, but its DSDE endpoint prior is
+an expert-assisted extension rather than part of the current PIRC-19 core evidence.
+Until an independently attested expert feed exists, all three Arm 22 executions remain
+`data_unavailable`; no mock prior is used in the core receipts.
 
 After TSDE aggregation, bind the cohort, all RunRecords, and the aggregate summary
 into a portable receipt (only hashes and compact metadata are committed):

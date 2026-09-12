@@ -38,6 +38,7 @@ from experiments.nex326.runner import (
     RunError,
     STAGES,
     _apply_bridge,
+    predict_segments,
     validate_run_record,
 )
 from experiments.nex326.schrodinger import (
@@ -518,6 +519,139 @@ def test_dsde_raster_conditions_query_position_without_route_point_index(tmp_pat
             feature_basis=basis,
         )
         assert ablated.feature_names[5:] == derived
+
+
+def test_arm17_terrain_uses_dynamic_position_lookup_without_future_route_leakage(
+    tmp_path,
+):
+    class PositionField:
+        names = ("terrain_elevation", "terrain_slope")
+
+        def __init__(self, calls):
+            self.calls = calls
+
+        def evaluate(self, position, time):
+            del time
+            values = np.atleast_2d(np.asarray(position, dtype=float))
+            self.calls.append(values.copy())
+            return np.column_stack(
+                [100.0 + 0.02 * values[:, 0], 2.0 + 0.01 * np.abs(values[:, 1])]
+            )
+
+    class PositionResolver:
+        names = PositionField.names
+
+        def __init__(self):
+            self.calls = []
+
+        def for_segment(self, segment):
+            del segment
+            return PositionField(self.calls)
+
+        def identity(self):
+            return {
+                "schema_version": "test-position-resolver-v1",
+                "names": list(self.names),
+                "future_route_point_index_used": False,
+            }
+
+    source = load_cohort(NEX326 / "fixtures" / "registered_cohort.json")
+    stripped_splits = {}
+    for split, segments in source.splits.items():
+        stripped_splits[split] = tuple(
+            Segment(
+                segment_id=segment.segment_id,
+                source_domain=segment.source_domain,
+                region=segment.region,
+                time=segment.time,
+                state=segment.state,
+                conditions={
+                    name: values
+                    for name, values in segment.conditions.items()
+                    if name not in PositionResolver.names
+                },
+                has_terrain=False,
+                endpoint_prior_mean=segment.endpoint_prior_mean,
+                endpoint_prior_covariance=segment.endpoint_prior_covariance,
+                endpoint_prior_source=segment.endpoint_prior_source,
+                endpoint_prior_derived_from_truth=segment.endpoint_prior_derived_from_truth,
+            )
+            for segment in segments
+        )
+    cohort = Cohort(
+        schema_version=source.schema_version,
+        dataset_id="terrain-resolver-test",
+        data_version="v1",
+        purpose="test",
+        splits=stripped_splits,
+        unavailable_reasons={},
+        fingerprint="a" * 64,
+    )
+    resolver = PositionResolver()
+    runner = NEX326Runner(
+        load_experiment_spec(),
+        cohort,
+        tmp_path / "runs",
+        n_samples=8,
+        condition_resolver=resolver,
+    )
+    arm17 = next(arm for arm in runner.spec.arms if arm.arm_id == 17)
+    terrain = next(
+        item for item in arm17.subconfigs if item["subconfig_id"] == "terrain"
+    )
+    record = runner.run_one(arm17, terrain)
+
+    assert record["run_status"] == "succeeded"
+    assert record["dataset"]["spatial_conditions"][
+        "future_route_point_index_used"
+    ] is False
+    assert record["runtime"]["spatial_condition_propagation"] == (
+        "local_gaussian_mean_closure"
+    )
+    assert any(call.shape == (1, 2) for call in resolver.calls)
+
+    config = runner._config(terrain)
+    prepared = {
+        split: runner._resolve_spatial_conditions(segments, config["condition"])
+        for split, segments in stripped_splits.items()
+        if split != "animal_pretrain"
+    }
+    model = train_model(
+        prepared["train"],
+        prepared["validation"],
+        prepared["adapt"],
+        (),
+        config,
+    )
+    original = prepared["evaluation"][0]
+    cutoff = max(1, len(original.time) // 2 - 1)
+    changed_state = original.state.copy()
+    changed_state[cutoff + 1 :] += np.asarray([10_000.0, -20_000.0])
+    changed_future = Segment(
+        segment_id=original.segment_id,
+        source_domain=original.source_domain,
+        region=original.region,
+        time=original.time,
+        state=changed_state,
+        conditions=original.conditions,
+        has_terrain=True,
+        endpoint_prior_mean=original.endpoint_prior_mean,
+        endpoint_prior_covariance=original.endpoint_prior_covariance,
+        endpoint_prior_source=original.endpoint_prior_source,
+    )
+    baseline_prediction = predict_segments(
+        model, (original,), config, seed=41, n_samples=8, condition_resolver=resolver
+    )[0]
+    changed_prediction = predict_segments(
+        model,
+        (changed_future,),
+        config,
+        seed=41,
+        n_samples=8,
+        condition_resolver=resolver,
+    )[0]
+    assert np.array_equal(baseline_prediction.samples, changed_prediction.samples)
+    assert not np.array_equal(baseline_prediction.target, changed_prediction.target)
 
 
 def test_directional_ablation_matrix_registers_one_feature_change_per_contrast():

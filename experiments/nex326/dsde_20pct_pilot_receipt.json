@@ -4,8 +4,8 @@
   "spec_version": "nex326-process-v2",
   "scientific_status": "pilot_not_final_scientific_evidence",
   "implementation": {
-    "source_bundle_sha256": "b54577c4e50820a2c30615e00ce857487a00bf6885c8d5443dbaddbc9c14e873",
-    "execution_identity_sha256": "6a0686d927f6e93d9fead3f47eede11d82fdd16d00983934db7ecd32ed30dc97",
+    "source_bundle_sha256": "d06e7abd94e13c0b0a54dbbac68469f1b436720328a1490ee50762c8d9d1f081",
+    "execution_identity_sha256": "0d3753d2a074cd79dd6c7d42ec63931f99b590b7b047528eed857c22cc1a2956",
     "files": [
       {
         "path": "cohort.py",
@@ -25,11 +25,15 @@
       },
       {
         "path": "runner.py",
-        "sha256": "8733519281cd36ea55ccc922c66f52887a61e765f1da98a5fadc5340a86fad86"
+        "sha256": "8fb4a45d8ee1ea77dbaacd6a1b1639ea883c3f3e85134e35c3c089085dfae5b6"
       },
       {
         "path": "schrodinger.py",
         "sha256": "c27d8d8859a93e401974ce34db5392c9a86c1c951423d87afa60597dc5536ef6"
+      },
+      {
+        "path": "spatial_conditions.py",
+        "sha256": "1eed09d983a094d64b0d844c97c83592c8791ba4b6da1b74da7c67b7d74de5af"
       },
       {
         "path": "specification.py",
@@ -94,21 +98,21 @@
     "protocol_seed": 20260814,
     "replicate_seed": 20260814,
     "effective_prediction_samples": {
-      "64": 29,
+      "64": 30,
       "256": 1,
-      "not_run": 6
+      "not_run": 5
     },
     "run_status": {
-      "succeeded": 30,
-      "data_unavailable": 6
+      "succeeded": 31,
+      "data_unavailable": 5
     },
     "verdict": {
-      "not_assessed": 30,
-      "unavailable": 6
+      "not_assessed": 31,
+      "unavailable": 5
     },
     "mechanism_status": {
-      "passed": 30,
-      "not_run": 6
+      "passed": 31,
+      "not_run": 5
     },
     "comparison": {
       "scientific_status": "exploratory_only",
@@ -120,7 +124,8 @@
       "status": {
         "reference": 8,
         "exploratory_point_estimate": 22,
-        "data_unavailable": 6
+        "data_unavailable": 5,
+        "requires_coverage_matched_reference": 1
       },
       "uncertainty_status": {
         "reference": 8,
@@ -135,12 +140,6 @@
         "subconfig_id": "animal_pretrain",
         "stage": "load_versioned_data",
         "reason": "DSDE Zhejiang holdout contains human trajectories only"
-      },
-      {
-        "arm_id": 17,
-        "subconfig_id": "terrain",
-        "stage": "adapt_features",
-        "reason": "DSDE Zhejiang pilot has no aligned terrain"
       },
       {
         "arm_id": 17,
@@ -170,29 +169,29 @@
   },
   "integrity": {
     "cohort_sha256": "646420b38d5110b6b9727b50447f96c59635ecfbade92210021c5d430b73dc04",
-    "run_manifest_sha256": "8569f25bb73f9d4b078430986c2a77067683567517da487b9dfb6873ee68d4a0",
-    "run_record_set_sha256": "9100ac47d021d3b3583b87a0efd167c536d006e4d9156af077ee1a8f582b1cf3",
-    "tsde_summary_sha256": "2522ba229902f22bbc669446ab3a7ce5ab980dcfd4294ef5424b03edadb12563",
+    "run_manifest_sha256": "b284a520ab1e95c81e8f1d9af71c8dd00b78699a50d54b48bb0dd2605cf09d02",
+    "run_record_set_sha256": "e91e113c21a2121cd93397f2cc334e76bcb81e2b401ed4d20840ccf252e1aefa",
+    "tsde_summary_sha256": "73dc0d22353372da58526928b5bd5ddf9920481f6b746aae8f966e5a50a379ab",
     "tsde_artifacts": {
       "nex326_process.csv": {
         "path": "nex326_process.csv",
-        "sha256": "94b6830e0187a8e2ac9b4082d7528eba1b6726d07992c923bc94844be97aa3e7",
-        "size_bytes": 10659
+        "sha256": "b56b0fbac91ac31eaef1b2170d4594d243c034958a9c309b2f9bac4efc5ab5c5",
+        "size_bytes": 10732
       },
       "nex326_status.csv": {
         "path": "nex326_status.csv",
-        "sha256": "d3d22efb1fff7bba160aa868828ad970e068a99c62b0a1f46308e4b7dd0e0e76",
+        "sha256": "2b0b42ec235096d2df32dde36a9c07ccb1d4ed573f0955b4f704966488149ca1",
         "size_bytes": 1628
       },
       "nex326_pilot_comparisons.csv": {
         "path": "nex326_pilot_comparisons.csv",
-        "sha256": "087216fc40e4da8bf85b3e7cdd5496c6494a50775ec8029a9f24ab3b11201351",
-        "size_bytes": 13042
+        "sha256": "694814dd3c2ad5981a186ebbe78e79f9e3c5dab5a25c3875c7592573d05afd72",
+        "size_bytes": 13107
       },
       "nex326_test_plot.svg": {
         "path": "nex326_test_plot.svg",
-        "sha256": "1551379ac7e4158679adc542e90e07a5b986e3b2f9541d478f96315e70c98717",
-        "size_bytes": 3448
+        "sha256": "6577e7d00c7763062ef674550e874c1ba024be690fea319907afcf2293bb389c",
+        "size_bytes": 3546
       }
     }
   }

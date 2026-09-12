@@ -47,12 +47,16 @@ def run_replicates(
     spec_path: Path | str = SPEC_PATH,
     n_samples: int = 64,
     strict_environment: bool = False,
+    condition_root: Path | str | None = None,
+    srtm_root: Path | str | None = None,
 ) -> dict[str, object]:
     """Run complete 36-execution replicas and write one hash-bound batch manifest."""
     replicate_seeds = validate_replicate_seeds(seeds)
     cohort_file = Path(cohort_path)
     if not cohort_file.is_file():
         raise MultiSeedError("cohort file does not exist")
+    if (condition_root is None) != (srtm_root is None):
+        raise MultiSeedError("condition_root and srtm_root must be supplied together")
     destination = Path(output_root)
     manifest_path = destination / "multi_seed_manifest.json"
     if manifest_path.exists():
@@ -75,6 +79,8 @@ def run_replicates(
             n_samples=n_samples,
             replicate_seed=seed,
             strict_environment=strict_environment,
+            condition_root=condition_root,
+            srtm_root=srtm_root,
         )
         records = runner.run_all()
         dataset_fingerprints.update(str(record["dataset"]["fingerprint"]) for record in records)
@@ -136,6 +142,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--samples", type=int, default=64)
     parser.add_argument("--spec", type=Path, default=SPEC_PATH)
     parser.add_argument(
+        "--condition-root",
+        type=Path,
+        help="DSDE condition-slice root used to recover registered local projections",
+    )
+    parser.add_argument(
+        "--srtm-root",
+        type=Path,
+        help="SRTM HGT root for leakage-safe Arm 17 terrain lookup",
+    )
+    parser.add_argument(
         "--strict-environment",
         action="store_true",
         help="fail unless Python and package versions match environment.lock.json",
@@ -148,6 +164,8 @@ def main(argv: list[str] | None = None) -> int:
         spec_path=args.spec,
         n_samples=args.samples,
         strict_environment=args.strict_environment,
+        condition_root=args.condition_root,
+        srtm_root=args.srtm_root,
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0

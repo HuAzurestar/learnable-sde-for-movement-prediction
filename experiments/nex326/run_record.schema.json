@@ -78,7 +78,8 @@
           "type": "object",
           "required": ["train", "validation", "adapt", "evaluation", "animal_pretrain"],
           "additionalProperties": {"type": "integer", "minimum": 0}
-        }
+        },
+        "spatial_conditions": {"type": ["object", "null"]}
       }
     },
     "config": {"type": "object"},
@@ -87,7 +88,11 @@
       "required": ["requested_prediction_samples", "effective_prediction_samples"],
       "properties": {
         "requested_prediction_samples": {"type": "integer", "minimum": 1},
-        "effective_prediction_samples": {"type": ["integer", "null"], "minimum": 1}
+        "effective_prediction_samples": {"type": ["integer", "null"], "minimum": 1},
+        "spatial_condition_propagation": {
+          "enum": ["local_gaussian_mean_closure", "particlewise_dynamic_lookup", null]
+        },
+        "future_route_point_index_used": {"type": "boolean"}
       }
     },
     "seed": {"type": "integer"},

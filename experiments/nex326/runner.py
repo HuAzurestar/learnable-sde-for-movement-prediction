@@ -13,7 +13,7 @@ from collections import Counter
 from dataclasses import dataclass
 from numbers import Real
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Mapping, Protocol, Sequence
 
 import numpy as np
 
@@ -50,6 +50,7 @@ IMPLEMENTATION_FILES = (
     "model.py",
     "runner.py",
     "schrodinger.py",
+    "spatial_conditions.py",
     "specification.py",
 )
 
@@ -65,6 +66,25 @@ class DataUnavailable(RunError):
         super().__init__(reason)
         self.stage = stage
         self.reason = reason
+
+
+class ConditionField(Protocol):
+    """Position-dependent condition values available during a rollout."""
+
+    @property
+    def names(self) -> tuple[str, ...]: ...
+
+    def evaluate(self, position: np.ndarray, time: float) -> np.ndarray: ...
+
+
+class ConditionResolver(Protocol):
+    """Resolve a leakage-safe spatial condition field for one segment."""
+
+    names: tuple[str, ...]
+
+    def for_segment(self, segment: Segment) -> ConditionField: ...
+
+    def identity(self) -> dict[str, object]: ...
 
 
 @dataclass(frozen=True)
@@ -371,14 +391,27 @@ def _transition_matrices(
     index: int,
     dt: float,
     state: np.ndarray,
+    condition_field: ConditionField | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    conditions = dict(segment.conditions)
+    if condition_field is not None:
+        dynamic = np.asarray(
+            condition_field.evaluate(state, float(segment.time[index])),
+            dtype=float,
+        ).reshape(-1, len(condition_field.names))
+        if dynamic.shape != (1, len(condition_field.names)):
+            raise RunError("spatial condition lookup must return one row per state")
+        for offset, name in enumerate(condition_field.names):
+            values = np.asarray(conditions.get(name, np.zeros(len(segment.time))), dtype=float).copy()
+            values[index] = dynamic[0, offset]
+            conditions[name] = values
     proxy = Segment(
         segment_id=segment.segment_id,
         source_domain=segment.source_domain,
         region=segment.region,
         time=segment.time,
         state=segment.state.copy(),
-        conditions=segment.conditions,
+        conditions=conditions,
         has_terrain=segment.has_terrain,
         endpoint_prior_mean=segment.endpoint_prior_mean,
         endpoint_prior_covariance=segment.endpoint_prior_covariance,
@@ -400,6 +433,7 @@ def _propagate_gaussian(
     segment: Segment,
     start: int,
     integrator: str,
+    condition_field: ConditionField | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     mean = segment.state[start].copy()
     covariance = np.zeros((2, 2), dtype=float)
@@ -408,7 +442,9 @@ def _propagate_gaussian(
         substeps = 4 if integrator == "euler_maruyama" else (2 if integrator == "split" else 1)
         step = dt / substeps
         for _ in range(substeps):
-            matrix, intercept, noise = _transition_matrices(model, mode, segment, index, step, mean)
+            matrix, intercept, noise = _transition_matrices(
+                model, mode, segment, index, step, mean, condition_field
+            )
             mean = matrix @ mean + intercept
             covariance = matrix @ covariance @ matrix.T + noise / substeps
     covariance = 0.5 * (covariance + covariance.T) + 1e-10 * np.eye(2)
@@ -422,6 +458,7 @@ def _mc_rollout(
     integrator: str,
     n_samples: int,
     rng: np.random.Generator,
+    condition_field: ConditionField | None = None,
 ) -> np.ndarray:
     states = np.repeat(segment.state[start][None, :], n_samples, axis=0)
     fixed_modes = rng.choice(model.n_modes, n_samples, p=model.mode_probabilities)
@@ -442,7 +479,13 @@ def _mc_rollout(
                     continue
                 for sample_index in np.flatnonzero(mask):
                     matrix, intercept, noise = _transition_matrices(
-                        model, mode, segment, index, step, states[sample_index]
+                        model,
+                        mode,
+                        segment,
+                        index,
+                        step,
+                        states[sample_index],
+                        condition_field,
                     )
                     updated[sample_index] = (
                         matrix @ states[sample_index]
@@ -460,13 +503,16 @@ def _fp_rollout(
     integrator: str,
     n_samples: int,
     rng: np.random.Generator,
+    condition_field: ConditionField | None = None,
 ) -> np.ndarray:
     counts = rng.multinomial(n_samples, model.mode_probabilities)
     samples: list[np.ndarray] = []
     for mode, count in enumerate(counts):
         if not count:
             continue
-        mean, covariance = _propagate_gaussian(model, mode, segment, start, integrator)
+        mean, covariance = _propagate_gaussian(
+            model, mode, segment, start, integrator, condition_field
+        )
         samples.append(rng.multivariate_normal(mean, covariance, size=count))
     return np.concatenate(samples, axis=0)
 
@@ -533,17 +579,27 @@ def predict_segments(
     *,
     seed: int,
     n_samples: int,
+    condition_resolver: ConditionResolver | None = None,
 ) -> tuple[Prediction, ...]:
     rng = np.random.default_rng(seed)
     predictions: list[Prediction] = []
     for segment in segments:
+        condition_field = (
+            condition_resolver.for_segment(segment)
+            if condition_resolver is not None
+            else None
+        )
         start = max(1, len(segment.time) // 2 - 1)
         poa = str(config.get("poa", "fp"))
         integrator = str(config.get("integrator", "split"))
         if poa == "fp":
-            samples = _fp_rollout(model, segment, start, integrator, n_samples, rng)
+            samples = _fp_rollout(
+                model, segment, start, integrator, n_samples, rng, condition_field
+            )
         else:
-            samples = _mc_rollout(model, segment, start, integrator, n_samples, rng)
+            samples = _mc_rollout(
+                model, segment, start, integrator, n_samples, rng, condition_field
+            )
         bridged, before, after, bridge_path, bridge_diagnostics = _apply_bridge(
             samples,
             segment,
@@ -732,6 +788,7 @@ class NEX326Runner:
         n_samples: int = 64,
         replicate_seed: int | None = None,
         strict_environment: bool = False,
+        condition_resolver: ConditionResolver | None = None,
     ) -> None:
         self.spec = spec
         self.cohort = cohort
@@ -739,6 +796,11 @@ class NEX326Runner:
         if isinstance(n_samples, bool) or not isinstance(n_samples, int) or n_samples <= 0:
             raise ValueError("n_samples must be a positive integer")
         self.n_samples = n_samples
+        self.condition_resolver = condition_resolver
+        resolver_names = tuple(condition_resolver.names) if condition_resolver else ()
+        if len(resolver_names) != len(set(resolver_names)):
+            raise ValueError("condition resolver names must be unique")
+        self.condition_resolver_names = resolver_names
         self.implementation = implementation_identity()
         if strict_environment and not self.implementation["environment_lock"]["conformant"]:
             raise RunError("runtime does not conform to environment.lock.json")
@@ -760,19 +822,89 @@ class NEX326Runner:
         n_samples: int = 64,
         replicate_seed: int | None = None,
         strict_environment: bool = False,
+        condition_root: Path | str | None = None,
+        srtm_root: Path | str | None = None,
     ) -> "NEX326Runner":
         spec = load_experiment_spec(spec_path) if spec_path is not None else load_experiment_spec()
+        cohort = load_cohort(cohort_path)
+        if (condition_root is None) != (srtm_root is None):
+            raise ValueError("condition_root and srtm_root must be supplied together")
+        condition_resolver = None
+        if condition_root is not None and srtm_root is not None:
+            from .spatial_conditions import DSDERasterConditionResolver
+
+            condition_resolver = DSDERasterConditionResolver(
+                cohort,
+                condition_root,
+                srtm_root,
+            )
         return cls(
             spec,
-            load_cohort(cohort_path),
+            cohort,
             output_root,
             n_samples=n_samples,
             replicate_seed=replicate_seed,
             strict_environment=strict_environment,
+            condition_resolver=condition_resolver,
         )
 
     def _config(self, subconfig: Mapping[str, object]) -> dict[str, object]:
         return {**self.spec.full_components, **subconfig.get("components", {})}
+
+    def _resolve_spatial_conditions(
+        self,
+        segments: Sequence[Segment],
+        required_conditions: Sequence[str],
+    ) -> tuple[Segment, ...]:
+        """Materialize observed-state fields for fitting and diagnostic gates.
+
+        Evaluation rollout does not consume these future-indexed values: prediction
+        resolves the same field again from each simulated position.
+        """
+        dynamic_names = tuple(
+            name for name in required_conditions if name in self.condition_resolver_names
+        )
+        if not dynamic_names or self.condition_resolver is None:
+            return tuple(segments)
+        resolved: list[Segment] = []
+        for segment in segments:
+            try:
+                field = self.condition_resolver.for_segment(segment)
+                if not set(dynamic_names) <= set(field.names):
+                    raise ValueError("resolved field is missing required condition names")
+                sampled = np.asarray(
+                    field.evaluate(segment.state, float(segment.time[0])), dtype=float
+                )
+            except (OSError, ValueError) as error:
+                raise DataUnavailable(
+                    "adapt_features",
+                    f"spatial condition data unavailable for {segment.segment_id}: {error}",
+                ) from error
+            if sampled.shape != (len(segment.time), len(field.names)):
+                raise RunError(
+                    f"spatial condition lookup shape mismatch for {segment.segment_id}"
+                )
+            conditions = dict(segment.conditions)
+            for offset, name in enumerate(field.names):
+                if name in dynamic_names:
+                    conditions[name] = sampled[:, offset].copy()
+            resolved.append(
+                Segment(
+                    segment_id=segment.segment_id,
+                    source_domain=segment.source_domain,
+                    region=segment.region,
+                    time=segment.time,
+                    state=segment.state,
+                    conditions=conditions,
+                    has_terrain=segment.has_terrain
+                    or bool({"terrain_elevation", "terrain_slope"} & set(dynamic_names)),
+                    endpoint_prior_mean=segment.endpoint_prior_mean,
+                    endpoint_prior_covariance=segment.endpoint_prior_covariance,
+                    endpoint_prior_source=segment.endpoint_prior_source,
+                    endpoint_prior_derived_from_truth=segment.endpoint_prior_derived_from_truth,
+                )
+            )
+        return tuple(resolved)
 
     def run_one(self, arm: ArmSpec, subconfig: Mapping[str, object]) -> dict[str, object]:
         try:
@@ -802,6 +934,7 @@ class NEX326Runner:
                 for split in required_condition_splits
                 if any(
                     condition not in segment.conditions
+                    and condition not in self.condition_resolver_names
                     for segment in self.cohort.splits[split]
                 )
             ]
@@ -820,8 +953,16 @@ class NEX326Runner:
                     "animal_pretrain", "licensed animal pretraining data are unavailable"
                 ),
             )
+        prepared_splits = {
+            split: (
+                self._resolve_spatial_conditions(segments, required_conditions)
+                if split in required_condition_splits
+                else tuple(segments)
+            )
+            for split, segments in self.cohort.splits.items()
+        }
         selected: dict[str, tuple[Segment, ...]] = {}
-        for split, segments in self.cohort.splits.items():
+        for split, segments in prepared_splits.items():
             if not segments:
                 selected[split] = ()
                 continue
@@ -878,6 +1019,11 @@ class NEX326Runner:
             config,
             seed=seed,
             n_samples=prediction_sample_count,
+            condition_resolver=(
+                self.condition_resolver
+                if set(required_conditions) & set(self.condition_resolver_names)
+                else None
+            ),
         )
         metrics = compute_metrics(predictions, str(config.get("score", "d2_mc")))
         gates = mechanism_statistics(
@@ -890,12 +1036,21 @@ class NEX326Runner:
             subconfig.get("mechanism_gate"),
         )
         run_id = f"nex326-v2-arm-{arm.arm_id:02d}-{subconfig_id}-seed-{self.replicate_seed}"
-        result_id = hashlib.sha256(
-            (
-                f"{self.spec.spec_version}:{run_id}:{self.cohort.fingerprint}:"
-                f"{self.implementation['execution_identity_sha256']}"
-            ).encode()
-        ).hexdigest()
+        condition_identity = (
+            self.condition_resolver.identity()
+            if set(required_conditions) & set(self.condition_resolver_names)
+            and self.condition_resolver is not None
+            else None
+        )
+        result_material = (
+            f"{self.spec.spec_version}:{run_id}:{self.cohort.fingerprint}:"
+            f"{self.implementation['execution_identity_sha256']}"
+        )
+        if condition_identity is not None:
+            result_material += ":" + json.dumps(
+                condition_identity, sort_keys=True, separators=(",", ":")
+            )
+        result_id = hashlib.sha256(result_material.encode()).hexdigest()
         record: dict[str, object] = {
             "schema_version": RUN_RECORD_VERSION,
             "experiment_id": self.spec.experiment_id,
@@ -926,11 +1081,20 @@ class NEX326Runner:
                 "fingerprint": self.cohort.fingerprint,
                 "purpose": self.cohort.purpose,
                 "split_counts": {name: len(values) for name, values in selected.items()},
+                "spatial_conditions": condition_identity,
             },
             "config": config,
             "runtime": {
                 "requested_prediction_samples": self.n_samples,
                 "effective_prediction_samples": prediction_sample_count,
+                "spatial_condition_propagation": (
+                    "local_gaussian_mean_closure"
+                    if condition_identity is not None and config.get("poa") == "fp"
+                    else "particlewise_dynamic_lookup"
+                    if condition_identity is not None
+                    else None
+                ),
+                "future_route_point_index_used": False,
             },
             "seed": self.spec.seed,
             "replicate_seed": self.replicate_seed,

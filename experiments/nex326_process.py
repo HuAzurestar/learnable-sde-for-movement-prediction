@@ -26,6 +26,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--samples", type=int, default=64)
     parser.add_argument(
+        "--condition-root",
+        type=Path,
+        help="DSDE condition-slice root used to recover registered local projections",
+    )
+    parser.add_argument(
+        "--srtm-root",
+        type=Path,
+        help="SRTM HGT root for leakage-safe Arm 17 terrain lookup",
+    )
+    parser.add_argument(
         "--replicate-seed",
         type=int,
         help="prediction/training replicate seed; defaults to the frozen protocol seed",
@@ -60,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(
             "a scientific --cohort is required; use --implementation-fixture only for contract validation"
         )
+    if (args.condition_root is None) != (args.srtm_root is None):
+        parser.error("--condition-root and --srtm-root must be supplied together")
     cohort_path = DEFAULT_FIXTURE if args.implementation_fixture else args.cohort
     runner = NEX326Runner.from_paths(
         cohort_path,
@@ -68,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
         n_samples=args.samples,
         replicate_seed=args.replicate_seed,
         strict_environment=args.strict_environment,
+        condition_root=args.condition_root,
+        srtm_root=args.srtm_root,
     )
     records = runner.run_all()
     print(
