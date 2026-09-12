@@ -67,6 +67,7 @@ def run_phase_space_replicates(
     if manifest_path.exists() or any((destination / f"seed-{seed}").exists() for seed in selected_seeds):
         raise PhaseSpaceReplicateError("one or more phase-space outputs already exist")
     spec = load_phase_space_spec(spec_path)
+    condition_names = tuple(spec["condition_contract"]["registered_condition_names"])
     cohort = load_cohort(cohort_file)
     destination.mkdir(parents=True, exist_ok=True)
     entries: list[dict[str, object]] = []
@@ -75,7 +76,9 @@ def run_phase_space_replicates(
         relative = Path(f"seed-{seed}") / "phase_space_report.json"
         report_path = destination / relative
         resolver = (
-            DSDERasterConditionResolver(cohort, condition_root, srtm_root)
+            DSDERasterConditionResolver(
+                cohort, condition_root, srtm_root, names=condition_names
+            )
             if condition_root is not None
             else None
         )
@@ -138,6 +141,7 @@ def run_phase_space_replicates(
         "state_contract": reports[0]["state_contract"],
         "condition_contract": reports[0]["condition_contract"],
         "condition_field": reports[0]["condition_field"],
+        "registered_protocol": spec["protocol"],
         "metric_summary": summary,
         "reports": entries,
     }
@@ -225,6 +229,7 @@ def write_phase_space_receipt(
         "state_contract": manifest["state_contract"],
         "condition_contract": manifest["condition_contract"],
         "condition_field": manifest.get("condition_field"),
+        "registered_protocol": manifest.get("registered_protocol"),
         "metric_summary": manifest["metric_summary"],
         "integrity": {
             "manifest_sha256": _sha256(manifest_file),
@@ -335,10 +340,15 @@ def write_phase_space_contrast(
         for metric in metric_names
     }
     primary = deltas["position_energy_score_d2"]
+    primary_better_count = sum(value < 0.0 for value in primary)
+    required_better_count = len(primary) // 2 + 1
     conclusion = (
         "observed_primary_metric_gain"
-        if mean(primary) < 0.0
+        if mean(primary) < 0.0 and primary_better_count >= required_better_count
         else "no_observed_primary_metric_gain"
+    )
+    registered_primary = candidate.get("registered_protocol", {}).get(
+        "primary_comparator"
     )
     contrast = {
         "schema_version": "nex326-phase-space-paired-contrast-v1",
@@ -349,6 +359,11 @@ def write_phase_space_contrast(
         "replicate_seeds": baseline["replicate_seeds"],
         "prediction_samples_per_segment": baseline["prediction_samples_per_segment"],
         "primary_metric": "position_energy_score_d2",
+        "comparator_role": (
+            "registered_primary"
+            if registered_primary == baseline["benchmark_id"]
+            else "secondary_or_unregistered"
+        ),
         "metric_direction": {
             "position_energy_score_d2": "lower_is_better",
             "position_hdr90_coverage": "descriptive_calibration_rate",
@@ -365,6 +380,11 @@ def write_phase_space_contrast(
             for metric, values in deltas.items()
         },
         "conclusion": conclusion,
+        "exploratory_gain_rule": {
+            "mean_candidate_minus_baseline_below_zero": mean(primary) < 0.0,
+            "candidate_better_seed_count": primary_better_count,
+            "required_better_seed_count": required_better_count,
+        },
         "interpretation": (
             "The terrain field is operational, but this paired pilot does not by itself "
             "establish that terrain conditioning improves trajectory prediction."

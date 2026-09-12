@@ -21,6 +21,7 @@ from experiments.nex326.model import build_transition_data, train_model
 from experiments.nex326.pilot_receipt import PilotReceiptError, build_pilot_receipt
 from experiments.nex326.phase_space import (
     PhaseSpaceError,
+    directional_terrain_velocity_terms,
     fit_affine_velocity_model,
     load_phase_space_spec,
     phase_space_state,
@@ -38,7 +39,10 @@ from experiments.nex326.schrodinger import (
     SchrodingerBridgeError,
     solve_particle_schrodinger_bridge,
 )
-from experiments.nex326.spatial_conditions import DSDERasterConditionResolver
+from experiments.nex326.spatial_conditions import (
+    DIRECTIONAL_TERRAIN_CONDITION_NAMES,
+    DSDERasterConditionResolver,
+)
 from experiments.nex326_process import main
 from experiments.nex326_phase_space_multi_seed import (
     PhaseSpaceReplicateError,
@@ -265,6 +269,25 @@ def test_phase_space_contract_uses_causal_four_dimensional_state():
     assert np.allclose(phase[0, 2:], expected_velocity[0])
 
 
+def test_directional_terrain_terms_distinguish_uphill_downhill_and_tangent():
+    signed, distance = directional_terrain_velocity_terms(
+        np.asarray([[2.0, 3.0], [-2.0, 3.0], [0.0, -4.0]]),
+        np.asarray([[1.0, 0.0], [1.0, 0.0], [1.0, 0.0]]),
+    )
+    assert np.allclose(signed, [2.0, -2.0, 0.0])
+    assert np.allclose(distance, [2.0, 2.0, 0.0])
+    spec = load_phase_space_spec(
+        NEX326 / "phase_space_directional_terrain_benchmark.json"
+    )
+    assert spec["velocity_model"]["feature_basis"] == "directional_terrain_v2"
+    assert spec["protocol"]["primary_comparator"] == (
+        "NEX326-PHASE-SPACE-4D-TERRAIN-v1"
+    )
+    assert "t and -t are equivalent" in spec["condition_contract"][
+        "contour_tangent_semantics"
+    ]
+
+
 def test_phase_space_benchmark_runs_without_rewriting_frozen_arms(tmp_path):
     cohort_path = NEX326 / "fixtures" / "registered_cohort.json"
     output = tmp_path / "phase-space.json"
@@ -367,6 +390,29 @@ def test_dsde_raster_conditions_query_position_without_route_point_index(tmp_pat
     identity = resolver.identity()
     assert identity["future_route_point_index_used"] is False
     assert len(identity["terrain_tiles"]) == 1
+
+    directional_resolver = DSDERasterConditionResolver(
+        cohort,
+        condition_root,
+        srtm_root,
+        names=DIRECTIONAL_TERRAIN_CONDITION_NAMES,
+    )
+    directional = directional_resolver.for_segment(splits["evaluation"][0]).evaluate(
+        np.asarray([[0.0, 0.0]]), 0.0
+    )
+    assert directional.shape == (1, 3)
+    assert directional[0, 1] > 0.0
+    assert directional[0, 2] > 0.0
+    model = fit_affine_velocity_model(
+        splits["train"] + splits["adapt"],
+        condition_names=DIRECTIONAL_TERRAIN_CONDITION_NAMES,
+        condition_resolver=directional_resolver,
+        feature_basis="directional_terrain_v2",
+    )
+    assert model.feature_names[-2:] == (
+        "signed_uphill_speed",
+        "velocity_to_contour_line_distance",
+    )
 
 
 def test_phase_space_multi_seed_manifest_and_receipt_are_hash_bound(tmp_path):

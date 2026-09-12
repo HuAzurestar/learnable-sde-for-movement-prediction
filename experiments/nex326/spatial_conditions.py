@@ -17,6 +17,15 @@ from .phase_space import ConditionField, PhaseSpaceError
 EARTH_RADIUS_METRES = 6_371_000.0
 DEGREES_TO_RADIANS = math.pi / 180.0
 TERRAIN_CONDITION_NAMES = ("terrain_elevation", "terrain_slope")
+DIRECTIONAL_TERRAIN_CONDITION_NAMES = (
+    "terrain_elevation",
+    "terrain_gradient_east",
+    "terrain_gradient_north",
+)
+SUPPORTED_CONDITION_PROFILES = {
+    TERRAIN_CONDITION_NAMES,
+    DIRECTIONAL_TERRAIN_CONDITION_NAMES,
+}
 SPLIT_DIRECTORIES = {
     "train": "zhejiang_finetune",
     "adapt": "zhejiang_finetune",
@@ -65,13 +74,16 @@ class _Projection:
 
 
 class RasterTerrainField(ConditionField):
-    """Evaluate SRTM elevation and slope from one DSDE file's local coordinates."""
+    """Evaluate registered SRTM features from one DSDE file's local coordinates."""
 
-    names = TERRAIN_CONDITION_NAMES
-
-    def __init__(self, projection: _Projection, tile_loader):
+    def __init__(self, projection: _Projection, tile_loader, names):
         self._projection = projection
         self._tile_loader = tile_loader
+        self._names = tuple(names)
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return self._names
 
     def _geographic(self, position: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         values = np.atleast_2d(np.asarray(position, dtype=float))
@@ -95,7 +107,7 @@ class RasterTerrainField(ConditionField):
     def evaluate(self, position: np.ndarray, time: float) -> np.ndarray:
         del time  # Terrain is static; time remains available for future fields.
         latitude, longitude = self._geographic(position)
-        result = np.empty((len(latitude), 2), dtype=float)
+        result = np.empty((len(latitude), len(self.names)), dtype=float)
         tile_names = np.asarray(
             [_tile_name(lat, lon) for lat, lon in zip(latitude, longitude)],
             dtype=object,
@@ -103,12 +115,21 @@ class RasterTerrainField(ConditionField):
         for tile_name in np.unique(tile_names):
             selected = tile_names == tile_name
             tile = self._tile_loader(str(tile_name))
-            result[selected] = self._sample_tile(
+            sampled = self._sample_tile(
                 tile,
                 latitude[selected],
                 longitude[selected],
                 str(tile_name),
             )
+            feature_index = {
+                "terrain_elevation": 0,
+                "terrain_slope": 1,
+                "terrain_gradient_east": 2,
+                "terrain_gradient_north": 3,
+            }
+            result[selected] = sampled[
+                :, [feature_index[name] for name in self.names]
+            ]
         return result
 
     @staticmethod
@@ -155,6 +176,8 @@ class RasterTerrainField(ConditionField):
         corner_rows = (row0, row0, row1, row1)
         corner_columns = (column0, column1, column0, column1)
         corner_slopes = []
+        corner_east_gradients = []
+        corner_north_gradients = []
         for corner_row, corner_column in zip(corner_rows, corner_columns):
             gradient_row = np.clip(corner_row, 1, scale - 1)
             gradient_column = np.clip(corner_column, 1, scale - 1)
@@ -169,13 +192,31 @@ class RasterTerrainField(ConditionField):
             corner_slopes.append(
                 np.degrees(np.arctan(np.hypot(north_south, east_west)))
             )
-        slope = (
-            corner_slopes[0] * (1.0 - row_fraction) * (1.0 - column_fraction)
-            + corner_slopes[1] * (1.0 - row_fraction) * column_fraction
-            + corner_slopes[2] * row_fraction * (1.0 - column_fraction)
-            + corner_slopes[3] * row_fraction * column_fraction
+            corner_east_gradients.append(east_west)
+            corner_north_gradients.append(north_south)
+        weights = (
+            (1.0 - row_fraction) * (1.0 - column_fraction),
+            (1.0 - row_fraction) * column_fraction,
+            row_fraction * (1.0 - column_fraction),
+            row_fraction * column_fraction,
         )
-        values = np.column_stack([elevation, slope])
+        slope = (
+            corner_slopes[0] * weights[0]
+            + corner_slopes[1] * weights[1]
+            + corner_slopes[2] * weights[2]
+            + corner_slopes[3] * weights[3]
+        )
+        gradient_east = sum(
+            gradient * weight
+            for gradient, weight in zip(corner_east_gradients, weights)
+        )
+        gradient_north = sum(
+            gradient * weight
+            for gradient, weight in zip(corner_north_gradients, weights)
+        )
+        values = np.column_stack(
+            [elevation, slope, gradient_east, gradient_north]
+        )
         if not np.isfinite(values).all() or np.any(elevation <= -30_000):
             raise PhaseSpaceError("SRTM terrain lookup returned a void or non-finite value")
         return values
@@ -197,7 +238,13 @@ class DSDERasterConditionResolver:
         cohort: Cohort,
         condition_root: Path | str,
         srtm_root: Path | str,
+        names: tuple[str, ...] = TERRAIN_CONDITION_NAMES,
     ) -> None:
+        self.names = tuple(names)
+        if self.names not in SUPPORTED_CONDITION_PROFILES:
+            raise PhaseSpaceError(
+                f"unsupported DSDE terrain condition profile: {self.names}"
+            )
         self._condition_root = Path(condition_root).resolve()
         self._srtm_root = Path(srtm_root).resolve()
         if not self._condition_root.is_dir() or not self._srtm_root.is_dir():
@@ -281,7 +328,7 @@ class DSDERasterConditionResolver:
             raise PhaseSpaceError(
                 f"no terrain projection registered for {segment.segment_id}"
             ) from error
-        return RasterTerrainField(projection, self._tile)
+        return RasterTerrainField(projection, self._tile, self.names)
 
     def _tile(self, tile_name: str) -> np.ndarray:
         path = (self._srtm_root / tile_name).resolve()
@@ -296,7 +343,7 @@ class DSDERasterConditionResolver:
 
     def identity(self) -> dict[str, object]:
         return {
-            "schema_version": "nex326-dsde-raster-condition-resolver-v1",
+            "schema_version": "nex326-dsde-raster-condition-resolver-v2",
             "names": list(self.names),
             "projection": (
                 "inverse NEX-313 file-mean equirectangular local projection; "
@@ -319,6 +366,7 @@ class DSDERasterConditionResolver:
 
 
 __all__ = [
+    "DIRECTIONAL_TERRAIN_CONDITION_NAMES",
     "DSDERasterConditionResolver",
     "RasterTerrainField",
     "TERRAIN_CONDITION_NAMES",

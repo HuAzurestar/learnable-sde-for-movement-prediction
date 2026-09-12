@@ -23,6 +23,7 @@ IMPLEMENTATION_FILES = (
     "phase_space.py",
     "phase_space_benchmark.json",
     "phase_space_terrain_benchmark.json",
+    "phase_space_directional_terrain_benchmark.json",
     "spatial_conditions.py",
 )
 
@@ -56,6 +57,8 @@ class AffineVelocityModel:
     """Coupled affine velocity SDE with diffusion confined to velocity."""
 
     condition_names: tuple[str, ...]
+    feature_basis: str
+    feature_names: tuple[str, ...]
     feature_mean: np.ndarray
     feature_scale: np.ndarray
     weights: np.ndarray
@@ -72,15 +75,12 @@ class AffineVelocityModel:
         velocity_matrix = np.atleast_2d(velocity_values)
         if velocity_matrix.shape[1] != 2:
             raise PhaseSpaceError("velocity must have shape (..., 2)")
-        if self.condition_names:
-            if conditions is None:
-                raise PhaseSpaceError("registered conditions require a spatial field")
-            condition_matrix = np.atleast_2d(np.asarray(conditions, dtype=float))
-            if condition_matrix.shape != (len(velocity_matrix), len(self.condition_names)):
-                raise PhaseSpaceError("condition field returned an incompatible shape")
-            raw = np.column_stack([velocity_matrix, condition_matrix])
-        else:
-            raw = velocity_matrix
+        raw, _ = _velocity_feature_matrix(
+            velocity_matrix,
+            conditions,
+            self.condition_names,
+            self.feature_basis,
+        )
         normalized = (raw - self.feature_mean) / self.feature_scale
         design = np.column_stack([np.ones(len(normalized)), normalized])
         result = design @ self.weights
@@ -90,6 +90,8 @@ class AffineVelocityModel:
         return {
             "kind": "coupled_affine_velocity_ou",
             "condition_names": list(self.condition_names),
+            "feature_basis": self.feature_basis,
+            "feature_names": list(self.feature_names),
             "feature_mean": self.feature_mean.tolist(),
             "feature_scale": self.feature_scale.tolist(),
             "weights": self.weights.tolist(),
@@ -105,6 +107,87 @@ class PhaseSpacePrediction:
     target_state: np.ndarray
     paths: np.ndarray
     cutoff: int
+
+
+def directional_terrain_velocity_terms(
+    velocity: np.ndarray,
+    gradient: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return signed uphill speed and distance to the unoriented contour line."""
+    velocity_matrix = np.atleast_2d(np.asarray(velocity, dtype=float))
+    gradient_matrix = np.atleast_2d(np.asarray(gradient, dtype=float))
+    if (
+        velocity_matrix.shape != gradient_matrix.shape
+        or velocity_matrix.shape[1] != 2
+        or not np.isfinite(velocity_matrix).all()
+        or not np.isfinite(gradient_matrix).all()
+    ):
+        raise PhaseSpaceError("velocity and terrain gradient must share shape (..., 2)")
+    magnitude = np.linalg.norm(gradient_matrix, axis=1)
+    uphill_unit = np.divide(
+        gradient_matrix,
+        magnitude[:, None],
+        out=np.zeros_like(gradient_matrix),
+        where=magnitude[:, None] > 1e-12,
+    )
+    signed_uphill_speed = np.einsum("ni,ni->n", velocity_matrix, uphill_unit)
+    return signed_uphill_speed, np.abs(signed_uphill_speed)
+
+
+def _velocity_feature_matrix(
+    velocity: np.ndarray,
+    conditions: np.ndarray | None,
+    condition_names: Sequence[str],
+    feature_basis: str,
+) -> tuple[np.ndarray, tuple[str, ...]]:
+    velocity_matrix = np.atleast_2d(np.asarray(velocity, dtype=float))
+    names = tuple(condition_names)
+    if velocity_matrix.shape[1] != 2:
+        raise PhaseSpaceError("velocity must have shape (..., 2)")
+    if names:
+        if conditions is None:
+            raise PhaseSpaceError("registered conditions require a spatial field")
+        condition_matrix = np.atleast_2d(np.asarray(conditions, dtype=float))
+        if condition_matrix.shape != (len(velocity_matrix), len(names)):
+            raise PhaseSpaceError("condition field returned an incompatible shape")
+    else:
+        condition_matrix = np.empty((len(velocity_matrix), 0), dtype=float)
+    if feature_basis == "direct":
+        return (
+            np.column_stack([velocity_matrix, condition_matrix]),
+            ("vx", "vy", *names),
+        )
+    if feature_basis != "directional_terrain_v2":
+        raise PhaseSpaceError(f"unsupported velocity feature basis: {feature_basis}")
+    required = (
+        "terrain_elevation",
+        "terrain_gradient_east",
+        "terrain_gradient_north",
+    )
+    if names != required:
+        raise PhaseSpaceError(
+            "directional terrain basis requires elevation/east-gradient/north-gradient"
+        )
+    gradient = condition_matrix[:, 1:3]
+    signed_uphill_speed, velocity_to_contour_distance = (
+        directional_terrain_velocity_terms(velocity_matrix, gradient)
+    )
+    matrix = np.column_stack(
+        [
+            velocity_matrix,
+            condition_matrix,
+            signed_uphill_speed,
+            velocity_to_contour_distance,
+        ]
+    )
+    feature_names = (
+        "vx",
+        "vy",
+        *required,
+        "signed_uphill_speed",
+        "velocity_to_contour_line_distance",
+    )
+    return matrix, feature_names
 
 
 def _sha256(path: Path) -> str:
@@ -178,6 +261,7 @@ def _transition_rows(
     segments: Sequence[Segment],
     condition_names: Sequence[str],
     condition_resolver: ConditionFieldResolver | None = None,
+    feature_basis: str = "direct",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     features: list[np.ndarray] = []
     increments: list[np.ndarray] = []
@@ -200,7 +284,13 @@ def _transition_rows(
                     [segment.conditions[name][index] for name in condition_names],
                     dtype=float,
                 )
-            features.append(np.concatenate([phase[index, 2:], condition]))
+            feature, _ = _velocity_feature_matrix(
+                phase[index : index + 1, 2:],
+                condition[None, :] if len(condition) else None,
+                condition_names,
+                feature_basis,
+            )
+            features.append(feature[0])
             increments.append(phase[index + 1, 2:] - phase[index, 2:])
             elapsed_values.append(elapsed)
     if len(features) < 3:
@@ -213,6 +303,7 @@ def fit_affine_velocity_model(
     *,
     condition_names: Sequence[str] = (),
     condition_resolver: ConditionFieldResolver | None = None,
+    feature_basis: str = "direct",
     ridge: float = 1e-6,
 ) -> AffineVelocityModel:
     """Fit ``dV=f(V,C)dt+GdW`` without learning the kinematic position row."""
@@ -226,7 +317,13 @@ def fit_affine_velocity_model(
     ):
         raise PhaseSpaceError("a registered training condition is unavailable")
     raw, velocity_increment, elapsed = _transition_rows(
-        segments, names, condition_resolver
+        segments, names, condition_resolver, feature_basis
+    )
+    _, feature_names = _velocity_feature_matrix(
+        np.zeros((1, 2)),
+        np.zeros((1, len(names))) if names else None,
+        names,
+        feature_basis,
     )
     feature_mean = raw.mean(axis=0)
     feature_scale = raw.std(axis=0)
@@ -247,6 +344,8 @@ def fit_affine_velocity_model(
         raise PhaseSpaceError("velocity diffusion fit is not positive definite")
     return AffineVelocityModel(
         condition_names=names,
+        feature_basis=feature_basis,
+        feature_names=feature_names,
         feature_mean=feature_mean,
         feature_scale=feature_scale,
         weights=weights,
@@ -312,10 +411,15 @@ def _validation_velocity_rmse(
     condition_resolver: ConditionFieldResolver | None = None,
 ) -> float:
     raw, increments, elapsed = _transition_rows(
-        segments, model.condition_names, condition_resolver
+        segments,
+        model.condition_names,
+        condition_resolver,
+        model.feature_basis,
     )
-    conditions = raw[:, 2:] if model.condition_names else None
-    predicted = model.acceleration(raw[:, :2], conditions) * elapsed[:, None]
+    normalized = (raw - model.feature_mean) / model.feature_scale
+    predicted = (
+        np.column_stack([np.ones(len(normalized)), normalized]) @ model.weights
+    ) * elapsed[:, None]
     return float(np.sqrt(np.mean((predicted - increments) ** 2)))
 
 
@@ -387,6 +491,7 @@ def run_phase_space_benchmark(
         fit_segments,
         condition_names=condition_names,
         condition_resolver=condition_resolver,
+        feature_basis=str(velocity_config.get("feature_basis", "direct")),
         ridge=float(velocity_config["ridge"]),
     )
     rng = np.random.default_rng(seed)
@@ -500,6 +605,7 @@ __all__ = [
     "ConditionField",
     "ConditionFieldResolver",
     "PhaseSpaceError",
+    "directional_terrain_velocity_terms",
     "fit_affine_velocity_model",
     "load_phase_space_spec",
     "phase_space_state",

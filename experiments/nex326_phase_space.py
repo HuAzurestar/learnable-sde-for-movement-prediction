@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Sequence
 
 from experiments.nex326.cohort import load_cohort
-from experiments.nex326.phase_space import SPEC_PATH, write_phase_space_report
+from experiments.nex326.phase_space import (
+    SPEC_PATH,
+    load_phase_space_spec,
+    write_phase_space_report,
+)
 from experiments.nex326.spatial_conditions import DSDERasterConditionResolver
 
 
@@ -24,9 +28,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if (args.condition_root is None) != (args.srtm_root is None):
         parser.error("--condition-root and --srtm-root must be supplied together")
+    spec = load_phase_space_spec(args.spec)
+    condition_names = tuple(spec["condition_contract"]["registered_condition_names"])
     resolver = (
         DSDERasterConditionResolver(
-            load_cohort(args.cohort), args.condition_root, args.srtm_root
+            load_cohort(args.cohort),
+            args.condition_root,
+            args.srtm_root,
+            names=condition_names,
         )
         if args.condition_root is not None
         else None
