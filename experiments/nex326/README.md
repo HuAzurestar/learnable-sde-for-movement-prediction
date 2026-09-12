@@ -220,6 +220,14 @@ not cover training-data, fitted-cohort, or dataset-version uncertainty. HDR90 is
 bootstrapped because the legacy compact per-segment report omitted its inclusion flag;
 the analysis records that limitation instead of reconstructing or inventing it.
 
+The recorded Energy Score delta was `-0.16278`, with a 95% paired-segment interval
+of `[-0.34787, +0.01303]`; 96.58% of bootstrap draws were below zero. The interval
+slightly crosses zero, so the descriptive improvement is not promoted to a stable
+effect. CEP50 (`[-1.06742, +0.40763]`) and endpoint velocity RMSE
+(`[-0.00194, +0.00812]`) also crossed zero. Consequently v5 remains the lowest
+observed Energy Score in this bounded pilot, while the scientific assessment remains
+`not_assessed` and requires genuinely independent data to strengthen.
+
 For a bounded run on the registered DSDE Zhejiang holdout, first materialize the
 deterministic 20%-by-segment pilot cohort without copying the source parquet into this
 repository:
