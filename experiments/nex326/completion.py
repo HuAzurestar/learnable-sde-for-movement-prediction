@@ -13,11 +13,13 @@ from .specification import load_experiment_spec
 
 
 ROOT = Path(__file__).resolve().parent
-SCHEMA_VERSION = "pirc19-nex326-completion-audit-v1"
+SCHEMA_VERSION = "pirc19-nex326-completion-audit-v2"
 DEFAULT_FIDELITY = ROOT / "implementation_fidelity_report.json"
 DEFAULT_GAPS = ROOT / "implementation_gaps.json"
 DEFAULT_PILOT = ROOT / "dsde_20pct_pilot_receipt.json"
 DEFAULT_MULTI_SEED = ROOT / "dsde_20pct_multi_seed_receipt.json"
+DEFAULT_SCOPE_POLICY = ROOT / "pirc19_scope_policy.json"
+APPROVED_EXCLUDED_ARMS = {13, 17, 22}
 EXPECTED_UNAVAILABLE = {
     (13, "animal_pretrain"),
     (17, "weather"),
@@ -106,6 +108,7 @@ def build_completion_report(
     gaps_path: Path | str = DEFAULT_GAPS,
     pilot_path: Path | str = DEFAULT_PILOT,
     multi_seed_path: Path | str = DEFAULT_MULTI_SEED,
+    scope_policy_path: Path | str = DEFAULT_SCOPE_POLICY,
 ) -> dict[str, object]:
     """Build a dimensioned completion report without inventing one overall score."""
     spec = load_experiment_spec()
@@ -113,6 +116,22 @@ def build_completion_report(
     gaps = _load(gaps_path)
     pilot = _load(pilot_path)
     multi_seed = _load(multi_seed_path)
+    scope_policy = _load(scope_policy_path)
+
+    excluded_rows = scope_policy.get("approved_excluded_arms", [])
+    excluded_arm_ids = {
+        int(item["arm_id"])
+        for item in excluded_rows
+        if isinstance(item, Mapping) and "arm_id" in item
+    }
+    all_execution_keys = {
+        (arm.arm_id, str(subconfig["subconfig_id"]))
+        for arm, subconfig in spec.executions
+    }
+    approved_excluded_keys = {
+        key for key in all_execution_keys if key[0] in excluded_arm_ids
+    }
+    required_keys = all_execution_keys - approved_excluded_keys
 
     execution = pilot.get("execution", {})
     run_status = execution.get("run_status", {}) if isinstance(execution, Mapping) else {}
@@ -129,6 +148,8 @@ def build_completion_report(
         and "arm_id" in item
         and "subconfig_id" in item
     }
+    required_unavailable = unavailable & required_keys
+    required_succeeded = len(required_keys) - len(required_unavailable)
     succeeded = int(run_status.get("succeeded", 0)) if isinstance(run_status, Mapping) else 0
     unavailable_count = (
         int(run_status.get("data_unavailable", 0))
@@ -167,6 +188,21 @@ def build_completion_report(
             "frozen_contract",
             len(spec.arms) == 22 and len(spec.executions) == 36,
             f"{len(spec.arms)} numbered arms and {len(spec.executions)} execution slots",
+        ),
+        _check(
+            "approved_scope_policy",
+            scope_policy.get("schema_version") == "pirc19-reproduction-scope-v1"
+            and scope_policy.get("task_id") == "PIRC-19"
+            and scope_policy.get("experiment_id") == spec.experiment_id
+            and excluded_arm_ids == APPROVED_EXCLUDED_ARMS
+            and int(scope_policy.get("frozen_execution_count", 0))
+            == len(all_execution_keys)
+            and int(scope_policy.get("approved_excluded_execution_count", 0))
+            == len(approved_excluded_keys)
+            and int(scope_policy.get("required_execution_count", 0))
+            == len(required_keys),
+            f"Arms {sorted(excluded_arm_ids)} exclude {len(approved_excluded_keys)} of "
+            f"{len(all_execution_keys)} frozen execution slots",
         ),
         _check(
             "implementation_routing",
@@ -211,8 +247,15 @@ def build_completion_report(
         ),
         _check(
             "declared_unavailable_scope",
-            unavailable == EXPECTED_UNAVAILABLE,
-            "only animal, weather, and three expert-prior extension executions are unavailable",
+            unavailable == EXPECTED_UNAVAILABLE
+            and unavailable <= approved_excluded_keys,
+            "every data-unavailable execution is inside an approved excluded arm",
+        ),
+        _check(
+            "required_execution_scope",
+            required_succeeded == len(required_keys)
+            and not required_unavailable,
+            f"{required_succeeded} of {len(required_keys)} required execution slots succeeded",
         ),
         _check(
             "terrain_evidence",
@@ -244,6 +287,7 @@ def build_completion_report(
         Path(gaps_path),
         Path(pilot_path),
         Path(multi_seed_path),
+        Path(scope_policy_path),
     ]
     return {
         "schema_version": SCHEMA_VERSION,
@@ -251,7 +295,7 @@ def build_completion_report(
         "experiment_id": spec.experiment_id,
         "spec_version": spec.spec_version,
         "overall_status": (
-            "engineering_reconstruction_complete_scientific_reproduction_incomplete"
+            "pirc19_complete_with_approved_arm_exclusions"
             if all_checks_passed
             else "completion_audit_failed"
         ),
@@ -264,6 +308,10 @@ def build_completion_report(
             "current_dsde_execution": {
                 "status": "complete_for_available_inputs",
                 **_fraction(succeeded, len(spec.executions)),
+            },
+            "required_empirical_reproduction_scope": {
+                "status": "complete" if not required_unavailable else "incomplete",
+                **_fraction(required_succeeded, len(required_keys)),
             },
             "replicated_current_dsde_execution": {
                 "status": "complete_for_available_inputs",
@@ -280,26 +328,31 @@ def build_completion_report(
             "total": len(checks),
             "all_passed": all_checks_passed,
         },
-        "current_data_blockers": [
+        "task_completion": {
+            "status": "complete" if all_checks_passed else "audit_failed",
+            "basis": (
+                f"{required_succeeded}/{len(required_keys)} required execution slots "
+                "succeeded; Arms 13, 17, and 22 are approved empirical exclusions."
+            ),
+        },
+        "approved_empirical_exclusions": [
             {
                 "arm_id": 13,
-                "subconfig_id": "animal_pretrain",
-                "required_input": "licensed versioned animal pretraining cohort",
+                "execution_count": 1,
+                "disposition": "not_required_no_animal_cohort",
             },
             {
                 "arm_id": 17,
-                "subconfig_id": "weather",
-                "required_input": "time-aligned temperature and precipitation",
+                "execution_count": 4,
+                "disposition": "not_required_condition_variant_arm",
             },
-        ],
-        "deferred_extensions": [
             {
                 "arm_id": 22,
-                "subconfig_ids": ["doob", "sb", "soft_endpoint"],
-                "required_input": "independently attested expert endpoint-prior feed",
-            }
+                "execution_count": 3,
+                "disposition": "deferred_expert_assisted_extension",
+            },
         ],
-        "scientific_blockers": [
+        "scientific_followups": [
             "the tracked DSDE cohort is a deterministic 20% pilot, not the full registered cohort",
             "three replicate seeds over one cohort are descriptive, not independent scientific replications",
             "all succeeded executions remain not_assessed",
@@ -311,7 +364,7 @@ def build_completion_report(
             }
             for path in evidence_paths
         ],
-        "next_core_step_requires_external_input": True,
+        "next_core_step_requires_external_input": False,
     }
 
 

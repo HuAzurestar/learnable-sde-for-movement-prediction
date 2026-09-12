@@ -300,6 +300,15 @@ the frozen-contract implementation, current-data execution coverage, replicated
 execution coverage, and scientific-assessment coverage separately, and fails if source
 hashes, receipt identities, unavailable scopes, or the Arm 22 extension boundary drift.
 
+The accepted PIRC-19 empirical scope is recorded in
+`pirc19_scope_policy.json`. Arms 13, 17, and 22 are approved exclusions: Arm 13 lacks a
+licensed animal cohort, Arm 17 condition variants are not required in the current
+scope, and Arm 22 remains an expert-assisted extension. This excludes 8 of the 36
+frozen execution slots. All 28 required slots succeeded on the registered DSDE 20%
+pilot; three Arm 17 variants also succeeded as supplemental evidence. PIRC-19 is
+therefore complete within the approved scope. This completion status does not promote
+the exploratory pilot results to paper-equivalent scientific claims.
+
 After aggregating each seed independently, produce a descriptive cross-replicate table:
 
 ```console

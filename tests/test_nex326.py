@@ -853,12 +853,21 @@ def test_pirc19_completion_audit_separates_engineering_and_scientific_status(
     report = write_completion_report(tmp_path / "completion.json")
     assert report == build_completion_report()
     assert report["check_summary"] == {
-        "passed": 11,
-        "total": 11,
+        "passed": 13,
+        "total": 13,
         "all_passed": True,
     }
+    assert report["overall_status"] == (
+        "pirc19_complete_with_approved_arm_exclusions"
+    )
     assert report["dimensions"]["frozen_contract_implementation"]["ratio"] == 1.0
     assert report["dimensions"]["current_dsde_execution"]["numerator"] == 31
+    assert report["dimensions"]["required_empirical_reproduction_scope"] == {
+        "status": "complete",
+        "numerator": 28,
+        "denominator": 28,
+        "ratio": 1.0,
+    }
     assert report["dimensions"]["replicated_current_dsde_execution"] == {
         "status": "complete_for_available_inputs",
         "numerator": 93,
@@ -868,7 +877,8 @@ def test_pirc19_completion_audit_separates_engineering_and_scientific_status(
     assert report["dimensions"][
         "scientifically_assessed_succeeded_executions"
     ]["numerator"] == 0
-    assert report["next_core_step_requires_external_input"] is True
+    assert report["task_completion"]["status"] == "complete"
+    assert report["next_core_step_requires_external_input"] is False
 
     broken_multi = json.loads(
         (NEX326 / "dsde_20pct_multi_seed_receipt.json").read_text(encoding="utf-8")
@@ -880,6 +890,20 @@ def test_pirc19_completion_audit_separates_engineering_and_scientific_status(
         write_completion_report(
             tmp_path / "broken-completion.json",
             multi_seed_path=broken_path,
+        )
+
+    broken_scope = json.loads(
+        (NEX326 / "pirc19_scope_policy.json").read_text(encoding="utf-8")
+    )
+    broken_scope["approved_excluded_arms"].append(
+        {"arm_id": 12, "reason": "not approved"}
+    )
+    broken_scope_path = tmp_path / "broken-scope.json"
+    broken_scope_path.write_text(json.dumps(broken_scope), encoding="utf-8")
+    with pytest.raises(CompletionAuditError, match="approved_scope_policy"):
+        write_completion_report(
+            tmp_path / "broken-scope-completion.json",
+            scope_policy_path=broken_scope_path,
         )
 
 

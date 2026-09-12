@@ -1,9 +1,9 @@
 {
-  "schema_version": "pirc19-nex326-completion-audit-v1",
+  "schema_version": "pirc19-nex326-completion-audit-v2",
   "task_id": "PIRC-19",
   "experiment_id": "NEX326",
   "spec_version": "nex326-process-v2",
-  "overall_status": "engineering_reconstruction_complete_scientific_reproduction_incomplete",
+  "overall_status": "pirc19_complete_with_approved_arm_exclusions",
   "paper_equivalent": false,
   "dimensions": {
     "frozen_contract_implementation": {
@@ -17,6 +17,12 @@
       "numerator": 31,
       "denominator": 36,
       "ratio": 0.8611111111111112
+    },
+    "required_empirical_reproduction_scope": {
+      "status": "complete",
+      "numerator": 28,
+      "denominator": 28,
+      "ratio": 1.0
     },
     "replicated_current_dsde_execution": {
       "status": "complete_for_available_inputs",
@@ -36,6 +42,11 @@
       "name": "frozen_contract",
       "passed": true,
       "detail": "22 numbered arms and 36 execution slots"
+    },
+    {
+      "name": "approved_scope_policy",
+      "passed": true,
+      "detail": "Arms [13, 17, 22] exclude 8 of 36 frozen execution slots"
     },
     {
       "name": "implementation_routing",
@@ -70,7 +81,12 @@
     {
       "name": "declared_unavailable_scope",
       "passed": true,
-      "detail": "only animal, weather, and three expert-prior extension executions are unavailable"
+      "detail": "every data-unavailable execution is inside an approved excluded arm"
+    },
+    {
+      "name": "required_execution_scope",
+      "passed": true,
+      "detail": "28 of 28 required execution slots succeeded"
     },
     {
       "name": "terrain_evidence",
@@ -89,34 +105,32 @@
     }
   ],
   "check_summary": {
-    "passed": 11,
-    "total": 11,
+    "passed": 13,
+    "total": 13,
     "all_passed": true
   },
-  "current_data_blockers": [
+  "task_completion": {
+    "status": "complete",
+    "basis": "28/28 required execution slots succeeded; Arms 13, 17, and 22 are approved empirical exclusions."
+  },
+  "approved_empirical_exclusions": [
     {
       "arm_id": 13,
-      "subconfig_id": "animal_pretrain",
-      "required_input": "licensed versioned animal pretraining cohort"
+      "execution_count": 1,
+      "disposition": "not_required_no_animal_cohort"
     },
     {
       "arm_id": 17,
-      "subconfig_id": "weather",
-      "required_input": "time-aligned temperature and precipitation"
-    }
-  ],
-  "deferred_extensions": [
+      "execution_count": 4,
+      "disposition": "not_required_condition_variant_arm"
+    },
     {
       "arm_id": 22,
-      "subconfig_ids": [
-        "doob",
-        "sb",
-        "soft_endpoint"
-      ],
-      "required_input": "independently attested expert endpoint-prior feed"
+      "execution_count": 3,
+      "disposition": "deferred_expert_assisted_extension"
     }
   ],
-  "scientific_blockers": [
+  "scientific_followups": [
     "the tracked DSDE cohort is a deterministic 20% pilot, not the full registered cohort",
     "three replicate seeds over one cohort are descriptive, not independent scientific replications",
     "all succeeded executions remain not_assessed"
@@ -137,7 +151,11 @@
     {
       "path": "dsde_20pct_multi_seed_receipt.json",
       "canonical_json_sha256": "1bfadf450584a65602569b1b4e18028e4e7c1a4b014bb0bcb4840365c7a6c315"
+    },
+    {
+      "path": "pirc19_scope_policy.json",
+      "canonical_json_sha256": "ea8e5e9f02cdd2d8eac2aa4541a7727759baead1e6e2f23ae5e2549a8fbfec07"
     }
   ],
-  "next_core_step_requires_external_input": true
+  "next_core_step_requires_external_input": false
 }
