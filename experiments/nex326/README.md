@@ -168,6 +168,17 @@ paired Energy Score must improve and at least two of three seeds must improve. A
 the earlier phase-space runs, secondary calibration, position, and velocity metrics
 must still be reported even if the primary gate passes.
 
+The recorded run did not pass that gate. Relative to contour-distance v3, v4's mean
+paired Energy Score delta was `+3.3755`, with zero of three seeds improving. Across
+the 84 seed-segment pairs, 27 improved and 57 worsened; the 10% trimmed mean delta
+remained positive at `+2.5073`, so the result is not explained only by one extreme
+trajectory. The secondary velocity endpoint RMSE did improve on all three seeds by a
+mean `-0.00981`, and validation velocity-increment RMSE moved from `0.56857` to
+`0.56815`. The fitted normal and tangent responses were close (`-0.02557` versus
+`-0.02424`). Together these diagnostics suggest that the restricted structural model
+slightly regularizes velocity prediction but is too constrained for the endpoint
+position distribution; they do not support replacing contour-distance v3.
+
 For a bounded run on the registered DSDE Zhejiang holdout, first materialize the
 deterministic 20%-by-segment pilot cohort without copying the source parquet into this
 repository:
