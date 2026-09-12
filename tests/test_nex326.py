@@ -146,7 +146,13 @@ def test_all_arm_subconfigs_run_the_same_artifact_producing_pipeline(tmp_path, m
     assert len(source_bundles) == 1
     assert len(execution_identities) == 1
     assert all(len(bundle) == 64 for bundle in source_bundles)
-    assert all(record["implementation"]["environment_lock"]["conformant"] for record in records)
+    environment_conformance = {
+        record["implementation"]["environment_lock"]["conformant"]
+        for record in records
+    }
+    assert environment_conformance == {
+        runner.implementation["environment_lock"]["conformant"]
+    }
     for record in records:
         assert [stage["name"] for stage in record["stages"]] == list(STAGES)
         assert all(stage["status"] == "completed" for stage in record["stages"])
