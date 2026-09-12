@@ -413,6 +413,49 @@ def test_dsde_raster_conditions_query_position_without_route_point_index(tmp_pat
         "signed_uphill_speed",
         "velocity_to_contour_line_distance",
     )
+    expected_derived = {
+        "directional_terrain_gradient_only": (),
+        "directional_terrain_signed_uphill": ("signed_uphill_speed",),
+        "directional_terrain_contour_distance": (
+            "velocity_to_contour_line_distance",
+        ),
+    }
+    for basis, derived in expected_derived.items():
+        ablated = fit_affine_velocity_model(
+            splits["train"] + splits["adapt"],
+            condition_names=DIRECTIONAL_TERRAIN_CONDITION_NAMES,
+            condition_resolver=directional_resolver,
+            feature_basis=basis,
+        )
+        assert ablated.feature_names[5:] == derived
+
+
+def test_directional_ablation_matrix_registers_one_feature_change_per_contrast():
+    matrix = json.loads(
+        (NEX326 / "phase_space_directional_ablation.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert matrix["shared_protocol"]["replicate_seeds"] == [
+        20260814,
+        20260815,
+        20260816,
+    ]
+    assert len(matrix["registered_contrasts"]) == 4
+    specs = {
+        item["benchmark_id"]: load_phase_space_spec(NEX326 / item["spec"])
+        for item in matrix["configurations"]
+        if "spec" in item
+    }
+    assert specs["NEX326-PHASE-SPACE-4D-GRADIENT-ONLY-v3"]["velocity_model"][
+        "feature_basis"
+    ] == "directional_terrain_gradient_only"
+    assert specs["NEX326-PHASE-SPACE-4D-SIGNED-UPHILL-v3"]["velocity_model"][
+        "features"
+    ][-1] == "signed_uphill_speed"
+    assert specs["NEX326-PHASE-SPACE-4D-CONTOUR-DISTANCE-v3"][
+        "velocity_model"
+    ]["features"][-1] == "velocity_to_contour_line_distance"
 
 
 def test_phase_space_multi_seed_manifest_and_receipt_are_hash_bound(tmp_path):

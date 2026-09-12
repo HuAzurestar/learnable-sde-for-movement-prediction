@@ -1,0 +1,60 @@
+{
+  "schema_version": "nex326-phase-space-directional-ablation-v1",
+  "scientific_role": "preregistered_followup_exploratory_ablation",
+  "cohort": "NEX326-DSDE-ZHEJIANG-20P-PILOT-001",
+  "shared_protocol": {
+    "replicate_seeds": [20260814, 20260815, 20260816],
+    "prediction_samples": 64,
+    "primary_metric": "position_energy_score_d2",
+    "gain_rule": "mean paired candidate-minus-baseline below zero and candidate better on at least two of three seeds"
+  },
+  "configurations": [
+    {
+      "role": "scalar_reference",
+      "benchmark_id": "NEX326-PHASE-SPACE-4D-TERRAIN-v1"
+    },
+    {
+      "role": "direction_without_velocity_interaction",
+      "benchmark_id": "NEX326-PHASE-SPACE-4D-GRADIENT-ONLY-v3",
+      "spec": "phase_space_gradient_only_benchmark.json"
+    },
+    {
+      "role": "uphill_downhill_interaction",
+      "benchmark_id": "NEX326-PHASE-SPACE-4D-SIGNED-UPHILL-v3",
+      "spec": "phase_space_signed_uphill_benchmark.json"
+    },
+    {
+      "role": "unoriented_tangent_distance_interaction",
+      "benchmark_id": "NEX326-PHASE-SPACE-4D-CONTOUR-DISTANCE-v3",
+      "spec": "phase_space_contour_distance_benchmark.json"
+    },
+    {
+      "role": "combined_directional_interactions",
+      "benchmark_id": "NEX326-PHASE-SPACE-4D-DIRECTIONAL-TERRAIN-v2",
+      "spec": "phase_space_directional_terrain_benchmark.json"
+    }
+  ],
+  "registered_contrasts": [
+    {
+      "question": "does signed terrain direction improve on scalar slope magnitude",
+      "baseline": "NEX326-PHASE-SPACE-4D-TERRAIN-v1",
+      "candidate": "NEX326-PHASE-SPACE-4D-GRADIENT-ONLY-v3"
+    },
+    {
+      "question": "does uphill/downhill sign add information beyond gradient direction",
+      "baseline": "NEX326-PHASE-SPACE-4D-GRADIENT-ONLY-v3",
+      "candidate": "NEX326-PHASE-SPACE-4D-SIGNED-UPHILL-v3"
+    },
+    {
+      "question": "does distance to the unoriented contour line add information beyond gradient direction",
+      "baseline": "NEX326-PHASE-SPACE-4D-GRADIENT-ONLY-v3",
+      "candidate": "NEX326-PHASE-SPACE-4D-CONTOUR-DISTANCE-v3"
+    },
+    {
+      "question": "do both velocity interactions improve on gradient direction alone",
+      "baseline": "NEX326-PHASE-SPACE-4D-GRADIENT-ONLY-v3",
+      "candidate": "NEX326-PHASE-SPACE-4D-DIRECTIONAL-TERRAIN-v2"
+    }
+  ],
+  "interpretation_policy": "attribute a gain only to the corresponding registered contrast; do not infer causality from the combined model alone"
+}

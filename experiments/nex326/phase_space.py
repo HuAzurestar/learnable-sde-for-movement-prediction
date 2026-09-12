@@ -24,6 +24,10 @@ IMPLEMENTATION_FILES = (
     "phase_space_benchmark.json",
     "phase_space_terrain_benchmark.json",
     "phase_space_directional_terrain_benchmark.json",
+    "phase_space_directional_ablation.json",
+    "phase_space_gradient_only_benchmark.json",
+    "phase_space_signed_uphill_benchmark.json",
+    "phase_space_contour_distance_benchmark.json",
     "spatial_conditions.py",
 )
 
@@ -157,7 +161,18 @@ def _velocity_feature_matrix(
             np.column_stack([velocity_matrix, condition_matrix]),
             ("vx", "vy", *names),
         )
-    if feature_basis != "directional_terrain_v2":
+    directional_bases = {
+        "directional_terrain_gradient_only": (),
+        "directional_terrain_signed_uphill": ("signed_uphill_speed",),
+        "directional_terrain_contour_distance": (
+            "velocity_to_contour_line_distance",
+        ),
+        "directional_terrain_v2": (
+            "signed_uphill_speed",
+            "velocity_to_contour_line_distance",
+        ),
+    }
+    if feature_basis not in directional_bases:
         raise PhaseSpaceError(f"unsupported velocity feature basis: {feature_basis}")
     required = (
         "terrain_elevation",
@@ -172,21 +187,16 @@ def _velocity_feature_matrix(
     signed_uphill_speed, velocity_to_contour_distance = (
         directional_terrain_velocity_terms(velocity_matrix, gradient)
     )
+    derived_values = {
+        "signed_uphill_speed": signed_uphill_speed,
+        "velocity_to_contour_line_distance": velocity_to_contour_distance,
+    }
+    derived_names = directional_bases[feature_basis]
     matrix = np.column_stack(
-        [
-            velocity_matrix,
-            condition_matrix,
-            signed_uphill_speed,
-            velocity_to_contour_distance,
-        ]
+        [velocity_matrix, condition_matrix]
+        + [derived_values[name] for name in derived_names]
     )
-    feature_names = (
-        "vx",
-        "vy",
-        *required,
-        "signed_uphill_speed",
-        "velocity_to_contour_line_distance",
-    )
+    feature_names = ("vx", "vy", *required, *derived_names)
     return matrix, feature_names
 
 
