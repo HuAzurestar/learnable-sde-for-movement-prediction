@@ -179,6 +179,15 @@ mean `-0.00981`, and validation velocity-increment RMSE moved from `0.56857` to
 slightly regularizes velocity prediction but is too constrained for the endpoint
 position distribution; they do not support replacing contour-distance v3.
 
+`phase_space_terrain_aligned_residual_benchmark.json` preregisters one bounded v5
+follow-up. It preserves the complete contour-distance v3 affine drift and adds only
+`lambda_normal*P_normal*v`; setting `lambda_normal=0` recovers the v3 drift family.
+This separates the value of a terrain-aligned vector response from the broad isotropic
+restriction imposed by v4. The comparator, cohort, seeds, primary metric, and gain
+rule remain unchanged. A stopping rule is also registered: if this nested residual
+does not pass the exploratory gate, no further terrain feature variants are added in
+this reconstruction cycle.
+
 For a bounded run on the registered DSDE Zhejiang holdout, first materialize the
 deterministic 20%-by-segment pilot cohort without copying the source parquet into this
 repository:

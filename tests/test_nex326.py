@@ -21,9 +21,11 @@ from experiments.nex326.model import build_transition_data, train_model
 from experiments.nex326.pilot_receipt import PilotReceiptError, build_pilot_receipt
 from experiments.nex326.phase_space import (
     PhaseSpaceError,
+    TerrainAlignedResidualModel,
     TerrainAlignedVelocityModel,
     directional_terrain_velocity_terms,
     fit_affine_velocity_model,
+    fit_terrain_aligned_residual_model,
     fit_terrain_aligned_velocity_model,
     load_phase_space_spec,
     phase_space_state,
@@ -337,6 +339,25 @@ def test_terrain_aligned_v4_is_preregistered_as_structural_followup():
     assert "t and -t" in spec["condition_contract"]["contour_tangent_semantics"]
 
 
+def test_terrain_aligned_v5_is_nested_and_has_a_stopping_rule():
+    spec = load_phase_space_spec(
+        NEX326 / "phase_space_terrain_aligned_residual_benchmark.json"
+    )
+    assert spec["velocity_model"]["kind"] == "terrain_aligned_residual_drift"
+    assert spec["velocity_model"]["base_feature_basis"] == (
+        "directional_terrain_contour_distance"
+    )
+    assert spec["velocity_model"]["learned_structural_parameters"] == [
+        "lambda_normal"
+    ]
+    assert spec["protocol"]["primary_comparator"] == (
+        "NEX326-PHASE-SPACE-4D-CONTOUR-DISTANCE-v3"
+    )
+    assert "do not add further terrain feature variants" in spec["protocol"][
+        "stopping_rule"
+    ]
+
+
 def test_phase_space_benchmark_runs_without_rewriting_frozen_arms(tmp_path):
     cohort_path = NEX326 / "fixtures" / "registered_cohort.json"
     output = tmp_path / "phase-space.json"
@@ -470,6 +491,17 @@ def test_dsde_raster_conditions_query_position_without_route_point_index(tmp_pat
     assert terrain_aligned.transition_count == 4
     assert terrain_aligned.to_dict()["kind"] == "terrain_aligned_projection_drift"
     assert np.linalg.eigvalsh(terrain_aligned.diffusion_covariance).min() > 0.0
+    residual_model = fit_terrain_aligned_residual_model(
+        splits["train"] + splits["adapt"],
+        condition_names=DIRECTIONAL_TERRAIN_CONDITION_NAMES,
+        condition_resolver=directional_resolver,
+    )
+    assert isinstance(residual_model, TerrainAlignedResidualModel)
+    assert residual_model.transition_count == 4
+    assert residual_model.feature_names[-1] == "velocity_to_contour_line_distance"
+    assert residual_model.to_dict()["nested_baseline"].startswith(
+        "lambda_normal=0"
+    )
     expected_derived = {
         "directional_terrain_gradient_only": (),
         "directional_terrain_signed_uphill": ("signed_uphill_speed",),

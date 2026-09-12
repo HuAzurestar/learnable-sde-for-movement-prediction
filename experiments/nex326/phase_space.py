@@ -29,6 +29,7 @@ IMPLEMENTATION_FILES = (
     "phase_space_signed_uphill_benchmark.json",
     "phase_space_contour_distance_benchmark.json",
     "phase_space_terrain_aligned_benchmark.json",
+    "phase_space_terrain_aligned_residual_benchmark.json",
     "spatial_conditions.py",
 )
 
@@ -157,6 +158,67 @@ class TerrainAlignedVelocityModel:
             "diffusion_state_support": ["vx", "vy"],
             "invariance": "P_tangent is unchanged when a contour tangent representative t is replaced by -t",
             "flat_gradient_convention": "P_normal*v=0 and P_tangent*v=v",
+        }
+
+
+@dataclass(frozen=True)
+class TerrainAlignedResidualModel:
+    """Contour-distance affine drift plus one terrain-normal vector response."""
+
+    condition_names: tuple[str, ...]
+    feature_basis: str
+    feature_names: tuple[str, ...]
+    feature_mean: np.ndarray
+    feature_scale: np.ndarray
+    base_weights: np.ndarray
+    normal_response: float
+    normal_design_scale: float
+    diffusion_covariance: np.ndarray
+    transition_count: int
+
+    def acceleration(
+        self,
+        velocity: np.ndarray,
+        conditions: np.ndarray | None = None,
+    ) -> np.ndarray:
+        velocity_values = np.asarray(velocity, dtype=float)
+        one = velocity_values.ndim == 1
+        velocity_matrix = np.atleast_2d(velocity_values)
+        condition_matrix = _validated_directional_conditions(
+            velocity_matrix, conditions, self.condition_names
+        )
+        raw, _ = _velocity_feature_matrix(
+            velocity_matrix,
+            condition_matrix,
+            self.condition_names,
+            self.feature_basis,
+        )
+        normalized = (raw - self.feature_mean) / self.feature_scale
+        base = np.column_stack([np.ones(len(normalized)), normalized]) @ self.base_weights
+        normal, _ = terrain_aligned_velocity_components(
+            velocity_matrix, condition_matrix[:, 1:3]
+        )
+        result = base + self.normal_response * normal
+        return result[0] if one else result
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "kind": "terrain_aligned_residual_drift",
+            "condition_names": list(self.condition_names),
+            "base_feature_basis": self.feature_basis,
+            "base_feature_names": list(self.feature_names),
+            "base_feature_mean": self.feature_mean.tolist(),
+            "base_feature_scale": self.feature_scale.tolist(),
+            "base_weights": self.base_weights.tolist(),
+            "normal_response": self.normal_response,
+            "normal_design_scale": self.normal_design_scale,
+            "drift_formula": "affine_contour_distance(v,C) + lambda_normal*P_normal*v",
+            "nested_baseline": "lambda_normal=0 recovers contour-distance v3",
+            "diffusion_covariance": self.diffusion_covariance.tolist(),
+            "transition_count": self.transition_count,
+            "diffusion_state_support": ["vx", "vy"],
+            "invariance": "P_normal is unchanged when an uphill unit vector u is replaced by -u",
+            "flat_gradient_convention": "P_normal*v=0",
         }
 
 
@@ -473,7 +535,7 @@ def _terrain_aligned_transition_rows(
     condition_resolver: ConditionFieldResolver,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     velocities: list[np.ndarray] = []
-    gradients: list[np.ndarray] = []
+    conditions: list[np.ndarray] = []
     increments: list[np.ndarray] = []
     elapsed_values: list[float] = []
     for segment in segments:
@@ -488,14 +550,14 @@ def _terrain_aligned_transition_rows(
                 phase[index : index + 1, 2:], condition, condition_names
             )
             velocities.append(phase[index, 2:])
-            gradients.append(condition_matrix[0, 1:3])
+            conditions.append(condition_matrix[0])
             increments.append(phase[index + 1, 2:] - phase[index, 2:])
             elapsed_values.append(elapsed)
     if len(velocities) < 3:
         raise PhaseSpaceError("phase-space fit requires at least three velocity transitions")
     return (
         np.stack(velocities),
-        np.stack(gradients),
+        np.stack(conditions),
         np.stack(increments),
         np.asarray(elapsed_values),
     )
@@ -534,9 +596,10 @@ def fit_terrain_aligned_velocity_model(
         raise PhaseSpaceError("terrain-aligned drift requires a spatial condition resolver")
     if condition_resolver.names != names:
         raise PhaseSpaceError("condition resolver names do not match the registered model")
-    velocity, gradient, increments, elapsed = _terrain_aligned_transition_rows(
+    velocity, conditions, increments, elapsed = _terrain_aligned_transition_rows(
         segments, names, condition_resolver
     )
+    gradient = conditions[:, 1:3]
     physical_design = _terrain_aligned_design(velocity, gradient)
     # One shared scale per vector block preserves rotational meaning while avoiding
     # a ridge penalty that depends on the units of velocity versus terrain gradient.
@@ -577,8 +640,83 @@ def fit_terrain_aligned_velocity_model(
     )
 
 
+def fit_terrain_aligned_residual_model(
+    segments: Sequence[Segment],
+    *,
+    condition_names: Sequence[str],
+    condition_resolver: ConditionFieldResolver | None,
+    ridge: float = 1e-6,
+) -> TerrainAlignedResidualModel:
+    """Fit one normal-vector response on top of the contour-distance model."""
+    if ridge <= 0.0:
+        raise PhaseSpaceError("ridge must be positive")
+    names = tuple(str(name) for name in condition_names)
+    if condition_resolver is None:
+        raise PhaseSpaceError(
+            "terrain-aligned residual drift requires a spatial condition resolver"
+        )
+    if condition_resolver.names != names:
+        raise PhaseSpaceError("condition resolver names do not match the registered model")
+    velocity, conditions, increments, elapsed = _terrain_aligned_transition_rows(
+        segments, names, condition_resolver
+    )
+    feature_basis = "directional_terrain_contour_distance"
+    raw, feature_names = _velocity_feature_matrix(
+        velocity, conditions, names, feature_basis
+    )
+    feature_mean = raw.mean(axis=0)
+    feature_scale = raw.std(axis=0)
+    feature_scale[feature_scale < 1e-10] = 1.0
+    normalized = (raw - feature_mean) / feature_scale
+    base_design = np.column_stack([np.ones(len(normalized)), normalized])
+    normal, _ = terrain_aligned_velocity_components(
+        velocity, conditions[:, 1:3]
+    )
+    normal_scale = max(float(np.sqrt(np.mean(normal**2))), 1e-10)
+    parameter_count = 2 * base_design.shape[1] + 1
+    rate_design = np.zeros((2 * len(velocity), parameter_count), dtype=float)
+    width = base_design.shape[1]
+    rate_design[0::2, :width] = base_design
+    rate_design[1::2, width : 2 * width] = base_design
+    rate_design[0::2, -1] = normal[:, 0] / normal_scale
+    rate_design[1::2, -1] = normal[:, 1] / normal_scale
+    increment_design = rate_design * np.repeat(elapsed, 2)[:, None]
+    target = increments.reshape(-1)
+    penalty = ridge * np.eye(parameter_count)
+    penalty[0, 0] = 0.0
+    penalty[width, width] = 0.0
+    coefficients = np.linalg.solve(
+        increment_design.T @ increment_design + penalty,
+        increment_design.T @ target,
+    )
+    base_weights = np.column_stack(
+        [coefficients[:width], coefficients[width : 2 * width]]
+    )
+    normal_response = float(coefficients[-1] / normal_scale)
+    predicted = (
+        base_design @ base_weights + normal_response * normal
+    ) * elapsed[:, None]
+    residual = increments - predicted
+    diffusion = np.einsum("ni,nj->ij", residual, residual) / elapsed.sum()
+    diffusion = 0.5 * (diffusion + diffusion.T) + 1e-10 * np.eye(2)
+    if float(np.linalg.eigvalsh(diffusion).min()) <= 0.0:
+        raise PhaseSpaceError("velocity diffusion fit is not positive definite")
+    return TerrainAlignedResidualModel(
+        condition_names=names,
+        feature_basis=feature_basis,
+        feature_names=feature_names,
+        feature_mean=feature_mean,
+        feature_scale=feature_scale,
+        base_weights=base_weights,
+        normal_response=normal_response,
+        normal_design_scale=normal_scale,
+        diffusion_covariance=diffusion,
+        transition_count=len(velocity),
+    )
+
+
 def rollout_phase_space(
-    model: AffineVelocityModel | TerrainAlignedVelocityModel,
+    model: AffineVelocityModel | TerrainAlignedVelocityModel | TerrainAlignedResidualModel,
     segment: Segment,
     *,
     cutoff: int,
@@ -629,20 +767,17 @@ def _energy_score(samples: np.ndarray, target: np.ndarray) -> float:
 
 
 def _validation_velocity_rmse(
-    model: AffineVelocityModel | TerrainAlignedVelocityModel,
+    model: AffineVelocityModel | TerrainAlignedVelocityModel | TerrainAlignedResidualModel,
     segments: Sequence[Segment],
     condition_resolver: ConditionFieldResolver | None = None,
 ) -> float:
-    if isinstance(model, TerrainAlignedVelocityModel):
+    if isinstance(model, (TerrainAlignedVelocityModel, TerrainAlignedResidualModel)):
         if condition_resolver is None:
             raise PhaseSpaceError(
                 "terrain-aligned validation requires a spatial condition resolver"
             )
-        velocity, gradient, increments, elapsed = _terrain_aligned_transition_rows(
+        velocity, conditions, increments, elapsed = _terrain_aligned_transition_rows(
             segments, model.condition_names, condition_resolver
-        )
-        conditions = np.column_stack(
-            [np.zeros(len(gradient)), gradient]
         )
         predicted = model.acceleration(velocity, conditions) * elapsed[:, None]
         return float(np.sqrt(np.mean((predicted - increments) ** 2)))
@@ -726,6 +861,13 @@ def run_phase_space_benchmark(
     model_kind = str(velocity_config["kind"])
     if model_kind == "terrain_aligned_projection_drift":
         model = fit_terrain_aligned_velocity_model(
+            fit_segments,
+            condition_names=condition_names,
+            condition_resolver=condition_resolver,
+            ridge=float(velocity_config["ridge"]),
+        )
+    elif model_kind == "terrain_aligned_residual_drift":
+        model = fit_terrain_aligned_residual_model(
             fit_segments,
             condition_names=condition_names,
             condition_resolver=condition_resolver,
