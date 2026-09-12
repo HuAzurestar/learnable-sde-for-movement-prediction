@@ -140,6 +140,17 @@ seeds. The recorded pilot passed that gate on all three seeds, with mean Energy 
 delta `-4.4971`. This is a pilot signal, not an inferential verdict; calibration and
 velocity diagnostics remain mixed.
 
+The preregistered follow-up matrix in `phase_space_directional_ablation.json`
+separates the directional basis into gradient-only, signed-uphill-only interaction,
+contour-distance-only interaction, and the combined v2 model. On the same three-seed
+pilot, mean Energy Scores were `125.7495`, `125.8819`, `122.1404`, and `122.2647`,
+respectively. The paired contrasts therefore locate the observed gain primarily in
+`abs(dot(v,u))`, the distance to the unoriented contour line: it improved on
+gradient-only for all three seeds by a mean `-3.6091`. Adding signed uphill speed alone
+did not pass the gate (`+0.1324`), and adding it to contour distance also did not pass
+(`+0.1244`). These are feature-attribution results for this affine pilot only; they do
+not establish a general behavioral preference for contour-following movement.
+
 For a bounded run on the registered DSDE Zhejiang holdout, first materialize the
 deterministic 20%-by-segment pilot cohort without copying the source parquet into this
 repository:
