@@ -129,6 +129,17 @@ python -m experiments.nex326.endpoint_prior \
   --output .local/nex326-dsde-20pct-pilot/cohort-with-endpoint-prior.json
 ```
 
+Before requesting that feed, export a provider package containing only each evaluation
+segment's observed inference prefix and forecast horizon. It deliberately excludes all
+states after the inference cutoff and the evaluation endpoint:
+
+```console
+python -m experiments.nex326.endpoint_prior \
+  --cohort .local/nex326-dsde-20pct-pilot/cohort.json \
+  --emit-request \
+  --output /tmp/nex326-endpoint-prior-request-v1.json
+```
+
 The feed must satisfy `endpoint_prior.schema.json`, cover every evaluation segment
 exactly once, contain finite positive-definite 2D covariances, and include a responsible
 party's explicit attestation that it was not derived from evaluation truth. The output

@@ -19,8 +19,8 @@
     "fingerprint": "c4eb7a337c13241928a543c839a21714da358d150de5befe6238b712fb4a7e48"
   },
   "implementation": {
-    "source_bundle_sha256": "a2498220815a70aa92c67034a0ae7e5a7d437a2e55fa614daecd0e7826889606",
-    "execution_identity_sha256": "fbc05b96f9cbac44b5e7a7a3425852328a94ea3ca31a991e0c0077056a49db1e",
+    "source_bundle_sha256": "b54577c4e50820a2c30615e00ce857487a00bf6885c8d5443dbaddbc9c14e873",
+    "execution_identity_sha256": "6a0686d927f6e93d9fead3f47eede11d82fdd16d00983934db7ecd32ed30dc97",
     "files": [
       {
         "path": "cohort.py",
@@ -44,7 +44,7 @@
       },
       {
         "path": "schrodinger.py",
-        "sha256": "20cff64402392ec509112999c4ffd8e81549d1f20406cfe5f09d1635c1468973"
+        "sha256": "c27d8d8859a93e401974ce34db5392c9a86c1c951423d87afa60597dc5536ef6"
       },
       {
         "path": "specification.py",
@@ -74,47 +74,47 @@
   },
   "method": "descriptive_across_replicate_seeds_no_inferential_ci",
   "integrity": {
-    "batch_manifest_sha256": "7c7b0f1bc20fc9e3772c4ce107dcbbcae032b0af915e4b59ef67ca783323bd92",
+    "batch_manifest_sha256": "d3a2052b8906bfad16fa26d28c114035aa62d72689c7d4e9d57828c46b9fbdeb",
     "per_seed_manifests": [
       {
         "replicate_seed": 20260814,
         "path": "seed-20260814/manifest.json",
-        "sha256": "6cbcdd5056846afc187538e3f08d29bf3bc42882b3b19cedde604c9825cc7b68",
+        "sha256": "8569f25bb73f9d4b078430986c2a77067683567517da487b9dfb6873ee68d4a0",
         "size_bytes": 4341
       },
       {
         "replicate_seed": 20260815,
         "path": "seed-20260815/manifest.json",
-        "sha256": "c8336838a57d321153aaa054928c4781a03cf687a24241911d4a7c9b3bdb7b8c",
+        "sha256": "a7cd1eff2dec4721ab0a47b8818c21cdba8b0d11d7534d8fc7a1793945a72538",
         "size_bytes": 4341
       },
       {
         "replicate_seed": 20260816,
         "path": "seed-20260816/manifest.json",
-        "sha256": "050f4f785e5cd9503601a73259105240fdaf92dfb7af3dca72f22848fe9b6578",
+        "sha256": "0117f01486bc70179ce29a04e3968df9e35e13d402a413a37cc1939524cd63d9",
         "size_bytes": 4341
       }
     ],
-    "replicate_aggregate_summary_sha256": "756cbcdad38c177fb58a5f56b14c6fe0bb4dbdaf28982d88e9cfb979d6a90dbf",
+    "replicate_aggregate_summary_sha256": "d7f15864650d0e3f024f00839c2d2b1c50c48d6d88636315ae5505f4f4fa4514",
     "replicate_aggregate_inputs": [
       {
         "replicate_seed": 20260814,
         "summary_path": "aggregate-seed-20260814/nex326_summary.json",
-        "summary_sha256": "5fa40ff65854839208a55131a9bc7a392a152d4ca422dec404c2a197673a309b",
+        "summary_sha256": "2522ba229902f22bbc669446ab3a7ce5ab980dcfd4294ef5424b03edadb12563",
         "comparisons_path": "aggregate-seed-20260814/nex326_pilot_comparisons.csv",
         "comparisons_sha256": "087216fc40e4da8bf85b3e7cdd5496c6494a50775ec8029a9f24ab3b11201351"
       },
       {
         "replicate_seed": 20260815,
         "summary_path": "aggregate-seed-20260815/nex326_summary.json",
-        "summary_sha256": "5077a339039b558bf78d6612beafe620dc924152378e2117c89e23e20cd6ec45",
+        "summary_sha256": "77a19975fd9dd58721a64cb0ba11d6e784307402145cd34fcbe69536f9271de0",
         "comparisons_path": "aggregate-seed-20260815/nex326_pilot_comparisons.csv",
         "comparisons_sha256": "b3563f09779c73292b8c7cab4c8ef000ad6d3bb57b44f09b365d5cb81a6c7a4b"
       },
       {
         "replicate_seed": 20260816,
         "summary_path": "aggregate-seed-20260816/nex326_summary.json",
-        "summary_sha256": "b72f35038240ec92dee6252bb6e2acdb15143bdc79b3b19ca727bcc9216af4f2",
+        "summary_sha256": "a6c86c20503fff53d8311a447fe130facee82a0778f5c7cc7296b4c7f388a785",
         "comparisons_path": "aggregate-seed-20260816/nex326_pilot_comparisons.csv",
         "comparisons_sha256": "4008b28811c57b4413f6c78b23518c3821d194df79fc5ccbc595ef987e0a7a9e"
       }

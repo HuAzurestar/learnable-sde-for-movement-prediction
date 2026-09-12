@@ -11,7 +11,11 @@ import pytest
 
 from experiments.nex326.cohort import load_cohort
 from experiments.nex326.dsde_pilot import materialize_dsde_zhejiang_pilot
-from experiments.nex326.endpoint_prior import EndpointPriorError, attach_endpoint_priors
+from experiments.nex326.endpoint_prior import (
+    EndpointPriorError,
+    attach_endpoint_priors,
+    write_endpoint_prior_request,
+)
 from experiments.nex326.fidelity import build_fidelity_report, write_fidelity_report
 from experiments.nex326.model import build_transition_data, train_model
 from experiments.nex326.pilot_receipt import PilotReceiptError, build_pilot_receipt
@@ -211,6 +215,8 @@ def test_bridge_runtime_paths_are_distinct_for_identical_inputs():
     assert solved[3] is not None and solved[3].shape == (4, 9, 2)
     assert np.allclose(solved[3][:, -1], solved[0])
     assert solved[4] is not None and solved[4]["converged"] is True
+    assert solved[4]["realized_terminal_particle_coverage"] == 1.0
+    assert len(np.unique(solved[0], axis=0)) == len(samples)
 
 
 def test_particle_schrodinger_bridge_refuses_nonconvergence():
@@ -600,6 +606,23 @@ def test_dsde_zhejiang_adapter_materializes_a_disjoint_20_percent_pilot(tmp_path
     assert bridge_record["failure"]["reason"] == (
         "DSDE Zhejiang pilot has no independent endpoint-prior feed"
     )
+
+    request_path = tmp_path / "endpoint_prior_request.json"
+    request = write_endpoint_prior_request(cohort_path, request_path)
+    assert request["schema_version"] == "nex326-endpoint-prior-request-v1"
+    assert request["cohort"]["fingerprint"] == cohort.fingerprint
+    assert len(request["records"]) == len(cohort.splits["evaluation"])
+    requested = request["records"][0]
+    source_segment = payload["splits"]["evaluation"][0]
+    assert requested["segment_id"] == source_segment["segment_id"]
+    assert len(requested["observed_state"]) < len(source_segment["state"])
+    assert source_segment["state"][-1] not in requested["observed_state"]
+    assert request["provider_requirements"]["prohibited_inputs"] == [
+        "evaluation states after the final observed_time entry",
+        "evaluation endpoint targets",
+    ]
+    with pytest.raises(EndpointPriorError, match="output already exists"):
+        write_endpoint_prior_request(cohort_path, request_path)
 
     prior_feed = {
         "schema_version": "nex326-endpoint-prior-v1",

@@ -14,6 +14,7 @@ from .cohort import load_cohort
 
 
 PRIOR_SCHEMA_VERSION = "nex326-endpoint-prior-v1"
+REQUEST_SCHEMA_VERSION = "nex326-endpoint-prior-request-v1"
 
 
 class EndpointPriorError(ValueError):
@@ -157,12 +158,104 @@ def attach_endpoint_priors(
     return payload
 
 
+def write_endpoint_prior_request(
+    cohort_path: Path | str,
+    output_path: Path | str,
+) -> dict[str, object]:
+    """Export only the observed prefix needed by an independent prior provider."""
+    cohort_file = Path(cohort_path)
+    destination = Path(output_path)
+    if not cohort_file.is_file():
+        raise EndpointPriorError("cohort file does not exist")
+    if destination.exists():
+        raise EndpointPriorError(f"output already exists: {destination}")
+    cohort = load_cohort(cohort_file)
+    source = _load_mapping(cohort_file, "cohort")
+    if "generator" in source or not isinstance(source.get("splits"), Mapping):
+        raise EndpointPriorError("endpoint-prior requests require a materialized cohort")
+    evaluation = cohort.splits["evaluation"]
+    if not evaluation:
+        raise EndpointPriorError("cohort has no evaluation segments")
+    if any(segment.endpoint_prior_mean is not None for segment in evaluation):
+        raise EndpointPriorError("cohort already contains endpoint priors")
+
+    records: list[dict[str, object]] = []
+    for segment in evaluation:
+        cutoff = max(1, len(segment.time) // 2 - 1)
+        records.append(
+            {
+                "segment_id": segment.segment_id,
+                "source_domain": segment.source_domain,
+                "region": segment.region,
+                "observed_time": segment.time[: cutoff + 1].tolist(),
+                "observed_state": segment.state[: cutoff + 1].tolist(),
+                "observed_conditions": {
+                    name: values[: cutoff + 1].tolist()
+                    for name, values in sorted(segment.conditions.items())
+                },
+                "forecast_horizon": float(segment.time[-1] - segment.time[cutoff]),
+            }
+        )
+    request: dict[str, object] = {
+        "schema_version": REQUEST_SCHEMA_VERSION,
+        "purpose": "independent_endpoint_prior_generation",
+        "cohort": {
+            "dataset_id": cohort.dataset_id,
+            "data_version": cohort.data_version,
+            "fingerprint": cohort.fingerprint,
+            "file": cohort_file.name,
+            "sha256": _sha256(cohort_file),
+        },
+        "state_space": "cohort_native_2d_xy",
+        "inference_cut_rule": "max(1, segment_length // 2 - 1)",
+        "record_count": len(records),
+        "provider_requirements": {
+            "output_schema": PRIOR_SCHEMA_VERSION,
+            "one_record_per_segment": True,
+            "required_distribution": "finite 2D mean and symmetric positive-definite 2x2 covariance",
+            "prohibited_inputs": [
+                "evaluation states after the final observed_time entry",
+                "evaluation endpoint targets",
+            ],
+            "required_attestation": [
+                "derived_from_evaluation_truth=false",
+                "method",
+                "responsible_party",
+            ],
+        },
+        "records": records,
+    }
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(request, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    return request
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cohort", type=Path, required=True)
-    parser.add_argument("--prior", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--prior", type=Path)
+    mode.add_argument("--emit-request", action="store_true")
     args = parser.parse_args(argv)
+    if args.emit_request:
+        request = write_endpoint_prior_request(args.cohort, args.output)
+        print(
+            json.dumps(
+                {
+                    "schema_version": request["schema_version"],
+                    "record_count": request["record_count"],
+                    "cohort": request["cohort"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    assert args.prior is not None
     payload = attach_endpoint_priors(args.cohort, args.prior, args.output)
     print(
         json.dumps(
@@ -182,4 +275,9 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-__all__ = ["EndpointPriorError", "attach_endpoint_priors", "main"]
+__all__ = [
+    "EndpointPriorError",
+    "attach_endpoint_priors",
+    "main",
+    "write_endpoint_prior_request",
+]

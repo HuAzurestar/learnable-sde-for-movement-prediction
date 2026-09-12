@@ -110,10 +110,14 @@ def solve_particle_schrodinger_bridge(
         tolerance=tolerance,
     )
 
-    flat = coupling.ravel()
-    flat /= flat.sum()
-    pair_indices = rng.choice(flat.size, size=count, replace=True, p=flat)
-    start_indices, target_indices = np.unravel_index(pair_indices, coupling.shape)
+    # Draw one conditional start for every terminal particle.  This stratification
+    # preserves the sampled terminal marginal exactly instead of only in expectation.
+    target_indices = np.arange(count)
+    start_indices = np.empty(count, dtype=int)
+    for target_index in target_indices:
+        conditional = coupling[:, target_index].copy()
+        conditional /= conditional.sum()
+        start_indices[target_index] = rng.choice(count, p=conditional)
     starts = samples[start_indices]
     endpoints = targets[target_indices]
     times = np.linspace(0.0, 1.0, time_steps + 1)
@@ -144,6 +148,9 @@ def solve_particle_schrodinger_bridge(
         "tolerance": tolerance,
         "max_marginal_error": marginal_error,
         "converged": True,
+        "path_sampling": "one_conditional_start_per_terminal_particle",
+        "realized_terminal_particle_coverage": 1.0,
+        "realized_initial_unique_fraction": float(len(np.unique(start_indices)) / count),
         "transport_cost": float(np.sum(coupling * cost)),
         "terminal_mean_error": float(np.linalg.norm(endpoints.mean(axis=0) - mean)),
         "terminal_covariance_error": float(np.linalg.norm(endpoint_covariance - covariance)),
