@@ -188,6 +188,19 @@ rule remain unchanged. A stopping rule is also registered: if this nested residu
 does not pass the exploratory gate, no further terrain feature variants are added in
 this reconstruction cycle.
 
+The recorded v5 run passed the exploratory gate, but only as a small pilot effect.
+Relative to contour-distance v3, mean paired Energy Score improved by `-0.16278`
+with all three sampling seeds in the same direction; CEP50 improved by `-0.12626`
+and HDR90 coverage was unchanged. Averaging each trajectory over its three sampling
+seeds, 16 of 28 evaluation segments improved and 12 worsened; the median delta was
+`-0.11406`. Across all 84 seed-segment pairs, the median (`-0.08609`) and 10% trimmed
+mean (`-0.12781`) were also negative, so the mean is not carried by a single extreme
+case. Validation velocity-increment RMSE improved slightly from `0.56857` to
+`0.56840`, while endpoint velocity RMSE worsened by `+0.00245`. The fitted structural
+coefficient was small (`lambda_normal=-0.001384`). This supports retaining v5 as the
+best bounded terrain variant, not claiming a scientific verdict: the three runs vary
+prediction sampling only and reuse the same fitted cohort and evaluation segments.
+
 For a bounded run on the registered DSDE Zhejiang holdout, first materialize the
 deterministic 20%-by-segment pilot cohort without copying the source parquet into this
 repository:
