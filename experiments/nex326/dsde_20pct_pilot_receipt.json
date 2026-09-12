@@ -4,8 +4,8 @@
   "spec_version": "nex326-process-v2",
   "scientific_status": "pilot_not_final_scientific_evidence",
   "implementation": {
-    "source_bundle_sha256": "d06e7abd94e13c0b0a54dbbac68469f1b436720328a1490ee50762c8d9d1f081",
-    "execution_identity_sha256": "0d3753d2a074cd79dd6c7d42ec63931f99b590b7b047528eed857c22cc1a2956",
+    "source_bundle_sha256": "8f814f8527a013832ced3adc428991b502528488648b82364ee33ec5a5fd4908",
+    "execution_identity_sha256": "81d0ee35890cb9cc7a3ac6c8f393888fb5998ab37bf89768be5a032b85ac3db1",
     "files": [
       {
         "path": "cohort.py",
@@ -25,7 +25,7 @@
       },
       {
         "path": "runner.py",
-        "sha256": "8fb4a45d8ee1ea77dbaacd6a1b1639ea883c3f3e85134e35c3c089085dfae5b6"
+        "sha256": "d69b2ddb0b5a48edb63a20a3b00494b8b0d4aa38405542db2af707cb7f0904a0"
       },
       {
         "path": "schrodinger.py",
@@ -123,15 +123,14 @@
       "bootstrap_seed": 20260814,
       "status": {
         "reference": 8,
-        "exploratory_point_estimate": 22,
-        "data_unavailable": 5,
-        "requires_coverage_matched_reference": 1
+        "exploratory_point_estimate": 23,
+        "data_unavailable": 5
       },
       "uncertainty_status": {
         "reference": 8,
-        "complete": 21,
+        "complete": 22,
         "partial_closed_energy_not_resampled": 1,
-        "not_applicable": 6
+        "not_applicable": 5
       }
     },
     "data_unavailable": [
@@ -169,13 +168,13 @@
   },
   "integrity": {
     "cohort_sha256": "646420b38d5110b6b9727b50447f96c59635ecfbade92210021c5d430b73dc04",
-    "run_manifest_sha256": "b284a520ab1e95c81e8f1d9af71c8dd00b78699a50d54b48bb0dd2605cf09d02",
-    "run_record_set_sha256": "e91e113c21a2121cd93397f2cc334e76bcb81e2b401ed4d20840ccf252e1aefa",
-    "tsde_summary_sha256": "73dc0d22353372da58526928b5bd5ddf9920481f6b746aae8f966e5a50a379ab",
+    "run_manifest_sha256": "14ef2c6633e9ae5457847cea2ba684dc4efebc493e98c21cf5bae01e93b7b7ca",
+    "run_record_set_sha256": "c22aec45d776cb651d0aab14fdd5a7f3952b41ea5e77c7515729fa6612119cce",
+    "tsde_summary_sha256": "3a8c0d7e315804131d8273965f0b1cbde3511e2482baeb7e3b541388b1d1ba8e",
     "tsde_artifacts": {
       "nex326_process.csv": {
         "path": "nex326_process.csv",
-        "sha256": "b56b0fbac91ac31eaef1b2170d4594d243c034958a9c309b2f9bac4efc5ab5c5",
+        "sha256": "1080412ba38079f430e6f0a969c8423b6bdf52b84a22d24ccc9708c6008393c4",
         "size_bytes": 10732
       },
       "nex326_status.csv": {
@@ -185,8 +184,8 @@
       },
       "nex326_pilot_comparisons.csv": {
         "path": "nex326_pilot_comparisons.csv",
-        "sha256": "694814dd3c2ad5981a186ebbe78e79f9e3c5dab5a25c3875c7592573d05afd72",
-        "size_bytes": 13107
+        "sha256": "5de175bedd0eb64d5883473f4fbd1f4e9d0eb6795d94a334ba62275a6fbff1a2",
+        "size_bytes": 13312
       },
       "nex326_test_plot.svg": {
         "path": "nex326_test_plot.svg",

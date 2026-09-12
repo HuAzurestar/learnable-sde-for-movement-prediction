@@ -19,8 +19,8 @@
     "fingerprint": "c4eb7a337c13241928a543c839a21714da358d150de5befe6238b712fb4a7e48"
   },
   "implementation": {
-    "source_bundle_sha256": "d06e7abd94e13c0b0a54dbbac68469f1b436720328a1490ee50762c8d9d1f081",
-    "execution_identity_sha256": "0d3753d2a074cd79dd6c7d42ec63931f99b590b7b047528eed857c22cc1a2956",
+    "source_bundle_sha256": "8f814f8527a013832ced3adc428991b502528488648b82364ee33ec5a5fd4908",
+    "execution_identity_sha256": "81d0ee35890cb9cc7a3ac6c8f393888fb5998ab37bf89768be5a032b85ac3db1",
     "files": [
       {
         "path": "cohort.py",
@@ -40,7 +40,7 @@
       },
       {
         "path": "runner.py",
-        "sha256": "8fb4a45d8ee1ea77dbaacd6a1b1639ea883c3f3e85134e35c3c089085dfae5b6"
+        "sha256": "d69b2ddb0b5a48edb63a20a3b00494b8b0d4aa38405542db2af707cb7f0904a0"
       },
       {
         "path": "schrodinger.py",
@@ -69,9 +69,8 @@
   },
   "comparison_status": {
     "reference": 8,
-    "exploratory_point_estimate": 22,
-    "data_unavailable": 5,
-    "requires_coverage_matched_reference": 1
+    "exploratory_point_estimate": 23,
+    "data_unavailable": 5
   },
   "replicate_status": {
     "succeeded": 31,
@@ -79,56 +78,56 @@
   },
   "method": "descriptive_across_replicate_seeds_no_inferential_ci",
   "integrity": {
-    "batch_manifest_sha256": "42a5a6760732b04e1f163ebd634509967183ca4ca0da86fa56bd40b14679de62",
+    "batch_manifest_sha256": "038e849b71374f6b2515d056449637a3d39a2da66bff69ac5cb1e806df9c1026",
     "per_seed_manifests": [
       {
         "replicate_seed": 20260814,
         "path": "seed-20260814/manifest.json",
-        "sha256": "b284a520ab1e95c81e8f1d9af71c8dd00b78699a50d54b48bb0dd2605cf09d02",
+        "sha256": "14ef2c6633e9ae5457847cea2ba684dc4efebc493e98c21cf5bae01e93b7b7ca",
         "size_bytes": 4488
       },
       {
         "replicate_seed": 20260815,
         "path": "seed-20260815/manifest.json",
-        "sha256": "cd3b524fe98ba8a39414642c8e781afd2344760a27965e50a50a342957c49dc4",
+        "sha256": "1112ff737fa25241b9e4847c86284f60ee52e0f0e4506b6ddfbc1571959d6e92",
         "size_bytes": 4488
       },
       {
         "replicate_seed": 20260816,
         "path": "seed-20260816/manifest.json",
-        "sha256": "4997ae9747e6abb820acdcd5f4478f44276464a988a21a3eadad76d31bfd35d9",
+        "sha256": "a59cc88fa7f5a9bd3c28ec4ab17bc9849b27e811263a2df8c682b9749e842a5b",
         "size_bytes": 4488
       }
     ],
-    "replicate_aggregate_summary_sha256": "60ba5684bb30a01e770598598f1bd100a153248fa0626a42c731a8632f9a904e",
+    "replicate_aggregate_summary_sha256": "92ba950dcad12383b562ea5309aed4c92d921d45f2d580cf26dff4dab568228a",
     "replicate_aggregate_inputs": [
       {
         "replicate_seed": 20260814,
         "summary_path": "aggregate-seed-20260814/nex326_summary.json",
-        "summary_sha256": "73dc0d22353372da58526928b5bd5ddf9920481f6b746aae8f966e5a50a379ab",
+        "summary_sha256": "3a8c0d7e315804131d8273965f0b1cbde3511e2482baeb7e3b541388b1d1ba8e",
         "comparisons_path": "aggregate-seed-20260814/nex326_pilot_comparisons.csv",
-        "comparisons_sha256": "694814dd3c2ad5981a186ebbe78e79f9e3c5dab5a25c3875c7592573d05afd72"
+        "comparisons_sha256": "5de175bedd0eb64d5883473f4fbd1f4e9d0eb6795d94a334ba62275a6fbff1a2"
       },
       {
         "replicate_seed": 20260815,
         "summary_path": "aggregate-seed-20260815/nex326_summary.json",
-        "summary_sha256": "6f358ccea334657859f19040d0732d0aa0b872189a0788a9a2bad4659907b21f",
+        "summary_sha256": "2a59da4fbf6b52d272e981943f154b19370e922ec6452c0b5250e8fc62e052d9",
         "comparisons_path": "aggregate-seed-20260815/nex326_pilot_comparisons.csv",
-        "comparisons_sha256": "75024e0100ca98edb265d1be016264e8e4442e90a0c2fc974210885141e2ae72"
+        "comparisons_sha256": "b8ac72baf913c1465f311caebecde7753e012d3eec6b033f75373f0e7c2ff03b"
       },
       {
         "replicate_seed": 20260816,
         "summary_path": "aggregate-seed-20260816/nex326_summary.json",
-        "summary_sha256": "e66d8b97eaae4c164a2e9ee0c9311edeca82a8eefdc9308ac7ab49a1431f115e",
+        "summary_sha256": "ce9a475da05a4e55cfd6d4ba8cab0f2c9e7ca9880ece41fde650a18cbfbf4182",
         "comparisons_path": "aggregate-seed-20260816/nex326_pilot_comparisons.csv",
-        "comparisons_sha256": "f2f72431c49354ee6c7ce3d6748815ff407aa311b09f58bfc8a3ec6fa7d03e50"
+        "comparisons_sha256": "d48d49881e11f24448ba060b76517a2d280426aaa265d3e1beebe0b3b8603629"
       }
     ],
     "replicate_aggregate_artifacts": {
       "nex326_cross_replicate_comparisons.csv": {
         "path": "nex326_cross_replicate_comparisons.csv",
-        "sha256": "7c84a8de05825068778e1bd690f8cd5aa1ee247a80131f67740f329321fa1d51",
-        "size_bytes": 10264
+        "sha256": "32be171b840824b0a311d42a40a1a259a2c0565be1721ff28111f664b458b6b2",
+        "size_bytes": 10467
       }
     }
   }

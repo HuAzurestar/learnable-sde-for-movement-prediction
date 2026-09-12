@@ -135,6 +135,15 @@ def _stable_seed(base: int, arm_id: int, subconfig_id: str) -> int:
     return (base + arm_id * 1009 + suffix) % (2**32 - 1)
 
 
+def _segment_ids_sha256(segments: Sequence[Segment]) -> str:
+    canonical = json.dumps(
+        [segment.segment_id for segment in segments],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def implementation_identity() -> dict[str, object]:
     """Hash the exact local sources and runtime versions that determine an execution."""
     root = Path(__file__).resolve().parent
@@ -1081,6 +1090,10 @@ class NEX326Runner:
                 "fingerprint": self.cohort.fingerprint,
                 "purpose": self.cohort.purpose,
                 "split_counts": {name: len(values) for name, values in selected.items()},
+                "selected_segment_ids_sha256": {
+                    name: _segment_ids_sha256(values)
+                    for name, values in selected.items()
+                },
                 "spatial_conditions": condition_identity,
             },
             "config": config,

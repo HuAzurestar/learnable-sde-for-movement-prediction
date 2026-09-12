@@ -608,6 +608,7 @@ def test_arm17_terrain_uses_dynamic_position_lookup_without_future_route_leakage
     assert record["runtime"]["spatial_condition_propagation"] == (
         "local_gaussian_mean_closure"
     )
+    assert len(record["dataset"]["selected_segment_ids_sha256"]["evaluation"]) == 64
     assert any(call.shape == (1, 2) for call in resolver.calls)
 
     config = runner._config(terrain)

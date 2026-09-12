@@ -79,6 +79,11 @@
           "required": ["train", "validation", "adapt", "evaluation", "animal_pretrain"],
           "additionalProperties": {"type": "integer", "minimum": 0}
         },
+        "selected_segment_ids_sha256": {
+          "type": "object",
+          "required": ["train", "validation", "adapt", "evaluation", "animal_pretrain"],
+          "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        },
         "spatial_conditions": {"type": ["object", "null"]}
       }
     },

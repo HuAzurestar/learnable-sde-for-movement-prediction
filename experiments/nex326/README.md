@@ -278,6 +278,15 @@ The tracked 20% DSDE receipt uses seeds `20260814..20260816`: all three replicas
 terrain is the additional succeeded execution. The remaining unavailable set is Arm 13
 animal transfer, Arm 17 weather, and the three expert-prior Arm 22 variants.
 
+Every succeeded RunRecord hashes the ordered segment IDs for each selected split. TSDE
+therefore compares Arm 17 terrain with the Arm 16 Full reference only when their
+evaluation-selection hashes match exactly. In the tracked pilot they do match. Across
+three seeds, terrain's Energy Score delta is consistently positive (mean `+5.91289`,
+lower is better), while CEP50 error is consistently lower (mean `-21.36536`) and HDR90
+coverage increases by `+0.11905` on average. The per-seed paired-segment Energy and
+CEP50 intervals all cross zero, so this mixed result remains exploratory and
+`not_assessed`.
+
 After aggregating each seed independently, produce a descriptive cross-replicate table:
 
 ```console
