@@ -1,0 +1,199 @@
+{
+  "schema_version": "nex326-dsde-pilot-receipt-v1",
+  "experiment_id": "NEX326",
+  "spec_version": "nex326-process-v2",
+  "scientific_status": "pilot_not_final_scientific_evidence",
+  "implementation": {
+    "source_bundle_sha256": "a2498220815a70aa92c67034a0ae7e5a7d437a2e55fa614daecd0e7826889606",
+    "execution_identity_sha256": "fbc05b96f9cbac44b5e7a7a3425852328a94ea3ca31a991e0c0077056a49db1e",
+    "files": [
+      {
+        "path": "cohort.py",
+        "sha256": "e59617dc9b84fe5071ab94e2555f90af4199c3adb6c370c2cc206ba44f38af15"
+      },
+      {
+        "path": "environment.lock.json",
+        "sha256": "88cbe7947af98bf227242f909ed8355cae4af633a6863925fcd7bd1a1cc0774f"
+      },
+      {
+        "path": "experiment.json",
+        "sha256": "f12dc97a20667212b206e46dd274706b8bf799ee54871729727938d2a7d9e54a"
+      },
+      {
+        "path": "model.py",
+        "sha256": "973f287190c445206084cb017181beec09c57a92e53b7cae16ac56c6c5b4bc32"
+      },
+      {
+        "path": "runner.py",
+        "sha256": "8733519281cd36ea55ccc922c66f52887a61e765f1da98a5fadc5340a86fad86"
+      },
+      {
+        "path": "schrodinger.py",
+        "sha256": "20cff64402392ec509112999c4ffd8e81549d1f20406cfe5f09d1635c1468973"
+      },
+      {
+        "path": "specification.py",
+        "sha256": "31e7d6c496c63bdcfd76c666810bc4851ae5e5e5fd86e1d842442314abecfdd2"
+      }
+    ],
+    "environment_lock": {
+      "path": "environment.lock.json",
+      "sha256": "88cbe7947af98bf227242f909ed8355cae4af633a6863925fcd7bd1a1cc0774f",
+      "conformant": true
+    },
+    "runtime": {
+      "python": "3.10.13",
+      "numpy": "1.26.4",
+      "pandas": "2.2.3",
+      "pyarrow": "24.0.0"
+    }
+  },
+  "dataset": {
+    "dataset_id": "NEX326-DSDE-ZHEJIANG-20P-PILOT-001",
+    "data_version": "nex313-zhejiang-349f06edc08f-20pct-pilot-v1",
+    "purpose": "real_trajectory_20pct_pilot_not_final_scientific_evidence",
+    "source": {
+      "registry": "DSDE NEX-313 Zhejiang holdout",
+      "trajectory_file": "zhejiang_holdout.parquet",
+      "trajectory_sha256": "349f06edc08f2c92453440019e6b116f82c92819d2231da318b0af22f1fe2008",
+      "splits_file": "zhejiang_splits.json",
+      "splits_sha256": "7d99184e6a14bda7f1ce94d659f8c1f15fc4eaf4d2b51452f8d2e18de157ea4f",
+      "license": "ODbL-derived research data; not embedded in the repository"
+    },
+    "selection": {
+      "seed": 20260814,
+      "sample_fraction": 0.2,
+      "unit": "segment_within_file_disjoint_split",
+      "meta_task_unit": "city_with_region_fallback",
+      "finetune_partition": "80_percent_train_20_percent_adapt_by_seeded_file_hash",
+      "source_usable_segments": {
+        "train": 524,
+        "adapt": 156,
+        "validation": 160,
+        "evaluation": 136
+      },
+      "materialized_segments": {
+        "train": 105,
+        "adapt": 32,
+        "validation": 32,
+        "evaluation": 28,
+        "animal_pretrain": 0
+      },
+      "skipped_unusable_segments": {
+        "train": 0,
+        "adapt": 0,
+        "validation": 33,
+        "evaluation": 6
+      }
+    }
+  },
+  "execution": {
+    "arm_count": 22,
+    "execution_count": 36,
+    "requested_prediction_samples": 64,
+    "protocol_seed": 20260814,
+    "replicate_seed": 20260814,
+    "effective_prediction_samples": {
+      "64": 29,
+      "256": 1,
+      "not_run": 6
+    },
+    "run_status": {
+      "succeeded": 30,
+      "data_unavailable": 6
+    },
+    "verdict": {
+      "not_assessed": 30,
+      "unavailable": 6
+    },
+    "mechanism_status": {
+      "passed": 30,
+      "not_run": 6
+    },
+    "comparison": {
+      "scientific_status": "exploratory_only",
+      "assessment": "not_assessed",
+      "method": "registered_reference_point_estimates",
+      "uncertainty_method": "paired_evaluation_segment_bootstrap_only",
+      "bootstrap_iterations": 1000,
+      "bootstrap_seed": 20260814,
+      "status": {
+        "reference": 8,
+        "exploratory_point_estimate": 22,
+        "data_unavailable": 6
+      },
+      "uncertainty_status": {
+        "reference": 8,
+        "complete": 21,
+        "partial_closed_energy_not_resampled": 1,
+        "not_applicable": 6
+      }
+    },
+    "data_unavailable": [
+      {
+        "arm_id": 13,
+        "subconfig_id": "animal_pretrain",
+        "stage": "load_versioned_data",
+        "reason": "DSDE Zhejiang holdout contains human trajectories only"
+      },
+      {
+        "arm_id": 17,
+        "subconfig_id": "terrain",
+        "stage": "adapt_features",
+        "reason": "DSDE Zhejiang pilot has no aligned terrain"
+      },
+      {
+        "arm_id": 17,
+        "subconfig_id": "weather",
+        "stage": "adapt_features",
+        "reason": "DSDE Zhejiang pilot has no aligned weather"
+      },
+      {
+        "arm_id": 22,
+        "subconfig_id": "doob",
+        "stage": "inference",
+        "reason": "DSDE Zhejiang pilot has no independent endpoint-prior feed"
+      },
+      {
+        "arm_id": 22,
+        "subconfig_id": "sb",
+        "stage": "inference",
+        "reason": "DSDE Zhejiang pilot has no independent endpoint-prior feed"
+      },
+      {
+        "arm_id": 22,
+        "subconfig_id": "soft_endpoint",
+        "stage": "inference",
+        "reason": "DSDE Zhejiang pilot has no independent endpoint-prior feed"
+      }
+    ]
+  },
+  "integrity": {
+    "cohort_sha256": "646420b38d5110b6b9727b50447f96c59635ecfbade92210021c5d430b73dc04",
+    "run_manifest_sha256": "6cbcdd5056846afc187538e3f08d29bf3bc42882b3b19cedde604c9825cc7b68",
+    "run_record_set_sha256": "5d8b97c4ccd0d54e8fb2e5fa449f1b9a4fd5a8efa635aedf6afe0d0aa3fdf948",
+    "tsde_summary_sha256": "5fa40ff65854839208a55131a9bc7a392a152d4ca422dec404c2a197673a309b",
+    "tsde_artifacts": {
+      "nex326_process.csv": {
+        "path": "nex326_process.csv",
+        "sha256": "2490ed9c07e5114b150ff43a16bc8b37cd657f33ff28b05ebd10da212b88feb7",
+        "size_bytes": 10659
+      },
+      "nex326_status.csv": {
+        "path": "nex326_status.csv",
+        "sha256": "d3d22efb1fff7bba160aa868828ad970e068a99c62b0a1f46308e4b7dd0e0e76",
+        "size_bytes": 1628
+      },
+      "nex326_pilot_comparisons.csv": {
+        "path": "nex326_pilot_comparisons.csv",
+        "sha256": "087216fc40e4da8bf85b3e7cdd5496c6494a50775ec8029a9f24ab3b11201351",
+        "size_bytes": 13042
+      },
+      "nex326_test_plot.svg": {
+        "path": "nex326_test_plot.svg",
+        "sha256": "1551379ac7e4158679adc542e90e07a5b986e3b2f9541d478f96315e70c98717",
+        "size_bytes": 3448
+      }
+    }
+  }
+}

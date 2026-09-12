@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nex326-run-record-v2",
+  "type": "object",
+  "required": [
+    "schema_version", "experiment_id", "spec_version", "run_id", "result_id",
+    "arm_id", "subconfig_id", "group", "lineage", "implementation_status", "implementation",
+    "run_status", "verdict", "dataset", "config", "runtime", "seed", "replicate_seed", "stages",
+    "artifacts", "metrics", "mechanism_gates"
+  ],
+  "properties": {
+    "schema_version": {"const": "nex326-run-record-v2"},
+    "experiment_id": {"const": "NEX326"},
+    "spec_version": {"const": "nex326-process-v2"},
+    "run_id": {"type": "string", "minLength": 1},
+    "result_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "arm_id": {"type": "integer", "minimum": 1, "maximum": 22},
+    "subconfig_id": {"type": "string", "minLength": 1},
+    "group": {"enum": ["model", "algorithm", "learning", "inference"]},
+    "lineage": {
+      "type": "object",
+      "required": ["idea_ids", "sources", "role", "confidence"],
+      "properties": {
+        "idea_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "sources": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "role": {"type": "string", "minLength": 1},
+        "confidence": {"enum": ["explicit", "conflict", "inferred"]},
+        "source_correction": {"type": ["object", "null"]}
+      }
+    },
+    "implementation_status": {"const": "implemented"},
+    "implementation": {
+      "type": "object",
+      "required": ["source_bundle_sha256", "execution_identity_sha256", "files", "environment_lock", "runtime"],
+      "properties": {
+        "source_bundle_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "execution_identity_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["path", "sha256"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        },
+        "environment_lock": {
+          "type": "object",
+          "required": ["path", "sha256", "conformant"],
+          "properties": {
+            "path": {"const": "environment.lock.json"},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "conformant": {"type": "boolean"}
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "required": ["python", "numpy", "pandas", "pyarrow"],
+          "additionalProperties": {"type": "string"}
+        }
+      }
+    },
+    "run_status": {"enum": ["succeeded", "failed", "data_unavailable"]},
+    "verdict": {"enum": ["not_assessed", "retain", "redundant", "harmful", "inconclusive", "unavailable"]},
+    "dataset": {
+      "type": "object",
+      "required": ["dataset_id", "schema_version", "data_version", "fingerprint", "purpose", "split_counts"],
+      "properties": {
+        "dataset_id": {"type": "string", "minLength": 1},
+        "schema_version": {"const": "nex326-cohort-v1"},
+        "data_version": {"type": "string", "minLength": 1},
+        "fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "purpose": {"type": "string", "minLength": 1},
+        "split_counts": {
+          "type": "object",
+          "required": ["train", "validation", "adapt", "evaluation", "animal_pretrain"],
+          "additionalProperties": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "config": {"type": "object"},
+    "runtime": {
+      "type": "object",
+      "required": ["requested_prediction_samples", "effective_prediction_samples"],
+      "properties": {
+        "requested_prediction_samples": {"type": "integer", "minimum": 1},
+        "effective_prediction_samples": {"type": ["integer", "null"], "minimum": 1}
+      }
+    },
+    "seed": {"type": "integer"},
+    "replicate_seed": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "stages": {
+      "type": "array", "minItems": 11, "maxItems": 11,
+      "items": {"$ref": "#/$defs/stage"}
+    },
+    "artifacts": {
+      "type": "object", "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/artifact_reference"}
+    },
+    "metrics": {"type": "object", "additionalProperties": {"type": "number"}},
+    "mechanism_gates": {
+      "type": "array", "minItems": 1,
+      "items": {"$ref": "#/$defs/mechanism_gate"}
+    },
+    "failure": {"type": ["object", "null"]}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"run_status": {"const": "succeeded"}}},
+      "then": {
+        "properties": {
+          "artifacts": {"required": ["checkpoint", "predictions", "metrics", "mechanism"]},
+          "metrics": {"required": ["energy_score_d2", "hdr90_coverage", "cep50_error"], "minProperties": 3},
+          "runtime": {
+            "properties": {"effective_prediction_samples": {"type": "integer", "minimum": 1}}
+          },
+          "verdict": {"enum": ["not_assessed", "retain", "redundant", "harmful", "inconclusive"]},
+          "stages": {"items": {"properties": {"status": {"const": "completed"}}}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"run_status": {"const": "data_unavailable"}}},
+      "then": {
+        "required": ["failure"],
+        "properties": {
+          "artifacts": {"required": ["availability"]},
+          "metrics": {"maxProperties": 0},
+          "runtime": {
+            "properties": {"effective_prediction_samples": {"type": "null"}}
+          },
+          "verdict": {"const": "unavailable"},
+          "failure": {"$ref": "#/$defs/failure"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"run_status": {"const": "failed"}}},
+      "then": {
+        "required": ["failure"],
+        "properties": {
+          "runtime": {
+            "properties": {"effective_prediction_samples": {"type": "null"}}
+          },
+          "failure": {"$ref": "#/$defs/failure"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "stage": {
+      "type": "object",
+      "required": ["name", "status"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "status": {"enum": ["completed", "failed", "data_unavailable", "not_run"]}
+      }
+    },
+    "artifact_reference": {
+      "type": "object",
+      "required": ["path", "sha256", "size_bytes"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "mechanism_gate": {
+      "type": "object",
+      "required": ["statistic", "value", "operator", "threshold", "passed", "sample_size"],
+      "properties": {
+        "statistic": {"type": "string", "minLength": 1},
+        "value": {"type": "number"},
+        "operator": {"enum": ["ge", "le"]},
+        "threshold": {"type": "number"},
+        "passed": {"type": "boolean"},
+        "sample_size": {"type": "integer", "minimum": 0}
+      }
+    },
+    "failure": {
+      "type": "object",
+      "required": ["stage", "reason", "category"],
+      "properties": {
+        "stage": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1},
+        "category": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

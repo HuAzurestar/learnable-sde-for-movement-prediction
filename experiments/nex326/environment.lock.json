@@ -1,0 +1,10 @@
+{
+  "schema_version": "nex326-environment-lock-v1",
+  "python": "3.10.13",
+  "packages": {
+    "numpy": "1.26.4",
+    "pandas": "2.2.3",
+    "pyarrow": "24.0.0"
+  },
+  "policy": "exact_versions_for_registered_dsde_20pct_pilot"
+}

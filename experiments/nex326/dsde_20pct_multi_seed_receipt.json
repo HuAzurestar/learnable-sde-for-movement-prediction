@@ -1,0 +1,130 @@
+{
+  "schema_version": "nex326-dsde-multi-seed-receipt-v1",
+  "experiment_id": "NEX326",
+  "spec_version": "nex326-process-v2",
+  "scientific_status": "exploratory_only_not_final_scientific_evidence",
+  "assessment": "not_assessed",
+  "protocol_seed": 20260814,
+  "replicate_seeds": [
+    20260814,
+    20260815,
+    20260816
+  ],
+  "replicate_count": 3,
+  "execution_count_per_replicate": 36,
+  "total_execution_count": 108,
+  "cohort": {
+    "source_file": "cohort.json",
+    "sha256": "646420b38d5110b6b9727b50447f96c59635ecfbade92210021c5d430b73dc04",
+    "fingerprint": "c4eb7a337c13241928a543c839a21714da358d150de5befe6238b712fb4a7e48"
+  },
+  "implementation": {
+    "source_bundle_sha256": "a2498220815a70aa92c67034a0ae7e5a7d437a2e55fa614daecd0e7826889606",
+    "execution_identity_sha256": "fbc05b96f9cbac44b5e7a7a3425852328a94ea3ca31a991e0c0077056a49db1e",
+    "files": [
+      {
+        "path": "cohort.py",
+        "sha256": "e59617dc9b84fe5071ab94e2555f90af4199c3adb6c370c2cc206ba44f38af15"
+      },
+      {
+        "path": "environment.lock.json",
+        "sha256": "88cbe7947af98bf227242f909ed8355cae4af633a6863925fcd7bd1a1cc0774f"
+      },
+      {
+        "path": "experiment.json",
+        "sha256": "f12dc97a20667212b206e46dd274706b8bf799ee54871729727938d2a7d9e54a"
+      },
+      {
+        "path": "model.py",
+        "sha256": "973f287190c445206084cb017181beec09c57a92e53b7cae16ac56c6c5b4bc32"
+      },
+      {
+        "path": "runner.py",
+        "sha256": "8733519281cd36ea55ccc922c66f52887a61e765f1da98a5fadc5340a86fad86"
+      },
+      {
+        "path": "schrodinger.py",
+        "sha256": "20cff64402392ec509112999c4ffd8e81549d1f20406cfe5f09d1635c1468973"
+      },
+      {
+        "path": "specification.py",
+        "sha256": "31e7d6c496c63bdcfd76c666810bc4851ae5e5e5fd86e1d842442314abecfdd2"
+      }
+    ],
+    "environment_lock": {
+      "path": "environment.lock.json",
+      "sha256": "88cbe7947af98bf227242f909ed8355cae4af633a6863925fcd7bd1a1cc0774f",
+      "conformant": true
+    },
+    "runtime": {
+      "python": "3.10.13",
+      "numpy": "1.26.4",
+      "pandas": "2.2.3",
+      "pyarrow": "24.0.0"
+    }
+  },
+  "comparison_status": {
+    "reference": 8,
+    "exploratory_point_estimate": 22,
+    "data_unavailable": 6
+  },
+  "replicate_status": {
+    "succeeded": 30,
+    "data_unavailable": 6
+  },
+  "method": "descriptive_across_replicate_seeds_no_inferential_ci",
+  "integrity": {
+    "batch_manifest_sha256": "7c7b0f1bc20fc9e3772c4ce107dcbbcae032b0af915e4b59ef67ca783323bd92",
+    "per_seed_manifests": [
+      {
+        "replicate_seed": 20260814,
+        "path": "seed-20260814/manifest.json",
+        "sha256": "6cbcdd5056846afc187538e3f08d29bf3bc42882b3b19cedde604c9825cc7b68",
+        "size_bytes": 4341
+      },
+      {
+        "replicate_seed": 20260815,
+        "path": "seed-20260815/manifest.json",
+        "sha256": "c8336838a57d321153aaa054928c4781a03cf687a24241911d4a7c9b3bdb7b8c",
+        "size_bytes": 4341
+      },
+      {
+        "replicate_seed": 20260816,
+        "path": "seed-20260816/manifest.json",
+        "sha256": "050f4f785e5cd9503601a73259105240fdaf92dfb7af3dca72f22848fe9b6578",
+        "size_bytes": 4341
+      }
+    ],
+    "replicate_aggregate_summary_sha256": "756cbcdad38c177fb58a5f56b14c6fe0bb4dbdaf28982d88e9cfb979d6a90dbf",
+    "replicate_aggregate_inputs": [
+      {
+        "replicate_seed": 20260814,
+        "summary_path": "aggregate-seed-20260814/nex326_summary.json",
+        "summary_sha256": "5fa40ff65854839208a55131a9bc7a392a152d4ca422dec404c2a197673a309b",
+        "comparisons_path": "aggregate-seed-20260814/nex326_pilot_comparisons.csv",
+        "comparisons_sha256": "087216fc40e4da8bf85b3e7cdd5496c6494a50775ec8029a9f24ab3b11201351"
+      },
+      {
+        "replicate_seed": 20260815,
+        "summary_path": "aggregate-seed-20260815/nex326_summary.json",
+        "summary_sha256": "5077a339039b558bf78d6612beafe620dc924152378e2117c89e23e20cd6ec45",
+        "comparisons_path": "aggregate-seed-20260815/nex326_pilot_comparisons.csv",
+        "comparisons_sha256": "b3563f09779c73292b8c7cab4c8ef000ad6d3bb57b44f09b365d5cb81a6c7a4b"
+      },
+      {
+        "replicate_seed": 20260816,
+        "summary_path": "aggregate-seed-20260816/nex326_summary.json",
+        "summary_sha256": "b72f35038240ec92dee6252bb6e2acdb15143bdc79b3b19ca727bcc9216af4f2",
+        "comparisons_path": "aggregate-seed-20260816/nex326_pilot_comparisons.csv",
+        "comparisons_sha256": "4008b28811c57b4413f6c78b23518c3821d194df79fc5ccbc595ef987e0a7a9e"
+      }
+    ],
+    "replicate_aggregate_artifacts": {
+      "nex326_cross_replicate_comparisons.csv": {
+        "path": "nex326_cross_replicate_comparisons.csv",
+        "sha256": "98a6546b96bba31c10e3bea254fc215f14089fd27734e9cd42ed98af0a275a4b",
+        "size_bytes": 10252
+      }
+    }
+  }
+}

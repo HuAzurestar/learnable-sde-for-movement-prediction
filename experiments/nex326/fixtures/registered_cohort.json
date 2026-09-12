@@ -1,0 +1,25 @@
+{
+  "schema_version": "nex326-cohort-v1",
+  "dataset_id": "NEX326-REGISTERED-IMPLEMENTATION-FIXTURE-001",
+  "data_version": "1.0.0",
+  "purpose": "implementation_fixture_not_scientific_evidence",
+  "license": "CC0-1.0 synthetic fixture",
+  "generator": {
+    "kind": "deterministic_coupled_motion_v1",
+    "seed": 20260814,
+    "points_per_segment": 13,
+    "dt_seconds": 60,
+    "split_counts": {
+      "train": 9,
+      "validation": 6,
+      "adapt": 6,
+      "evaluation": 6,
+      "animal_pretrain": 6
+    },
+    "endpoint_prior": {
+      "source": "simulated_external_planning_feed_v1",
+      "standard_deviation": 1.25,
+      "derived_from_evaluation_truth": false
+    }
+  }
+}
