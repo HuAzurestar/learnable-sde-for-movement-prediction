@@ -44,14 +44,28 @@ PUBLIC_PREREGISTRATION_REFERENCES = {
 # command-line entry points, and their contract tests.
 PUBLIC_NEX326 = Path("experiments/nex326")
 PUBLIC_NEX326_REFERENCES = {
+    Path(".gitattributes"),
+    Path("DATA.md"),
+    Path("data/pirc20.py"),
     Path("experiments/nex326_multi_seed.py"),
+    Path("experiments/nex326_multi_seed_compose.py"),
     Path("experiments/nex326_phase_space.py"),
     Path("experiments/nex326_phase_space_contrast.py"),
     Path("experiments/nex326_phase_space_multi_seed.py"),
     Path("experiments/nex326_phase_space_uncertainty.py"),
     Path("experiments/nex326_process.py"),
+    Path("tests/test_geolife_confirmation_adapter.py"),
     Path("tests/test_nex326.py"),
+    Path("tests/test_nex326_multi_seed_compose.py"),
     Path("tests/test_nex326_multi_seed_receipt.py"),
+    Path("tests/test_nex326_multi_seed_scope.py"),
+    Path("tests/test_nex326_scoped_runner.py"),
+    Path("tests/test_pirc20_candidate_selection.py"),
+    Path("tests/test_pirc20_confirmation_readiness.py"),
+    Path("tests/test_pirc20_confirmation_verdict.py"),
+    Path("tests/test_pirc20_dispersion_calibration.py"),
+    Path("tests/test_pirc20_nex326_adapter.py"),
+    Path("tests/test_pirc20_runtime.py"),
 }
 
 
