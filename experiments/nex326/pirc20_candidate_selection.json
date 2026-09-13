@@ -1,0 +1,132 @@
+{
+  "schema_version": "pirc20-candidate-selection-v1",
+  "task_id": "PIRC-20",
+  "experiment_id": "NEX326",
+  "status": "frozen_candidates_for_future_independent_confirmation",
+  "scientific_status": "exploratory_candidate_selection_not_a_verdict",
+  "policy": {
+    "path": "pirc20_confirmation_policy.json",
+    "sha256": "8f1eb55a3fbba22988c158b3d1bf5ea6d29b1d21aebb549fc5ed118b2e8997cb"
+  },
+  "discovery": {
+    "cohort_id": "pirc20-r1t-nex326-midpoint-20260912-v1",
+    "cohort_sha256": "b885075acd36cc829db3211c3f104cf8ac7d19d65d9e61ae2af3bf3d444b0075",
+    "replicate_seeds": [
+      20260814,
+      20260815,
+      20260816
+    ],
+    "multi_seed_receipt_sha256": "ddf9b5be7ceea43277e81ae4595084ca24b5459aea471c07c60c7b0320161097",
+    "replicate_summary_sha256": "ab6bda71fb292547b8db8ba502d255a25c53499cfd2371b8466f9e0b0e41e85f",
+    "cross_replicate_table_sha256": "0d1495a6de5c4d8675df1e202baca50d41bc6d80e94e6e87c936606f66beb60e"
+  },
+  "selection_rule": {
+    "required_replicate_count": 3,
+    "required_comparison_status": "exploratory_point_estimate",
+    "required_run_status": "succeeded",
+    "required_assessment": "not_assessed",
+    "metric_rule": "required improvement metrics have mean_candidate_minus_reference_below_zero_and_all_three_replicate_deltas_below_zero",
+    "required_improvement_metrics": [
+      "energy_score_d2",
+      "cep50_error"
+    ],
+    "reported_risk_metrics": [
+      "hdr90_abs_error_from_90"
+    ],
+    "expected_candidate_count": 3
+  },
+  "candidate_count": 3,
+  "candidates": [
+    {
+      "arm_id": 6,
+      "subconfig_id": "dt30",
+      "slot": "M2",
+      "reference_arm_id": 6,
+      "reference_subconfig_id": "dt60",
+      "discovery_metrics": {
+        "energy_score_d2": {
+          "mean_delta": -4.6307956459458905,
+          "min_delta": -5.0216712324921104,
+          "max_delta": -4.128033996843243,
+          "sign_consistency": "all_negative"
+        },
+        "hdr90_abs_error_from_90": {
+          "mean_delta": 0.021395850175154957,
+          "min_delta": 0.019563459983831855,
+          "max_delta": 0.022635408245755884,
+          "sign_consistency": "all_positive"
+        },
+        "cep50_error": {
+          "mean_delta": -3.1975664340217755,
+          "min_delta": -3.296667204281931,
+          "max_delta": -3.074354925491619,
+          "sign_consistency": "all_negative"
+        }
+      }
+    },
+    {
+      "arm_id": 9,
+      "subconfig_id": "mixed",
+      "slot": "E1",
+      "reference_arm_id": 7,
+      "reference_subconfig_id": "full",
+      "discovery_metrics": {
+        "energy_score_d2": {
+          "mean_delta": -5.727037879211366,
+          "min_delta": -5.9974570660356505,
+          "max_delta": -5.31253356633988,
+          "sign_consistency": "all_negative"
+        },
+        "hdr90_abs_error_from_90": {
+          "mean_delta": 0.014066289409862542,
+          "min_delta": 0.012045270816491482,
+          "max_delta": 0.015925626515763902,
+          "sign_consistency": "all_positive"
+        },
+        "cep50_error": {
+          "mean_delta": -0.3250914186058604,
+          "min_delta": -0.4191672200518326,
+          "max_delta": -0.18495264188113936,
+          "sign_consistency": "all_negative"
+        }
+      }
+    },
+    {
+      "arm_id": 9,
+      "subconfig_id": "pure_es",
+      "slot": "E1",
+      "reference_arm_id": 7,
+      "reference_subconfig_id": "full",
+      "discovery_metrics": {
+        "energy_score_d2": {
+          "mean_delta": -5.683397877689771,
+          "min_delta": -5.736954534916748,
+          "max_delta": -5.599816844888039,
+          "sign_consistency": "all_negative"
+        },
+        "hdr90_abs_error_from_90": {
+          "mean_delta": 0.014928590676367537,
+          "min_delta": 0.013338722716248974,
+          "max_delta": 0.01786580436540014,
+          "sign_consistency": "all_positive"
+        },
+        "cep50_error": {
+          "mean_delta": -0.46136221305046377,
+          "min_delta": -0.6896428762843243,
+          "max_delta": -0.29153094370381893,
+          "sign_consistency": "all_negative"
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "Discovery outcomes selected these candidates and cannot confirm them.",
+    "Only a zero-overlap future cohort evaluated under the frozen policy can issue a verdict."
+  ],
+  "privacy": {
+    "contains_sample_ids": false,
+    "contains_file_ids": false,
+    "contains_coordinates": false,
+    "contains_timestamps": false
+  }
+}

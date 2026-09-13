@@ -1,0 +1,84 @@
+{
+  "schema_version": "pirc20-dispersion-calibration-receipt-v1",
+  "task_id": "PIRC-20",
+  "experiment_id": "NEX326",
+  "calibration_version": "pirc20-validation-dispersion-v1",
+  "scientific_status": "exploratory_calibration_not_confirmation",
+  "fit_split": "validation",
+  "evaluation_split": "already_authorized_final_eval",
+  "target_coverage": 0.9,
+  "replicate_seeds": [
+    20260814,
+    20260815,
+    20260816
+  ],
+  "selection": {
+    "candidate_selection_sha256": "339fd37220b3a5a742e3e351c3b549d4ee718e6a3c8fbd6237cce24411d55b2c",
+    "candidate_count": 3,
+    "reference_count": 2
+  },
+  "method": {
+    "factor": "empirical_90pct_quantile_of_target_radius_over_forecast_hdr90_radius",
+    "fit_before_evaluation_read": true,
+    "center_preserved": true,
+    "row_level_output_retained": false
+  },
+  "comparisons": [
+    {
+      "arm_id": 6,
+      "subconfig_id": "dt30",
+      "reference_arm_id": 6,
+      "reference_subconfig_id": "dt60",
+      "mean_deltas": {
+        "energy_score_d2": 6.937500676989923,
+        "hdr90_abs_error_from_90": 0.001697655618431641,
+        "cep50_error": -3.19756643401117
+      },
+      "strict_zero_calibration_gate": "failed",
+      "disposition": "do_not_promote_calibrated_variant"
+    },
+    {
+      "arm_id": 9,
+      "subconfig_id": "mixed",
+      "reference_arm_id": 7,
+      "reference_subconfig_id": "full",
+      "mean_deltas": {
+        "energy_score_d2": -8.44218247783806,
+        "hdr90_abs_error_from_90": 0.025869037995149575,
+        "cep50_error": -0.3250914186224965
+      },
+      "strict_zero_calibration_gate": "failed",
+      "disposition": "do_not_promote_calibrated_variant"
+    },
+    {
+      "arm_id": 9,
+      "subconfig_id": "pure_es",
+      "reference_arm_id": 7,
+      "reference_subconfig_id": "full",
+      "mean_deltas": {
+        "energy_score_d2": -8.482772914987587,
+        "hdr90_abs_error_from_90": 0.025707356507679857,
+        "cep50_error": -0.46136221305413017
+      },
+      "strict_zero_calibration_gate": "failed",
+      "disposition": "do_not_promote_calibrated_variant"
+    }
+  ],
+  "assessment": {
+    "gate_margin": 0.0,
+    "passed_candidate_count": 0,
+    "decision": "validation_only_dispersion_scaling_did_not_remediate_relative_final_eval_calibration",
+    "next_action": "do_not_tune_against_discovery_final_eval; evaluate frozen original candidates only on an independent cohort"
+  },
+  "integrity": {
+    "private_aggregate_sha256": "f6afdfe7dd819ef2b2d90f6a8f4ccd6f5ff671d1836d9c146f3ffae979c379be",
+    "implementation_sha256": "2451dfc0372093ad2c25772025af119b9235de4b31bc4a952f7b2b6ecc1449c0"
+  },
+  "privacy": {
+    "contains_sample_ids": false,
+    "contains_file_ids": false,
+    "contains_coordinates": false,
+    "contains_timestamps": false,
+    "contains_row_level_predictions": false
+  }
+}

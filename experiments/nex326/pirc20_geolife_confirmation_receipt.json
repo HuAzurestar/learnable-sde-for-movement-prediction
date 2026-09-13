@@ -1,0 +1,128 @@
+{
+  "schema_version": "pirc20-geolife-confirmation-receipt-v1",
+  "task_id": "PIRC-20",
+  "experiment_id": "NEX326",
+  "completed_at": "2026-09-13",
+  "scientific_scope": {
+    "assessment": "independent_external_domain_confirmation",
+    "in_distribution_replication": false,
+    "domain_note": "GeoLife is predominantly urban Beijing trajectory data.",
+    "release_note": "Internal non-commercial academic evaluation only; public release requires separate legal review."
+  },
+  "frozen_inputs": {
+    "confirmation_policy_sha256": "8f1eb55a3fbba22988c158b3d1bf5ea6d29b1d21aebb549fc5ed118b2e8997cb",
+    "candidate_selection_sha256": "339fd37220b3a5a742e3e351c3b549d4ee718e6a3c8fbd6237cce24411d55b2c",
+    "discovery_cohort_id": "pirc20-r1t-nex326-midpoint-20260912-v1",
+    "discovery_cohort_sha256": "b885075acd36cc829db3211c3f104cf8ac7d19d65d9e61ae2af3bf3d444b0075",
+    "discovery_sample_count": 72046
+  },
+  "confirmation_cohort": {
+    "cohort_id": "pirc20-geolife-nex326-confirmation-20260913-v1",
+    "cohort_sha256": "b5d35f994de40e39db6d4fe53076e143c0cb302b8928310248563cf43f73f7b6",
+    "samples_manifest_sha256": "5b7f052b7ea6ad66be02e5ca2662646b552a0ee84bfd1bfc1f48b67e250eea83",
+    "samples_by_split": {
+      "train": 126886,
+      "validation": 37427,
+      "final_eval": 17038
+    },
+    "users_by_split": {
+      "train": 118,
+      "validation": 25,
+      "final_eval": 25
+    },
+    "readiness_sha256": "fb1f5ccab384a495caa4bce1a3b54ed4068ed60cf0063d282bf8c6d7f6dd39a4",
+    "independence": {
+      "verified": true,
+      "overlap_counts": {
+        "sample_id": 0,
+        "file_id": 0,
+        "segment_id": 0,
+        "independent_block_id": 0
+      }
+    }
+  },
+  "solar_conditions": {
+    "condition_id": "pirc20-geolife-solar-20260913-v2",
+    "receipt_sha256": "2bac969bdc3817cb062f58e56ca0065eeb08e2297aa1bc871cb26c461ac436e2",
+    "artifact_sha256": "f232c68c19652c0575f792bc705d2256aa0d6e7116cb07c5c5582b540b83c683",
+    "row_count": 6785207,
+    "row_group_count": 52
+  },
+  "execution": {
+    "replicate_seeds": [858858679, 181925750, 953559935],
+    "execution_count_per_seed": 28,
+    "total_execution_count": 84,
+    "run_status": {"succeeded": 84},
+    "scope_policy_sha256": "74c5f331fcb9ee11c2dd055b227095026f17c717e83df09d7c5f04bffc0868c6",
+    "approved_excluded_arm_ids": [13, 17, 22],
+    "batch_manifest_sha256": "ed8d2d7840c2376414a055f8c7ce9d7947d2819208790166624dd81aec2e020c",
+    "seed_manifest_sha256": {
+      "181925750": "c257e95f0eb312e6e81f26a338e99df5922bafae245924e452ed49409ecf6c51",
+      "858858679": "ac5bc8a8f519383ef4bea480eb82b338c2e03f259329085e70cf58d7d87f9da5",
+      "953559935": "c13ce78e81c24217133bdc08b33eed3ca1f19b460ff69b4d5069e729a379c206"
+    }
+  },
+  "verdict": {
+    "verdict_sha256": "6be80bdd9557547e5d9ad2ca675984db12a4d00674172455e8e0a22916949192",
+    "implementation_sha256": "3e428f9151bbab39a3e8ed651836cdb3b838c2521da6fc02f49407d28f96ec25",
+    "independent_block_count": 25,
+    "bootstrap_iterations": 2000,
+    "multiplicity_adjustment": "Holm",
+    "candidate_count": 3,
+    "retained_count": 0,
+    "verdict_counts": {"inconclusive": 3},
+    "candidate_gates": [
+      {
+        "candidate": "6/dt30",
+        "reference": "6/dt60",
+        "primary_energy": false,
+        "hdr90_absolute_error": false,
+        "cep50_error": true,
+        "mechanism": true,
+        "verdict": "inconclusive"
+      },
+      {
+        "candidate": "9/mixed",
+        "reference": "7/full",
+        "primary_energy": false,
+        "hdr90_absolute_error": true,
+        "cep50_error": false,
+        "mechanism": true,
+        "verdict": "inconclusive"
+      },
+      {
+        "candidate": "9/pure_es",
+        "reference": "7/full",
+        "primary_energy": false,
+        "hdr90_absolute_error": true,
+        "cep50_error": false,
+        "mechanism": true,
+        "verdict": "inconclusive"
+      }
+    ]
+  },
+  "descriptive_aggregate": {
+    "assessment": "not_assessed",
+    "replicate_summary_sha256": "ee02920eb64f4e74a7960aa42c1ef3c95d0b3d15369b101f47049e9203028001",
+    "comparison_table_sha256": "9f1a6d6e691423ae3f3a4313cec2372f5aa096b0ad7c959da12d05d5edb7d557",
+    "seed_summary_sha256": {
+      "181925750": "55f943fcdaf2eb8946d9417e63a55fca051922c5df8d9a6f44101b5f4bb77c37",
+      "858858679": "4681452842baa8cd74a20c4764f9c1241c3873ade6a73505b35eff35b18154b1",
+      "953559935": "7338a5809ff3ef492b1064ffabbf49b87c4a114656d20945913ff8568ddd5395"
+    }
+  },
+  "superseded_attempt": {
+    "run_id": "pirc20-geolife-nex326-confirmation-20260913-v1",
+    "record_count": 84,
+    "run_status": {"data_unavailable": 84},
+    "reason": "GeoLife solar-condition input was not yet supplied.",
+    "statistical_disposition": "excluded"
+  },
+  "privacy": {
+    "contains_sample_ids": false,
+    "contains_file_ids": false,
+    "contains_coordinates": false,
+    "contains_timestamps": false,
+    "contains_row_level_predictions": false
+  }
+}
