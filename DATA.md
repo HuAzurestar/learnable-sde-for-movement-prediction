@@ -35,3 +35,23 @@ Do not commit any of the following:
 
 Only aggregate metrics may be considered for a later public results release.
 They require a separate license and privacy review before publication.
+
+## Frozen PIRC-20 cohort
+
+Use `data.load_pirc20_cohort(path)` to open one explicit, versioned DSDE cohort.
+The reader verifies the declared `samples.jsonl` SHA-256, every sample identity,
+window bounds, ordering digest, split counts, and segment/independent-block isolation.
+It never scans a changing data directory. `samples_for_model("final_eval")` remains
+sealed unless the caller supplies the explicit final-evaluation unlock flag.
+
+For the NEX326 22-arm runtime, `experiments.nex326.pirc20_adapter` verifies the
+release, trajectory, alignment, and per-file condition hashes before creating one
+common in-memory cohort. It freezes an 80/20 train/adapt partition inside the outer
+PIRC-20 train split at independent-block level; validation and final_eval are never
+repartitioned. Exact duplicate timestamps retain the first observation and are
+deterministically balanced around the registered midpoint without inventing times or
+states. Reading final_eval requires its exact cohort ID as the acknowledgement.
+PIRC-20 execution uses `PIRC20NEX326Runner`, whose rollout start is always strictly
+before the evaluation endpoint even when a large registered `dt_seconds` resamples a
+short segment to only two points. The override is recorded in each RunRecord's
+implementation hash without changing the receipt-bound legacy NEX326 sources.
