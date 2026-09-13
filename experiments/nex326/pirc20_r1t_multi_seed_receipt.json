@@ -1,0 +1,147 @@
+{
+  "schema_version": "nex326-dsde-multi-seed-receipt-v1",
+  "experiment_id": "NEX326",
+  "spec_version": "nex326-process-v2",
+  "scientific_status": "exploratory_only_not_final_scientific_evidence",
+  "assessment": "not_assessed",
+  "protocol_seed": 20260814,
+  "replicate_seeds": [
+    20260814,
+    20260815,
+    20260816
+  ],
+  "replicate_count": 3,
+  "execution_count_per_replicate": 28,
+  "total_execution_count": 84,
+  "cohort": {
+    "source_file": "cohort.json",
+    "sha256": "b885075acd36cc829db3211c3f104cf8ac7d19d65d9e61ae2af3bf3d444b0075",
+    "fingerprint": "9510e059caf2b43d060caf74b154a2399072fb3c1814e228059584b31712e6fa"
+  },
+  "implementation": {
+    "source_bundle_sha256": "f4ac3fadfc2f32a4dec2f42ef89376b0f709f24fa725dfc3cda4f45ef929c565",
+    "execution_identity_sha256": "2405acb1269ed9c29a91b346ecf33382e8eab71581a0c6bd3c900dd3b6ab18a6",
+    "files": [
+      {
+        "path": "cohort.py",
+        "sha256": "e59617dc9b84fe5071ab94e2555f90af4199c3adb6c370c2cc206ba44f38af15"
+      },
+      {
+        "path": "environment.lock.json",
+        "sha256": "88cbe7947af98bf227242f909ed8355cae4af633a6863925fcd7bd1a1cc0774f"
+      },
+      {
+        "path": "experiment.json",
+        "sha256": "f12dc97a20667212b206e46dd274706b8bf799ee54871729727938d2a7d9e54a"
+      },
+      {
+        "path": "model.py",
+        "sha256": "973f287190c445206084cb017181beec09c57a92e53b7cae16ac56c6c5b4bc32"
+      },
+      {
+        "path": "runner.py",
+        "sha256": "d69b2ddb0b5a48edb63a20a3b00494b8b0d4aa38405542db2af707cb7f0904a0"
+      },
+      {
+        "path": "schrodinger.py",
+        "sha256": "c27d8d8859a93e401974ce34db5392c9a86c1c951423d87afa60597dc5536ef6"
+      },
+      {
+        "path": "spatial_conditions.py",
+        "sha256": "1eed09d983a094d64b0d844c97c83592c8791ba4b6da1b74da7c67b7d74de5af"
+      },
+      {
+        "path": "specification.py",
+        "sha256": "31e7d6c496c63bdcfd76c666810bc4851ae5e5e5fd86e1d842442314abecfdd2"
+      },
+      {
+        "path": "pirc20_runtime.py",
+        "sha256": "2645f4ee9e2907edd2df74f7cdd008aeb309cd0764bc959b05ab925a8a4f123b"
+      }
+    ],
+    "environment_lock": {
+      "path": "environment.lock.json",
+      "sha256": "88cbe7947af98bf227242f909ed8355cae4af633a6863925fcd7bd1a1cc0774f",
+      "conformant": true
+    },
+    "runtime": {
+      "python": "3.10.13",
+      "numpy": "1.26.4",
+      "pandas": "2.2.3",
+      "pyarrow": "24.0.0"
+    },
+    "pirc20_runtime_version": "pirc20-nex326-runtime-v1"
+  },
+  "scope": {
+    "policy_file": "pirc19_scope_policy.json",
+    "policy_sha256": "74c5f331fcb9ee11c2dd055b227095026f17c717e83df09d7c5f04bffc0868c6",
+    "approved_excluded_arm_ids": [
+      13,
+      17,
+      22
+    ],
+    "required_execution_count": 28
+  },
+  "comparison_status": {
+    "reference": 8,
+    "exploratory_point_estimate": 20
+  },
+  "replicate_status": {
+    "succeeded": 28
+  },
+  "method": "descriptive_across_replicate_seeds_no_inferential_ci",
+  "integrity": {
+    "batch_manifest_sha256": "e8be83fcb06b424076c6bee7ff40c25d6ad0b0a27afa443899d73f1250ee67e4",
+    "per_seed_manifests": [
+      {
+        "replicate_seed": 20260814,
+        "path": "runs/pirc20-r1t-nex326-core-seed-20260814-v2/manifest.json",
+        "sha256": "4be3fbcddad32b8bc21e4930f830df4cda23a8485ef7bb49ead007cd9942e8f3",
+        "size_bytes": 5030
+      },
+      {
+        "replicate_seed": 20260815,
+        "path": "runs/pirc20-r1t-nex326-core-seeds-20260815-20260816-v1/seed-20260815/manifest.json",
+        "sha256": "e42580a35d94d1ac1f51dacd6c3365d2883ba7aa80a66bca6590aba3924db925",
+        "size_bytes": 5030
+      },
+      {
+        "replicate_seed": 20260816,
+        "path": "runs/pirc20-r1t-nex326-core-seeds-20260815-20260816-v1/seed-20260816/manifest.json",
+        "sha256": "5f44716112e4d51d694e2b5929c36bd54039b1cb5cbb35f21d842a9bafa6a312",
+        "size_bytes": 5030
+      }
+    ],
+    "replicate_aggregate_summary_sha256": "ab6bda71fb292547b8db8ba502d255a25c53499cfd2371b8466f9e0b0e41e85f",
+    "replicate_aggregate_inputs": [
+      {
+        "replicate_seed": 20260814,
+        "summary_path": "aggregates/pirc20-r1t-nex326-core-seed-20260814-v2/nex326_summary.json",
+        "summary_sha256": "c85fff19ad9222ef0343536be59c41a9b1a4d1b8d29970bf081a0763fa660a93",
+        "comparisons_path": "aggregates/pirc20-r1t-nex326-core-seed-20260814-v2/nex326_pilot_comparisons.csv",
+        "comparisons_sha256": "9ed58371950672baa4a5de03dd84cc004ae275e88a1764d8fd8ea37e07f429cf"
+      },
+      {
+        "replicate_seed": 20260815,
+        "summary_path": "aggregates/pirc20-r1t-nex326-core-seed-20260815-v1/nex326_summary.json",
+        "summary_sha256": "1192ef80e3f060f8b80232d488788d678b7a811d9ef1ac913bc366a6f4477c24",
+        "comparisons_path": "aggregates/pirc20-r1t-nex326-core-seed-20260815-v1/nex326_pilot_comparisons.csv",
+        "comparisons_sha256": "e5f01c6e26949a8becc1a90e7d48a3b323ba7066048c7159e2acd8fbb3203051"
+      },
+      {
+        "replicate_seed": 20260816,
+        "summary_path": "aggregates/pirc20-r1t-nex326-core-seed-20260816-v1/nex326_summary.json",
+        "summary_sha256": "abb9f527a360f22b8c3ffe1799681b104a91b24a39c93570a7fa999cf8174333",
+        "comparisons_path": "aggregates/pirc20-r1t-nex326-core-seed-20260816-v1/nex326_pilot_comparisons.csv",
+        "comparisons_sha256": "da8c6335a664b4ae2c585620407b413991401a6d627e11e20823b2c86583904a"
+      }
+    ],
+    "replicate_aggregate_artifacts": {
+      "nex326_cross_replicate_comparisons.csv": {
+        "path": "nex326_cross_replicate_comparisons.csv",
+        "sha256": "0d1495a6de5c4d8675df1e202baca50d41bc6d80e94e6e87c936606f66beb60e",
+        "size_bytes": 9383
+      }
+    }
+  }
+}

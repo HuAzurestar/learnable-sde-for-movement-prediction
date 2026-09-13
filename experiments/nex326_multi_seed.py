@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Sequence
 
 from experiments.nex326.runner import NEX326Runner
+from experiments.nex326.scoped_runner import run_approved_scope
 from experiments.nex326.specification import SPEC_PATH, load_experiment_spec
 
 
@@ -49,8 +50,13 @@ def run_replicates(
     strict_environment: bool = False,
     condition_root: Path | str | None = None,
     srtm_root: Path | str | None = None,
+    pirc20_trajectory: Path | str | None = None,
+    pirc20_condition_root: Path | str | None = None,
+    pirc20_geolife_conditions: Path | str | None = None,
+    final_eval_unlock: str | None = None,
+    scope_policy: Path | str | None = None,
 ) -> dict[str, object]:
-    """Run complete 36-execution replicas and write one hash-bound batch manifest."""
+    """Run replicate batches and write one hash-bound batch manifest."""
     replicate_seeds = validate_replicate_seeds(seeds)
     cohort_file = Path(cohort_path)
     if not cohort_file.is_file():
@@ -66,23 +72,99 @@ def run_replicates(
         raise MultiSeedError("one or more replicate output directories already exist")
     destination.mkdir(parents=True, exist_ok=True)
     spec = load_experiment_spec(spec_path)
+    runner_type = NEX326Runner
+    cohort_header = json.loads(cohort_file.read_text(encoding="utf-8"))
+    if cohort_header.get("schema_version") == "pirc20-cohort-v1":
+        if pirc20_trajectory is None:
+            raise MultiSeedError("a PIRC-20 cohort requires its trajectory source")
+        from experiments.nex326.pirc20_runtime import PIRC20NEX326Runner
+
+        runner_type = PIRC20NEX326Runner
+        release_header_path = cohort_file.parent / "dataset.json"
+        release_header = json.loads(release_header_path.read_text(encoding="utf-8"))
+        if release_header.get("schema_version") == "pirc20-geolife-release-v1":
+            if pirc20_condition_root is not None:
+                raise MultiSeedError(
+                    "a GeoLife confirmation cohort does not accept a condition root"
+                )
+            if pirc20_geolife_conditions is None:
+                raise MultiSeedError(
+                    "a GeoLife confirmation cohort requires its solar condition receipt"
+                )
+            from experiments.nex326.geolife_confirmation_adapter import (
+                load_geolife_confirmation_cohort,
+            )
+
+            shared_cohort = load_geolife_confirmation_cohort(
+                cohort_file,
+                pirc20_trajectory,
+                pirc20_geolife_conditions,
+                final_eval_unlock=final_eval_unlock,
+            )
+        else:
+            if pirc20_geolife_conditions is not None:
+                raise MultiSeedError(
+                    "GeoLife conditions require a GeoLife confirmation cohort"
+                )
+            if pirc20_condition_root is None:
+                raise MultiSeedError(
+                    "an OSM-derived PIRC-20 cohort requires its condition root"
+                )
+            from experiments.nex326.pirc20_adapter import load_pirc20_nex326_cohort
+
+            shared_cohort = load_pirc20_nex326_cohort(
+                cohort_file,
+                pirc20_trajectory,
+                pirc20_condition_root,
+                final_eval_unlock=final_eval_unlock,
+            )
+        shared_resolver = None
+        if condition_root is not None and srtm_root is not None:
+            from experiments.nex326.spatial_conditions import DSDERasterConditionResolver
+
+            shared_resolver = DSDERasterConditionResolver(
+                shared_cohort, condition_root, srtm_root
+            )
+    else:
+        if (
+            pirc20_trajectory is not None
+            or pirc20_condition_root is not None
+            or pirc20_geolife_conditions is not None
+            or final_eval_unlock is not None
+        ):
+            raise MultiSeedError("PIRC-20 source options require a PIRC-20 cohort")
+        shared = NEX326Runner.from_paths(
+            cohort_file,
+            destination / ".cohort-validation",
+            spec_path=spec_path,
+            n_samples=n_samples,
+            replicate_seed=replicate_seeds[0],
+            strict_environment=strict_environment,
+            condition_root=condition_root,
+            srtm_root=srtm_root,
+        )
+        shared_cohort = shared.cohort
+        shared_resolver = shared.condition_resolver
     entries: list[dict[str, object]] = []
     dataset_fingerprints: set[str] = set()
     implementation_identities: dict[str, dict[str, object]] = {}
     for seed in replicate_seeds:
         relative_root = Path(f"seed-{seed}")
         records_root = destination / relative_root
-        runner = NEX326Runner.from_paths(
-            cohort_file,
+        runner = runner_type(
+            spec,
+            shared_cohort,
             records_root,
-            spec_path=spec_path,
             n_samples=n_samples,
             replicate_seed=seed,
             strict_environment=strict_environment,
-            condition_root=condition_root,
-            srtm_root=srtm_root,
+            condition_resolver=shared_resolver,
         )
-        records = runner.run_all()
+        records = (
+            run_approved_scope(runner, scope_policy)
+            if scope_policy is not None
+            else runner.run_all()
+        )
         dataset_fingerprints.update(str(record["dataset"]["fingerprint"]) for record in records)
         for record in records:
             implementation = dict(record["implementation"])
@@ -108,6 +190,10 @@ def run_replicates(
         raise MultiSeedError("replicates did not use one identical cohort fingerprint")
     if len(implementation_identities) != 1:
         raise MultiSeedError("replicates did not use one identical execution identity")
+    executions_per_replicate = {int(entry["record_count"]) for entry in entries}
+    if len(executions_per_replicate) != 1:
+        raise MultiSeedError("replicates did not execute one identical slot count")
+    execution_count = next(iter(executions_per_replicate))
     payload: dict[str, object] = {
         "schema_version": "nex326-multi-seed-manifest-v1",
         "experiment_id": spec.experiment_id,
@@ -118,8 +204,8 @@ def run_replicates(
         "replicate_count": len(replicate_seeds),
         "requested_prediction_samples": n_samples,
         "implementation": next(iter(implementation_identities.values())),
-        "executions_per_replicate": len(spec.executions),
-        "total_executions": len(spec.executions) * len(replicate_seeds),
+        "executions_per_replicate": execution_count,
+        "total_executions": execution_count * len(replicate_seeds),
         "cohort": {
             "source_file": cohort_file.name,
             "sha256": _sha256(cohort_file),
@@ -127,6 +213,12 @@ def run_replicates(
         },
         "replicates": entries,
     }
+    if scope_policy is not None:
+        policy_file = Path(scope_policy).resolve()
+        payload["scope_policy"] = {
+            "source_file": policy_file.name,
+            "sha256": _sha256(policy_file),
+        }
     manifest_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
         encoding="utf-8",
@@ -151,6 +243,26 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="SRTM HGT root for leakage-safe Arm 17 terrain lookup",
     )
+    parser.add_argument("--pirc20-trajectory", type=Path)
+    parser.add_argument(
+        "--pirc20-condition-root",
+        type=Path,
+        help="condition root required by OSM-derived PIRC-20 releases; omit for GeoLife",
+    )
+    parser.add_argument(
+        "--pirc20-geolife-conditions",
+        type=Path,
+        help="hash-bound receipt.json for reconstructed GeoLife solar elevation",
+    )
+    parser.add_argument(
+        "--scope-policy",
+        type=Path,
+        help="approved exclusion policy applied identically to every replicate",
+    )
+    parser.add_argument(
+        "--final-eval-unlock",
+        help="exact PIRC-20 cohort ID acknowledgement required to read final_eval",
+    )
     parser.add_argument(
         "--strict-environment",
         action="store_true",
@@ -166,6 +278,11 @@ def main(argv: list[str] | None = None) -> int:
         strict_environment=args.strict_environment,
         condition_root=args.condition_root,
         srtm_root=args.srtm_root,
+        pirc20_trajectory=args.pirc20_trajectory,
+        pirc20_condition_root=args.pirc20_condition_root,
+        pirc20_geolife_conditions=args.pirc20_geolife_conditions,
+        final_eval_unlock=args.final_eval_unlock,
+        scope_policy=args.scope_policy,
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0
