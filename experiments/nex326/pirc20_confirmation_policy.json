@@ -1,0 +1,98 @@
+{
+  "schema_version": "pirc20-confirmation-policy-v1",
+  "task_id": "PIRC-20",
+  "experiment_id": "NEX326",
+  "created_at": "2026-09-13",
+  "status": "frozen_for_future_independent_confirmation",
+  "discovery_evidence": {
+    "use": "candidate_selection_only_not_confirmation",
+    "cohort_id": "pirc20-r1t-nex326-midpoint-20260912-v1",
+    "cohort_sha256": "b885075acd36cc829db3211c3f104cf8ac7d19d65d9e61ae2af3bf3d444b0075",
+    "multi_seed_receipt_sha256": "ddf9b5be7ceea43277e81ae4595084ca24b5459aea471c07c60c7b0320161097",
+    "replicate_aggregate_summary_sha256": "ab6bda71fb292547b8db8ba502d255a25c53499cfd2371b8466f9e0b0e41e85f",
+    "cross_replicate_table_sha256": "0d1495a6de5c4d8675df1e202baca50d41bc6d80e94e6e87c936606f66beb60e"
+  },
+  "candidate_selection": {
+    "required_replicate_count": 3,
+    "required_comparison_status": "exploratory_point_estimate",
+    "required_run_status": "succeeded",
+    "required_assessment": "not_assessed",
+    "metric_rule": "required improvement metrics have mean_candidate_minus_reference_below_zero_and_all_three_replicate_deltas_below_zero",
+    "required_improvement_metrics": [
+      "energy_score_d2",
+      "cep50_error"
+    ],
+    "reported_risk_metrics": [
+      "hdr90_abs_error_from_90"
+    ],
+    "expected_candidate_count": 3
+  },
+  "confirmation_data": {
+    "required_schema_version": "pirc20-cohort-v1",
+    "must_differ_from_discovery": [
+      "cohort_id",
+      "data_version",
+      "cohort_sha256"
+    ],
+    "required_zero_overlap_identifiers": [
+      "sample_id",
+      "file_id",
+      "segment_id",
+      "independent_block_id"
+    ],
+    "required_splits": [
+      "train",
+      "validation",
+      "final_eval"
+    ],
+    "final_eval_access_before_execution": "sealed_identity_only"
+  },
+  "confirmation_execution": {
+    "scope_policy_sha256": "74c5f331fcb9ee11c2dd055b227095026f17c717e83df09d7c5f04bffc0868c6",
+    "required_execution_count_per_seed": 28,
+    "approved_excluded_arm_ids": [
+      13,
+      17,
+      22
+    ],
+    "replicate_seed_count": 3,
+    "replicate_seed_derivation": "first_31_bits_of_sha256(policy_sha256:confirmation_cohort_sha256:index), nonzero, collision_resolved_by_increment",
+    "bootstrap_unit": "independent_block_id",
+    "bootstrap_replicates": 2000
+  },
+  "decision_rule": {
+    "status": "frozen",
+    "candidate_minus_reference_orientation": "negative_is_better",
+    "primary_endpoint": "energy_score_d2",
+    "primary_test": "one_sided_independent_block_bootstrap",
+    "familywise_alpha": 0.05,
+    "multiplicity_adjustment": "holm_bonferroni_across_frozen_candidates",
+    "primary_success": "mean_delta_below_zero_and_holm_adjusted_p_at_most_0.05",
+    "guardrails": [
+      {
+        "metric": "hdr90_abs_error_from_90",
+        "noninferiority_margin": 0.0,
+        "rule": "one_sided_95pct_upper_bootstrap_bound_at_most_the_preregistered_noninferiority_margin"
+      },
+      {
+        "metric": "cep50_error",
+        "rule": "mean_delta_at_most_zero_and_one_sided_95pct_upper_bootstrap_bound_at_most_zero"
+      }
+    ],
+    "additional_requirements": [
+      "mechanism_gate_passed",
+      "all_integrity_checks_passed",
+      "no_discovery_confirmation_identifier_overlap"
+    ],
+    "allowed_verdicts": [
+      "retain",
+      "inconclusive",
+      "harmful"
+    ]
+  },
+  "limitations": [
+    "This policy was frozen after discovery results were observed and cannot make the discovery cohort confirmatory.",
+    "Execution seeds quantify algorithmic variation; statistical resampling remains at independent-block level.",
+    "Excluded Arms 13, 17, and 22 require separately authorized external data and are outside this confirmation family."
+  ]
+}

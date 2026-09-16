@@ -85,6 +85,38 @@ def build_multi_seed_receipt(
         or summary.get("assessment") != "not_assessed"
     ):
         raise MultiSeedReceiptError("batch and replicate aggregate identities differ")
+
+    execution_count = int(summary.get("execution_count_per_replicate", 0))
+    batch_scope = batch.get("scope_policy")
+    summary_scope = summary.get("scope")
+    receipt_scope: dict[str, object] | None = None
+    if batch_scope is None and summary_scope is None:
+        if execution_count != 36:
+            raise MultiSeedReceiptError("unscoped batch must contain the frozen 36-slot matrix")
+    elif not isinstance(batch_scope, Mapping) or not isinstance(summary_scope, Mapping):
+        raise MultiSeedReceiptError("batch and replicate aggregate scope declarations differ")
+    else:
+        excluded_ids = sorted(
+            int(arm_id) for arm_id in summary_scope.get("approved_excluded_arm_ids", [])
+        )
+        if (
+            excluded_ids != [13, 17, 22]
+            or execution_count != 28
+            or batch_scope.get("source_file") != summary_scope.get("policy_file")
+            or batch_scope.get("sha256") != summary_scope.get("policy_sha256")
+            or not isinstance(batch_scope.get("sha256"), str)
+            or len(str(batch_scope["sha256"])) != 64
+            or batch.get("executions_per_replicate") != 28
+            or batch.get("total_executions") != 28 * len(seeds)
+            or summary.get("replicate_status") != {"succeeded": 28}
+        ):
+            raise MultiSeedReceiptError("scoped batch does not match the approved 28-slot matrix")
+        receipt_scope = {
+            "policy_file": summary_scope["policy_file"],
+            "policy_sha256": summary_scope["policy_sha256"],
+            "approved_excluded_arm_ids": excluded_ids,
+            "required_execution_count": 28,
+        }
     batch_implementation = batch.get("implementation")
     batch_source_bundle = (
         batch_implementation.get("source_bundle_sha256")
@@ -116,6 +148,22 @@ def build_multi_seed_receipt(
             raise MultiSeedReceiptError("batch contains an invalid replicate entry")
         manifest_path = _verify_reference(batch_root, entry["manifest"], "per-seed manifest")
         manifest_payload = _load(manifest_path, "per-seed manifest")
+        if receipt_scope is not None:
+            manifest_scope = manifest_payload.get("scope")
+            if (
+                entry.get("record_count") != 28
+                or entry.get("run_status") != {"succeeded": 28}
+                or manifest_payload.get("record_count") != 28
+                or manifest_payload.get("run_status") != {"succeeded": 28}
+                or not isinstance(manifest_scope, Mapping)
+                or manifest_scope.get("policy_sha256")
+                != receipt_scope["policy_sha256"]
+                or sorted(int(arm_id) for arm_id in manifest_payload.get("arm_ids", []))
+                != [arm_id for arm_id in range(1, 23) if arm_id not in {13, 17, 22}]
+            ):
+                raise MultiSeedReceiptError(
+                    "per-seed manifest does not match the approved 28-slot matrix"
+                )
         manifest_implementation = manifest_payload.get("implementation")
         if batch_source_bundle is not None and (
             not isinstance(manifest_implementation, Mapping)
@@ -188,6 +236,7 @@ def build_multi_seed_receipt(
         "total_execution_count": len(seeds) * int(summary["execution_count_per_replicate"]),
         "cohort": batch["cohort"],
         "implementation": batch.get("implementation"),
+        "scope": receipt_scope,
         "comparison_status": summary["comparison_status"],
         "replicate_status": summary["replicate_status"],
         "method": summary["method"],

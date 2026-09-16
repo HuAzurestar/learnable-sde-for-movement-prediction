@@ -7,6 +7,11 @@
 *.yml text eol=lf
 *.json text eol=lf
 
+# These generated receipts are hash-bound to already executed PIRC-20
+# confirmation artifacts. Preserve their registered bytes across checkouts.
+experiments/nex326/pirc20_candidate_selection.json binary
+experiments/nex326/pirc20_r1t_multi_seed_receipt.json binary
+
 *.png binary
 *.jpg binary
 *.jpeg binary

@@ -9,6 +9,7 @@ description = "Composable OOP framework for learnable stochastic differential eq
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+  "duckdb>=1.0",
   "numpy>=1.24",
   "pandas>=2.0",
   "pyarrow>=14",

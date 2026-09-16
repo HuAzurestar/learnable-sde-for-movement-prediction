@@ -1,0 +1,24 @@
+{
+  "schema_version": "pirc20-cohort-v1",
+  "cohort_id": "pirc20-psde-fixture-v1",
+  "data_version": "pirc20-psde-fixture-v1",
+  "sample_manifest": "samples.jsonl",
+  "sample_manifest_sha256": "fbe026c618d554fcebed1c33fb85aaaccff92bceef40981d1bc4f1e58fb42ec5",
+  "ordered_sample_ids_sha256": "afdc0fd0197850841022afae5808206164f3224d801b86b926f9d835f8c4b126",
+  "ordered_sample_ids_hash_encoding": "utf8_sample_id_newline_in_manifest_order",
+  "sample_count": 3,
+  "sample_counts_by_split": {
+    "train": 1,
+    "validation": 1,
+    "final_eval": 1
+  },
+  "window": {
+    "mode": "fixed_points",
+    "history_points": 3,
+    "target_points": 1,
+    "stride_points": 1,
+    "boundary": "one_time_refined_segment_only"
+  },
+  "factor_availability_report": "not_applicable_fixture",
+  "final_eval_access": "sealed_identity_only"
+}

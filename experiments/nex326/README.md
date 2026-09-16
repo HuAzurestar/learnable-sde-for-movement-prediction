@@ -32,6 +32,153 @@ python -m experiments.nex326_process \
   --output .local/nex326-process-v2
 ```
 
+The full PIRC-20 release can instead be consumed without generating another
+trajectory JSON. The adapter materializes the hash-bound sources once for all arms:
+
+```console
+python -m experiments.nex326_process \
+  --cohort /private/pirc20/releases/<cohort-id>/cohort.json \
+  --pirc20-trajectory /private/trajectory/unified_full_leg.parquet \
+  --pirc20-condition-root /private/cond_slices \
+  --final-eval-unlock <cohort-id> \
+  --scope-policy experiments/nex326/pirc19_scope_policy.json \
+  --output /private/pirc20/runs/<run-id>
+```
+
+Omit `--final-eval-unlock` while preparing or validating the training side; the
+adapter will not read final-evaluation trajectory or condition rows. The multi-seed
+command accepts the same PIRC-20 options and reuses one materialized cohort across
+seeds. Aggregate results from the sealed full-source loading audit are recorded in
+`pirc20_runtime_audit.json`; it contains no row-level identities or locations.
+
+The PIRC-20 runtime also prevents a resampled two-point segment from initializing a
+rollout at its final target. This dataset-specific execution override is hash-bound in
+the RunRecord implementation identity; the receipt-bound legacy `runner.py` and
+`cohort.py` remain unchanged. Pass the same `--scope-policy` to the multi-seed command
+to apply the approved exclusions (Arms 13, 17, and 22) to every replicate and record
+the policy hash in the batch manifest.
+
+When a validated seed already exists as a standalone run, combine it with later
+replicate roots without rerunning or copying prediction artifacts:
+
+```console
+python -m experiments.nex326_multi_seed_compose \
+  --cohort /private/pirc20/releases/<cohort-id>/cohort.json \
+  --run-roots /private/pirc20/runs/seed-1 \
+              /private/pirc20/runs/batch/seed-2 \
+              /private/pirc20/runs/batch/seed-3 \
+  --scope-policy experiments/nex326/pirc19_scope_policy.json \
+  --output /private/pirc20/runs/combined-multi-seed-manifest.json
+```
+
+Every referenced run root must be below the output manifest's parent directory. The
+composer revalidates the exact 28-slot matrix, every RunRecord and artifact hash, the
+scope hash, cohort fingerprint, implementation identity, and distinct replicate seeds.
+The resulting cross-replicate summary can be sealed with
+`experiments.nex326.multi_seed_receipt`; for a scoped PIRC-20 batch the receipt also
+requires 28 successful executions per seed and binds the exact exclusions 13, 17, and
+22. `pirc20_r1t_multi_seed_receipt.json` is the checked-in, privacy-safe receipt for
+the three-seed R1T evaluation.
+
+Discovery-to-confirmation promotion is deliberately one-way. The checked-in
+`pirc20_confirmation_policy.json` binds the discovery hashes and
+`pirc20_candidate_selection.json` records the three configurations whose Energy
+Score and CEP50 deltas were negative on every discovery seed. HDR90 is screened by
+absolute error from the 90% target, not by raw coverage direction; all three
+candidates have a known calibration-risk flag. Their frozen external-domain
+confirmation result is recorded in `pirc20_geolife_confirmation_receipt.json`.
+
+Regenerate the privacy-safe candidate selection with:
+
+```console
+python -m experiments.nex326.candidate_selection \
+  --policy experiments/nex326/pirc20_confirmation_policy.json \
+  --receipt experiments/nex326/pirc20_r1t_multi_seed_receipt.json \
+  --replicate-summary /private/pirc20/aggregates/<batch>/nex326_replicate_summary.json \
+  --output experiments/nex326/pirc20_candidate_selection.json
+```
+
+Before opening any future confirmation target, prove cohort independence and derive
+the execution seeds deterministically:
+
+```console
+python -m experiments.nex326.confirmation_readiness \
+  --policy experiments/nex326/pirc20_confirmation_policy.json \
+  --candidate-selection experiments/nex326/pirc20_candidate_selection.json \
+  --discovery-cohort /private/pirc20/releases/<discovery>/cohort.json \
+  --confirmation-cohort /private/pirc20/releases/<confirmation>/cohort.json \
+  --output /private/pirc20/confirmation/<confirmation>/readiness.json
+```
+
+The readiness check fully validates both manifests and requires zero overlap in
+sample, file, segment, and independent-block identities. It does not read trajectory
+targets. Execution remains blocked until the HDR90 absolute-error noninferiority
+gate (frozen at zero degradation) and a zero-overlap confirmation cohort are both
+satisfied. A user-partitioned GeoLife release can satisfy the identity-independence
+gate, but it is predominantly urban Beijing data and therefore supports only an
+external-domain confirmation, not an in-distribution replication.
+
+GeoLife execution requires the cleaned trajectory plus a hash-bound solar-condition
+receipt reconstructed from the original GMT timestamps. The final-evaluation split
+stays sealed unless the exact cohort ID is supplied as the acknowledgement:
+
+```console
+python -m experiments.nex326_multi_seed \
+  --cohort /private/pirc20/releases/<geolife-confirmation>/cohort.json \
+  --pirc20-trajectory /data/trajectory/geolife_leg.parquet \
+  --pirc20-geolife-conditions /private/pirc20/conditions/<solar>/receipt.json \
+  --scope-policy experiments/nex326/pirc19_scope_policy.json \
+  --final-eval-unlock <geolife-confirmation> \
+  --seeds <seed-1> <seed-2> <seed-3> \
+  --samples 64 \
+  --output /private/pirc20/runs/<confirmation-run>
+```
+
+The optional exploratory remediation fits one dispersion multiplier per configuration
+and seed using validation targets only. It fixes that multiplier before opening the
+already-authorized final-evaluation predictions and emits aggregate results only:
+
+```console
+python -m experiments.nex326.dispersion_calibration \
+  --cohort /private/pirc20/releases/<discovery>/cohort.json \
+  --trajectory /data/trajectory/unified_full_leg.parquet \
+  --condition-root /data/cond_slices \
+  --candidate-selection experiments/nex326/pirc20_candidate_selection.json \
+  --run-roots /private/pirc20/runs/seed-1 /private/pirc20/runs/seed-2 /private/pirc20/runs/seed-3 \
+  --output /private/pirc20/aggregates/calibrated/pirc20_dispersion_calibration.json
+```
+
+This remediation remains discovery analysis. If retained, the same frozen
+validation-only operation must be rerun on the future confirmation cohort before its
+final-evaluation split is opened.
+
+After a readiness manifest reports `ready_to_execute` and all three registered seed
+runs finish, issue the policy-bound verdict with:
+
+```console
+python -m experiments.nex326.confirmation_verdict \
+  --policy experiments/nex326/pirc20_confirmation_policy.json \
+  --readiness /private/pirc20/confirmation/<confirmation>/readiness.json \
+  --cohort /private/pirc20/releases/<confirmation>/cohort.json \
+  --run-roots /private/pirc20/confirmation/<confirmation>/seed-* \
+  --output /private/pirc20/confirmation/<confirmation>/verdict.json
+```
+
+The evaluator rechecks the scoped run and prediction hashes, pairs every candidate
+with its frozen reference, reduces rows to independent-block sufficient statistics,
+performs 2,000 block-bootstrap draws while preserving seed pairing, and applies the
+frozen Holm and three-metric gates. Only aggregate results are written.
+
+The completed GeoLife confirmation ran all 28 approved slots on each of the three
+registered seeds (84/84 successful executions), excluding Arms 13, 17, and 22 as
+authorized. All three frozen candidates were inconclusive and none was retained:
+Arm 6/dt30 failed the primary Energy Score and zero-margin HDR90 gates, while both
+Arm 9 candidates failed the primary Energy Score and CEP50 gates. Mechanism checks
+passed throughout. This is an independent external-domain assessment, not an
+in-distribution replication; GeoLife is predominantly urban Beijing data. The
+checked-in receipt contains only aggregate counts and hashes. Public redistribution
+of the derived GeoLife release still requires separate legal review.
+
 Every execution follows the same load → samples → features → initialization → train →
 checkpoint → inference → metrics → mechanism → RunRecord path. The checked-in cohort
 is a deterministic, CC0 implementation fixture. Its records deliberately retain
@@ -334,7 +481,9 @@ python -m experiments.nex326.multi_seed_receipt \
 ```
 
 The receipt re-verifies all three per-seed manifests and summaries, their comparison
-CSVs, and the cross-replicate table before recording the complete hash chain.
+CSVs, and the cross-replicate table before recording the complete hash chain. Scoped
+receipts additionally require the batch, each seed manifest, and the aggregate to
+agree on the approved 28-slot policy.
 
 The adapter preserves the DSDE validation/evaluation file partitions, divides the
 finetune files into disjoint train/adapt partitions, and records source hashes. Solar

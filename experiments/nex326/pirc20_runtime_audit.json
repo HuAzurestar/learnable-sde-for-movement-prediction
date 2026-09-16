@@ -1,0 +1,144 @@
+{
+  "schema_version": "pirc20-nex326-runtime-audit-v1",
+  "task_id": "PIRC-20",
+  "audited_at": "2026-09-13",
+  "adapter_version": "pirc20-nex326-adapter-v1",
+  "dataset_id": "pirc20-r1t-nex326-midpoint-20260912-v1",
+  "final_eval_status": "unlocked_for_authorized_formal_evaluation",
+  "outer_sample_counts": {
+    "train": 49845,
+    "validation": 9831,
+    "final_eval": 12370
+  },
+  "runtime_segment_counts": {
+    "train": 39271,
+    "adapt": 10573,
+    "validation": 9831,
+    "evaluation": 12370,
+    "animal_pretrain": 0
+  },
+  "adaptation_partition": {
+    "source_split": "train",
+    "assignment_unit": "independent_block_id",
+    "seed": 20260912,
+    "train_fraction": 0.8,
+    "adapt_fraction": 0.2
+  },
+  "exact_time_policy": {
+    "unit": "unix_nanoseconds",
+    "duplicate_rule": "keep_first_without_crossing_the_registered_history_target_boundary",
+    "balancing_rule": "retain_exact_observations_and_endpoints_with_h_history_and_h_or_h_plus_1_target_points",
+    "excluded_samples": 1,
+    "invented_timestamps": false,
+    "invented_states": false
+  },
+  "integrity": {
+    "release_artifact_hashes_verified": true,
+    "trajectory_source_hash_verified": true,
+    "used_condition_file_hashes_verified": true,
+    "legacy_nex326_core_source_changed": false
+  },
+  "formal_evaluation": {
+    "scope_policy_sha256": "74c5f331fcb9ee11c2dd055b227095026f17c717e83df09d7c5f04bffc0868c6",
+    "approved_excluded_arm_ids": [13, 17, 22],
+    "attempts": [
+      {
+        "run_id": "pirc20-r1t-nex326-core-seed-20260814-v1",
+        "replicate_seed": 20260814,
+        "record_count": 28,
+        "run_status": {"succeeded": 28},
+        "manifest_sha256": "dfa725632ac03043846abf731acf26b078019dfa02521e777c7fc2dccb9d2318",
+        "assessment": "rejected_target_leakage",
+        "reason": "large-dt resampling could initialize a two-point evaluation rollout at its final target"
+      },
+      {
+        "run_id": "pirc20-r1t-nex326-core-seed-20260814-v2",
+        "replicate_seed": 20260814,
+        "record_count": 28,
+        "run_status": {"succeeded": 28},
+        "manifest_sha256": "4be3fbcddad32b8bc21e4930f830df4cda23a8485ef7bb49ead007cd9942e8f3",
+        "assessment": "integrity_and_leakage_checks_passed",
+        "tsde_summary_sha256": "c85fff19ad9222ef0343536be59c41a9b1a4d1b8d29970bf081a0763fa660a93",
+        "scientific_verdict": "not_assessed"
+      }
+    ]
+  },
+  "multi_seed_evaluation": {
+    "replicate_seeds": [
+      20260814,
+      20260815,
+      20260816
+    ],
+    "execution_count_per_replicate": 28,
+    "total_execution_count": 84,
+    "run_status": {
+      "succeeded": 84
+    },
+    "approved_excluded_arm_ids": [
+      13,
+      17,
+      22
+    ],
+    "batch_manifest_sha256": "e8be83fcb06b424076c6bee7ff40c25d6ad0b0a27afa443899d73f1250ee67e4",
+    "replicate_aggregate_summary_sha256": "ab6bda71fb292547b8db8ba502d255a25c53499cfd2371b8466f9e0b0e41e85f",
+    "portable_receipt": {
+      "path": "pirc20_r1t_multi_seed_receipt.json",
+      "sha256": "ddf9b5be7ceea43277e81ae4595084ca24b5459aea471c07c60c7b0320161097"
+    },
+    "scientific_status": "exploratory_only",
+    "scientific_verdict": "not_assessed"
+  },
+  "future_confirmation": {
+    "candidate_policy": {
+      "path": "pirc20_confirmation_policy.json",
+      "sha256": "8f1eb55a3fbba22988c158b3d1bf5ea6d29b1d21aebb549fc5ed118b2e8997cb",
+      "status": "frozen_and_used_for_external_domain_confirmation"
+    },
+    "candidate_selection": {
+      "path": "pirc20_candidate_selection.json",
+      "sha256": "339fd37220b3a5a742e3e351c3b549d4ee718e6a3c8fbd6237cce24411d55b2c",
+      "candidates": [
+        "6/dt30",
+        "9/mixed",
+        "9/pure_es"
+      ],
+      "use": "candidate_selection_only_not_confirmation"
+    },
+    "known_risk": "all three candidates worsen absolute HDR90 error from the 90 percent target on all discovery seeds",
+    "hdr90_absolute_error_noninferiority_margin": 0.0,
+    "dispersion_calibration": {
+      "version": "pirc20-validation-dispersion-v1",
+      "fit_split": "validation",
+      "private_aggregate_sha256": "f6afdfe7dd819ef2b2d90f6a8f4ccd6f5ff671d1836d9c146f3ffae979c379be",
+      "portable_receipt": {
+        "path": "pirc20_dispersion_calibration_receipt.json",
+        "sha256": "2a11e4d80fda72a641ded5b58a8ca4f70ad61f5c0ed06992f638c3016886cec9"
+      },
+      "strict_zero_calibration_gate_passed_candidates": 0,
+      "disposition": "do_not_promote_calibrated_variants"
+    },
+    "execution_blockers": [],
+    "external_domain_confirmation": {
+      "cohort_id": "pirc20-geolife-nex326-confirmation-20260913-v1",
+      "readiness_status": "ready_to_execute",
+      "zero_overlap_verified": true,
+      "replicate_seeds": [858858679, 181925750, 953559935],
+      "execution_count_per_seed": 28,
+      "total_execution_count": 84,
+      "run_status": {"succeeded": 84},
+      "verdict_counts": {"inconclusive": 3},
+      "retained_candidate_count": 0,
+      "scope": "external_domain_not_in_distribution",
+      "portable_receipt": {
+        "path": "pirc20_geolife_confirmation_receipt.json",
+        "sha256": "2282392c46dbb761abc7dc82b85b62fe8caa6ec10cd398d7795e4db2d23a4c17"
+      }
+    }
+  },
+  "privacy": {
+    "contains_sample_ids": false,
+    "contains_file_ids": false,
+    "contains_coordinates": false,
+    "contains_timestamps": false
+  }
+}
