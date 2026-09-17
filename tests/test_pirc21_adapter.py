@@ -14,6 +14,9 @@ from experiments.nex326.pirc21_adapter import (
     FeatureSnapshotAdapter,
     PIRC21AdapterError,
 )
+from experiments.nex326.cohort import Cohort, Segment
+from experiments.nex326.model import build_transition_data
+from experiments.nex326.pirc21_runtime import PIRC21FeatureRuntime
 
 
 def _sha256(path: Path) -> str:
@@ -383,3 +386,93 @@ def test_cache_identity_changes_with_selected_factor_set(tmp_path):
         snapshot, FeatureSelection(variant_ids=("elevation.absolute",))
     ).transform("train")
     assert empty.cache_identity != elevation.cache_identity
+
+
+def test_feature_runtime_attaches_adapter_matrix_to_actual_sde_transition_input(tmp_path):
+    snapshot = _write_snapshot(tmp_path)
+    manifest_path = snapshot / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for item in manifest["files"]:
+        if item["split"] != "train":
+            continue
+        path = snapshot / item["path"]
+        table = pq.read_table(path)
+        table = table.set_column(
+            table.schema.get_field_index("segment_id"),
+            "segment_id",
+            pa.array(["train-runtime-segment"] * table.num_rows),
+        )
+        table = table.set_column(
+            table.schema.get_field_index("absolute_epoch_ns"),
+            "absolute_epoch_ns",
+            pa.array(
+                [1_700_000_000_000_000_000 + index * 1_000_000_000 for index in range(4)],
+                type=pa.int64(),
+            ),
+        )
+        pq.write_table(table, path)
+        item["sha256"] = _sha256(path)
+    inventory = hashlib.sha256()
+    for item in sorted(manifest["files"], key=lambda value: value["path"]):
+        inventory.update(
+            f"{item['path']}\0{item['sha256']}\0{item['row_count']}\n".encode()
+        )
+    manifest["content_inventory_sha256"] = inventory.hexdigest()
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    segment = Segment(
+        segment_id="train-runtime-segment",
+        source_domain="human",
+        region="fixture",
+        time=np.arange(4, dtype=float),
+        state=np.column_stack((np.arange(4, dtype=float), np.zeros(4))),
+        conditions={},
+        has_terrain=False,
+    )
+    cohort = Cohort(
+        schema_version="nex326-cohort-v1",
+        dataset_id="pirc20-fixture-cohort-v1",
+        data_version="pirc20-fixture-v1",
+        purpose="fixture",
+        splits={
+            "train": (segment,),
+            "validation": (),
+            "adapt": (),
+            "evaluation": (),
+            "animal_pretrain": (),
+        },
+        unavailable_reasons={
+            "validation": "fixture",
+            "adapt": "fixture",
+            "evaluation": "fixture",
+            "animal_pretrain": "fixture",
+        },
+        fingerprint="fixture-cohort",
+    )
+    cohort.validate()
+    runtime = PIRC21FeatureRuntime(
+        snapshot,
+        FeatureSelection(variant_ids=("road.distance_log1p",)),
+    )
+    attached = runtime.attach(cohort)
+    attached_segment = attached.splits["train"][0]
+
+    assert runtime.condition_names == (
+        "pirc21:v_road_distance_log1p",
+        "pirc21:v_road_distance_log1p__valid",
+    )
+    assert np.allclose(
+        attached_segment.conditions["pirc21:v_road_distance_log1p"],
+        np.log1p([0.0, 10.0, 0.0, 30.0]),
+    )
+    assert attached_segment.conditions[
+        "pirc21:v_road_distance_log1p__valid"
+    ].tolist() == [1.0, 1.0, 0.0, 1.0]
+    transitions = build_transition_data(
+        attached.splits["train"], runtime.condition_names, "single_gaussian"
+    )
+    assert transitions.features.shape == (3, 5)
+    assert attached.fingerprint != cohort.fingerprint
+    assert runtime.identity_record["runtime_identity_sha256"]
