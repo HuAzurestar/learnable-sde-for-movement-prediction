@@ -58,6 +58,27 @@ the RunRecord implementation identity; the receipt-bound legacy `runner.py` and
 to apply the approved exclusions (Arms 13, 17, and 22) to every replicate and record
 the policy hash in the batch manifest.
 
+### PIRC-21 versioned terrain features
+
+`experiments.nex326.pirc21_adapter.FeatureSnapshotAdapter` consumes an immutable
+PIRC-21 FeatureRow snapshot independently of the legacy PIRC-20 condition view.
+`FeatureSelection` orders variant IDs, composition IDs, and optional segment
+aggregation IDs; changing any selection changes the cache identity without changing
+adapter code. An empty variant selection is the registered no-terrain configuration.
+
+Call `fit()` before transforming a selection containing `train_only` variants. The
+adapter fits those statistics from the snapshot's `train` split only and exposes an
+`identity_record` suitable for RunRecord configuration. It includes the snapshot,
+content inventory, feature spec/version, ordered selection, and fitted-state hashes.
+Final evaluation remains sealed unless the exact dataset ID is supplied. Missing
+features remain NaN plus an explicit validity mask; `model_matrix()` may replace the
+numeric slot with zero only while appending that mask, and refuses to hide missingness
+when validity indicators are disabled.
+
+The old `dem_elev/dem_slope/landcover/has_map` reader remains available through the
+PIRC-20 path for reproduction only. The PIRC-21 adapter never reads `has_map` and does
+not use it to decide whether a configured experiment is valid.
+
 When a validated seed already exists as a standalone run, combine it with later
 replicate roots without rerunning or copying prediction artifacts:
 
