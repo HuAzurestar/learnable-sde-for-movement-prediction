@@ -184,7 +184,38 @@ def test_adapter_derives_block_disjoint_adapt_and_keeps_final_eval_sealed(tmp_pa
         for split in ("train", "adapt")
         for segment in cohort.splits[split]
     } == {"r1t:train-a:0:0", "r1t:train-b:0:0"}
-    assert all(segment.has_terrain for split in ("train", "adapt", "validation") for segment in cohort.splits[split])
+    assert all(
+        segment.has_terrain
+        for split in ("train", "adapt", "validation")
+        for segment in cohort.splits[split]
+    )
+
+
+def test_bounded_pilot_selection_is_explicit_and_fingerprinted(tmp_path):
+    cohort_path, trajectory, conditions, _ = _write_release(tmp_path)
+    full = load_pirc20_nex326_cohort(cohort_path, trajectory, conditions)
+    bounded = load_pirc20_nex326_cohort(
+        cohort_path,
+        trajectory,
+        conditions,
+        maximum_segments_per_role={"train": 1, "adapt": 1, "validation": 1},
+    )
+
+    assert {
+        name: len(bounded.splits[name]) for name in ("train", "adapt", "validation")
+    } == {
+        "train": 1,
+        "adapt": 1,
+        "validation": 1,
+    }
+    assert bounded.fingerprint != full.fingerprint
+    with pytest.raises(PIRC20AdapterError, match="maximum_segments_per_role"):
+        load_pirc20_nex326_cohort(
+            cohort_path,
+            trajectory,
+            conditions,
+            maximum_segments_per_role={"train": 0},
+        )
 
 
 def test_exact_cohort_id_unlocks_final_eval_and_preserves_sample_boundary(tmp_path):
@@ -209,8 +240,12 @@ def test_exact_cohort_id_unlocks_final_eval_and_preserves_sample_boundary(tmp_pa
         )
 
 
-def test_duplicate_exact_time_keeps_first_observed_state_without_target_leakage(tmp_path):
-    cohort_path, trajectory, conditions, _ = _write_release(tmp_path, duplicate_time=True)
+def test_duplicate_exact_time_keeps_first_observed_state_without_target_leakage(
+    tmp_path,
+):
+    cohort_path, trajectory, conditions, _ = _write_release(
+        tmp_path, duplicate_time=True
+    )
     cohort = load_pirc20_nex326_cohort(cohort_path, trajectory, conditions)
     segment = next(
         segment

@@ -35,9 +35,7 @@ def _column(name: str) -> dict[str, object]:
     return {"name": name, "dtype": "float32", "unit": "1", "role": name}
 
 
-def _factor(
-    factor_id: str, columns: list[str], status: str
-) -> dict[str, object]:
+def _factor(factor_id: str, columns: list[str], status: str) -> dict[str, object]:
     return {
         "factor_id": factor_id,
         "value_columns": [_column(name) for name in columns],
@@ -368,9 +366,7 @@ def test_final_eval_is_sealed_and_snapshot_tampering_is_rejected(tmp_path):
     )
     with pytest.raises(PIRC21AdapterError, match="sealed"):
         adapter.transform("final_eval")
-    unlocked = adapter.transform(
-        "final_eval", final_eval_unlock="pirc20-fixture-v1"
-    )
+    unlocked = adapter.transform("final_eval", final_eval_unlock="pirc20-fixture-v1")
     assert unlocked.values.shape == (2, 1)
 
     target = snapshot / "features" / "train" / "train.parquet"
@@ -388,7 +384,25 @@ def test_cache_identity_changes_with_selected_factor_set(tmp_path):
     assert empty.cache_identity != elevation.cache_identity
 
 
-def test_feature_runtime_attaches_adapter_matrix_to_actual_sde_transition_input(tmp_path):
+def test_transform_can_scope_large_snapshot_to_selected_segments(tmp_path):
+    snapshot = _write_snapshot(tmp_path)
+    adapter = FeatureSnapshotAdapter(
+        snapshot, FeatureSelection(variant_ids=("elevation.absolute",))
+    )
+
+    full = adapter.transform("train")
+    scoped = adapter.transform("train", segment_ids=("train-segment-1",))
+
+    assert scoped.segment_ids == ("train-segment-1", "train-segment-1")
+    assert scoped.values[:, 0].tolist() == [4.0, 6.0]
+    assert scoped.cache_identity != full.cache_identity
+    with pytest.raises(PIRC21AdapterError, match="file identities are absent"):
+        adapter.transform("train", file_ids=("missing-file",))
+
+
+def test_feature_runtime_attaches_adapter_matrix_to_actual_sde_transition_input(
+    tmp_path,
+):
     snapshot = _write_snapshot(tmp_path)
     manifest_path = snapshot / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -406,7 +420,10 @@ def test_feature_runtime_attaches_adapter_matrix_to_actual_sde_transition_input(
             table.schema.get_field_index("absolute_epoch_ns"),
             "absolute_epoch_ns",
             pa.array(
-                [1_700_000_000_000_000_000 + index * 1_000_000_000 for index in range(4)],
+                [
+                    1_700_000_000_000_000_000 + index * 1_000_000_000
+                    for index in range(4)
+                ],
                 type=pa.int64(),
             ),
         )

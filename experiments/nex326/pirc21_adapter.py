@@ -17,6 +17,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 
@@ -98,9 +99,13 @@ def _safe_file(root: Path, relative: str) -> Path:
     try:
         path.relative_to(root)
     except ValueError as error:
-        raise PIRC21AdapterError(f"snapshot path escapes its root: {relative}") from error
+        raise PIRC21AdapterError(
+            f"snapshot path escapes its root: {relative}"
+        ) from error
     if not path.is_file() or path.is_symlink():
-        raise PIRC21AdapterError(f"snapshot artifact is missing or symlinked: {relative}")
+        raise PIRC21AdapterError(
+            f"snapshot artifact is missing or symlinked: {relative}"
+        )
     return path
 
 
@@ -126,7 +131,9 @@ def _int64(table: pa.Table, name: str) -> np.ndarray:
     try:
         return np.asarray(values, dtype=np.int64)
     except (TypeError, ValueError, OverflowError) as error:
-        raise PIRC21AdapterError(f"integer identity column is invalid: {name}") from error
+        raise PIRC21AdapterError(
+            f"integer identity column is invalid: {name}"
+        ) from error
 
 
 def _strings(table: pa.Table, name: str) -> np.ndarray:
@@ -220,7 +227,9 @@ class PointFeatureBatch:
         operations = tuple(operations)
         unknown = set(operations) - _AGGREGATIONS
         if not operations or unknown or len(operations) != len(set(operations)):
-            raise PIRC21AdapterError("segment aggregations must be non-empty and unique")
+            raise PIRC21AdapterError(
+                "segment aggregations must be non-empty and unique"
+            )
         segment_ids = tuple(sorted(set(self.segment_ids)))
         output_columns = tuple(
             f"{column}__{operation}"
@@ -232,7 +241,9 @@ class PointFeatureBatch:
         segment_array = np.asarray(self.segment_ids, dtype=object)
         for segment_offset, segment_id in enumerate(segment_ids):
             row_indexes = np.flatnonzero(segment_array == segment_id)
-            order = row_indexes[np.argsort(self.absolute_epoch_ns[row_indexes], kind="stable")]
+            order = row_indexes[
+                np.argsort(self.absolute_epoch_ns[row_indexes], kind="stable")
+            ]
             target_offset = 0
             for operation in operations:
                 for column_index in range(len(self.columns)):
@@ -298,8 +309,7 @@ class FeatureSnapshotAdapter:
             str(item["variant_id"]): item for item in self.spec["variants"]
         }
         self._composition_by_id = {
-            str(item["composition_id"]): item
-            for item in self.spec["compositions"]
+            str(item["composition_id"]): item for item in self.spec["compositions"]
         }
         self._column_factor: dict[str, str] = {}
         for factor_id, factor in self._factor_by_id.items():
@@ -343,17 +353,13 @@ class FeatureSnapshotAdapter:
             "adapter_version": ADAPTER_VERSION,
             "dataset_id": self.dataset_id,
             "snapshot_id": str(self.manifest["snapshot_id"]),
-            "content_inventory_sha256": str(
-                self.manifest["content_inventory_sha256"]
-            ),
+            "content_inventory_sha256": str(self.manifest["content_inventory_sha256"]),
             "feature_spec_id": self.feature_spec_id,
             "feature_spec_sha256": str(self.manifest["feature_spec_sha256"]),
             "processing_version": str(self.spec["processing_version"]),
             "variant_ids": list(self.selection.variant_ids),
             "composition_ids": list(self.selection.composition_ids),
-            "segment_aggregation_ids": list(
-                self.selection.segment_aggregations
-            ),
+            "segment_aggregation_ids": list(self.selection.segment_aggregations),
             "selection_fingerprint": self.selection_fingerprint,
             "fit_state": self._fit_state or {},
             "fit_state_fingerprint": self.fit_state_fingerprint,
@@ -436,7 +442,9 @@ class FeatureSnapshotAdapter:
                 )
             columns = tuple(str(item["name"]) for item in variant["output_columns"])
             if len(columns) != int(variant["output_dim"]):
-                raise PIRC21AdapterError(f"variant output dimension mismatch: {variant_id}")
+                raise PIRC21AdapterError(
+                    f"variant output dimension mismatch: {variant_id}"
+                )
             output_names.extend(columns)
         for composition_id in self.selection.composition_ids:
             composition = self._composition_by_id[composition_id]
@@ -450,9 +458,7 @@ class FeatureSnapshotAdapter:
                 raise PIRC21AdapterError(
                     f"unsupported composition for {composition_id}: {operator}"
                 )
-            columns = tuple(
-                str(item["name"]) for item in composition["output_columns"]
-            )
+            columns = tuple(str(item["name"]) for item in composition["output_columns"])
             if len(columns) != int(composition["output_dim"]):
                 raise PIRC21AdapterError(
                     f"composition output dimension mismatch: {composition_id}"
@@ -464,19 +470,37 @@ class FeatureSnapshotAdapter:
             str(item["aggregation_id"])
             for item in self.spec.get("segment_aggregations", ())
         }
-        missing_aggregations = set(self.selection.segment_aggregations) - aggregation_ids
+        missing_aggregations = (
+            set(self.selection.segment_aggregations) - aggregation_ids
+        )
         if missing_aggregations:
             raise PIRC21AdapterError(
                 "segment aggregations are not registered in the feature spec: "
                 f"{sorted(missing_aggregations)}"
             )
 
-    def _entries(self, split: str) -> list[Mapping[str, Any]]:
+    def _entries(
+        self, split: str, *, file_ids: Sequence[str] | None = None
+    ) -> list[Mapping[str, Any]]:
+        wanted = set(file_ids) if file_ids is not None else None
         entries = [
-            item for item in self.manifest["files"] if str(item.get("split")) == split
+            item
+            for item in self.manifest["files"]
+            if str(item.get("split")) == split
+            and (wanted is None or str(item.get("file_id")) in wanted)
         ]
         if not entries:
+            if wanted is not None:
+                raise PIRC21AdapterError(
+                    f"snapshot file identities are absent: {sorted(wanted)}"
+                )
             raise PIRC21AdapterError(f"snapshot split is absent: {split}")
+        if wanted is not None:
+            found = {str(item.get("file_id")) for item in entries}
+            if found != wanted:
+                raise PIRC21AdapterError(
+                    f"snapshot file identities are absent: {sorted(wanted - found)}"
+                )
         return sorted(entries, key=lambda item: str(item["path"]))
 
     def _required_columns(self) -> list[str]:
@@ -485,7 +509,10 @@ class FeatureSnapshotAdapter:
         for variant_id in self.selection.variant_ids:
             variant = self._variant_by_id[variant_id]
             parameters = variant["parameters"]
-            for name in (*parameters.get("input_columns", ()), *parameters.get("reference_columns", ())):
+            for name in (
+                *parameters.get("input_columns", ()),
+                *parameters.get("reference_columns", ()),
+            ):
                 name = str(name)
                 if name not in names:
                     names.append(name)
@@ -497,14 +524,21 @@ class FeatureSnapshotAdapter:
                 names.append(status)
         return names
 
-    def _load(self, split: str, *, final_eval_unlock: str | None) -> pa.Table:
+    def _load(
+        self,
+        split: str,
+        *,
+        final_eval_unlock: str | None,
+        file_ids: Sequence[str] | None = None,
+        segment_ids: Sequence[str] | None = None,
+    ) -> pa.Table:
         if split == _FINAL_EVAL_SPLIT and final_eval_unlock != self.dataset_id:
             raise PIRC21AdapterError(
                 "final_eval is sealed; provide the exact dataset ID acknowledgement"
             )
         columns = self._required_columns()
         tables: list[pa.Table] = []
-        for entry in self._entries(split):
+        for entry in self._entries(split, file_ids=file_ids):
             path = _safe_file(self.root, str(entry["path"]))
             table = pq.read_table(path, columns=columns).combine_chunks()
             metadata = table.schema.metadata or {}
@@ -513,9 +547,22 @@ class FeatureSnapshotAdapter:
                 raise PIRC21AdapterError("Parquet feature spec metadata mismatch")
             tables.append(table)
         table = pa.concat_tables(tables) if len(tables) > 1 else tables[0]
+        if segment_ids is not None:
+            wanted_segments = tuple(dict.fromkeys(segment_ids))
+            table = table.filter(
+                pc.is_in(table["segment_id"], value_set=pa.array(wanted_segments))
+            )
+            found_segments = set(_strings(table, "segment_id").tolist())
+            if found_segments != set(wanted_segments):
+                raise PIRC21AdapterError(
+                    "snapshot segment identities are absent: "
+                    f"{sorted(set(wanted_segments) - found_segments)}"
+                )
         if any(value != split for value in _strings(table, "split")):
             raise PIRC21AdapterError(f"FeatureRow split identity mismatch: {split}")
-        if any(value != self.dataset_id for value in _strings(table, "dataset_version")):
+        if any(
+            value != self.dataset_id for value in _strings(table, "dataset_version")
+        ):
             raise PIRC21AdapterError("FeatureRow dataset identity mismatch")
         point_ids = _strings(table, "point_id")
         if len(point_ids) != len(set(point_ids.tolist())):
@@ -527,7 +574,9 @@ class FeatureSnapshotAdapter:
     ) -> tuple[np.ndarray, np.ndarray]:
         parameters = variant["parameters"]
         input_names = [str(name) for name in parameters["input_columns"]]
-        reference_names = [str(name) for name in parameters.get("reference_columns", ())]
+        reference_names = [
+            str(name) for name in parameters.get("reference_columns", ())
+        ]
         names = input_names + reference_names
         arrays = np.column_stack([_numeric(table, name) for name in names])
         valid = np.isfinite(arrays).all(axis=1)
@@ -566,9 +615,7 @@ class FeatureSnapshotAdapter:
         self._fit_state = state
         return self
 
-    def _variant(
-        self, table: pa.Table, variant_id: str
-    ) -> _VariantResult:
+    def _variant(self, table: pa.Table, variant_id: str) -> _VariantResult:
         variant = self._variant_by_id[variant_id]
         transform = str(variant["transform"])
         parameters = variant["parameters"]
@@ -616,8 +663,12 @@ class FeatureSnapshotAdapter:
             reference_norm = np.linalg.norm(reference, axis=1)
             usable = row_valid & (heading_norm > 1e-12) & (reference_norm > 1e-12)
             heading = heading / np.where(heading_norm > 0, heading_norm, 1.0)[:, None]
-            reference = reference / np.where(reference_norm > 0, reference_norm, 1.0)[:, None]
-            sin_delta = heading[:, 0] * reference[:, 1] - heading[:, 1] * reference[:, 0]
+            reference = (
+                reference / np.where(reference_norm > 0, reference_norm, 1.0)[:, None]
+            )
+            sin_delta = (
+                heading[:, 0] * reference[:, 1] - heading[:, 1] * reference[:, 0]
+            )
             cos_delta = np.sum(heading * reference, axis=1)
             values = np.column_stack((sin_delta, cos_delta))
             valid = np.repeat(usable[:, None], 2, axis=1)
@@ -629,9 +680,7 @@ class FeatureSnapshotAdapter:
             point_indexes = _int64(table, "point_index")
             for segment_id in sorted(set(segments.tolist())):
                 offsets = np.flatnonzero(segments == segment_id)
-                order = offsets[
-                    np.lexsort((point_indexes[offsets], times[offsets]))
-                ]
+                order = offsets[np.lexsort((point_indexes[offsets], times[offsets]))]
                 for previous, current in zip(order[:-1], order[1:]):
                     dt_seconds = (times[current] - times[previous]) / 1_000_000_000.0
                     if row_valid[previous] and row_valid[current] and dt_seconds > 0:
@@ -664,7 +713,9 @@ class FeatureSnapshotAdapter:
             valid = row_valid[:, None]
         elif transform == "one_hot":
             categories = [float(value) for value in parameters["categories"]]
-            values = np.column_stack([raw[:, 0] == value for value in categories]).astype(float)
+            values = np.column_stack(
+                [raw[:, 0] == value for value in categories]
+            ).astype(float)
             valid = np.repeat(row_valid[:, None], len(categories), axis=1)
         elif transform == "threshold_bins":
             edges = np.asarray(parameters["edges"], dtype=float)
@@ -741,7 +792,11 @@ class FeatureSnapshotAdapter:
         else:
             semantics = tuple(composition.get("parameters", {}).get("semantics", ()))
             if semantics == ("uphill_projection", "contour_projection"):
-                if len(inputs) != 2 or inputs[0].values.shape[1] < 3 or inputs[1].values.shape[1] != 2:
+                if (
+                    len(inputs) != 2
+                    or inputs[0].values.shape[1] < 3
+                    or inputs[1].values.shape[1] != 2
+                ):
                     raise PIRC21AdapterError(
                         f"terrain projection inputs are invalid: {composition_id}"
                     )
@@ -755,7 +810,9 @@ class FeatureSnapshotAdapter:
                         np.sum(history * contour, axis=1),
                     )
                 )
-                usable = inputs[0].valid[:, 1:3].all(axis=1) & inputs[1].valid.all(axis=1)
+                usable = inputs[0].valid[:, 1:3].all(axis=1) & inputs[1].valid.all(
+                    axis=1
+                )
                 valid = np.repeat(usable[:, None], 2, axis=1)
             else:
                 if len(inputs) != 2 or inputs[0].values.shape != inputs[1].values.shape:
@@ -771,7 +828,12 @@ class FeatureSnapshotAdapter:
         return _VariantResult(np.where(valid, values, np.nan), valid, columns)
 
     def transform(
-        self, split: str, *, final_eval_unlock: str | None = None
+        self,
+        split: str,
+        *,
+        final_eval_unlock: str | None = None,
+        file_ids: Sequence[str] | None = None,
+        segment_ids: Sequence[str] | None = None,
     ) -> PointFeatureBatch:
         fitted_required = any(
             self._variant_by_id[variant_id]["fit_scope"] == "train_only"
@@ -781,7 +843,12 @@ class FeatureSnapshotAdapter:
             if fitted_required:
                 raise PIRC21AdapterError("fit() is required for this selection")
             self._fit_state = {}
-        table = self._load(split, final_eval_unlock=final_eval_unlock)
+        table = self._load(
+            split,
+            final_eval_unlock=final_eval_unlock,
+            file_ids=file_ids,
+            segment_ids=segment_ids,
+        )
         variants = {
             variant_id: self._variant(table, variant_id)
             for variant_id in self.selection.variant_ids
@@ -793,28 +860,26 @@ class FeatureSnapshotAdapter:
         if results:
             values = np.concatenate([result.values for result in results], axis=1)
             valid = np.concatenate([result.valid for result in results], axis=1)
-            columns = tuple(
-                column for result in results for column in result.columns
-            )
+            columns = tuple(column for result in results for column in result.columns)
         else:
             values = np.empty((table.num_rows, 0), dtype=float)
             valid = np.empty((table.num_rows, 0), dtype=bool)
             columns = ()
-        entries = self._entries(split)
+        entries = self._entries(split, file_ids=file_ids)
         cache_identity = _canonical_hash(
             {
                 "adapter_version": ADAPTER_VERSION,
                 "dataset_id": self.dataset_id,
                 "snapshot_id": self.manifest["snapshot_id"],
-                "content_inventory_sha256": self.manifest[
-                    "content_inventory_sha256"
-                ],
+                "content_inventory_sha256": self.manifest["content_inventory_sha256"],
                 "feature_spec_id": self.feature_spec_id,
                 "feature_spec_sha256": self.manifest["feature_spec_sha256"],
                 "selection_fingerprint": self.selection_fingerprint,
                 "fit_state_fingerprint": self.fit_state_fingerprint,
                 "split": split,
                 "split_files": [str(item["sha256"]) for item in entries],
+                "file_ids": sorted(file_ids) if file_ids is not None else None,
+                "segment_ids": sorted(segment_ids) if segment_ids is not None else None,
             }
         )
         batch = PointFeatureBatch(
@@ -837,9 +902,9 @@ class FeatureSnapshotAdapter:
             raise PIRC21AdapterError(
                 "segment_aggregations must be selected for segment output"
             )
-        return self.transform(
-            split, final_eval_unlock=final_eval_unlock
-        ).aggregate(self.selection.segment_aggregations)
+        return self.transform(split, final_eval_unlock=final_eval_unlock).aggregate(
+            self.selection.segment_aggregations
+        )
 
 
 __all__ = [

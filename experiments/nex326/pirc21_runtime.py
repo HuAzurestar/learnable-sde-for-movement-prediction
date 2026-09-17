@@ -27,6 +27,13 @@ class PIRC21RuntimeError(ValueError):
     """A feature snapshot cannot be aligned with the SDE cohort."""
 
 
+def _pirc20_file_id(segment_id: str) -> str | None:
+    parts = segment_id.split(":", 3)
+    if len(parts) != 4 or parts[0] != "r1t" or not parts[1]:
+        return None
+    return parts[1]
+
+
 class PIRC21Segment(Segment):
     """A Segment whose additional conditions are owned by a PIRC-21 identity."""
 
@@ -73,7 +80,9 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _extend_implementation_identity(identity: Mapping[str, object]) -> dict[str, object]:
+def _extend_implementation_identity(
+    identity: Mapping[str, object],
+) -> dict[str, object]:
     extended = dict(identity)
     files = [dict(item) for item in identity["files"]]  # type: ignore[index]
     existing = {str(item["path"]) for item in files}
@@ -131,20 +140,46 @@ class PIRC21FeatureRuntime:
             ),
         }
 
-    def _batch(self, split: str) -> PointFeatureBatch:
+    def _batch(self, split: str, segments: tuple[Segment, ...]) -> PointFeatureBatch:
+        segment_ids = tuple(segment.segment_id for segment in segments)
+        parsed_file_ids = tuple(_pirc20_file_id(value) for value in segment_ids)
+        file_ids = (
+            tuple(sorted(value for value in parsed_file_ids if value is not None))
+            if all(value is not None for value in parsed_file_ids)
+            else None
+        )
         if split == "final_eval":
             return self.adapter.transform(
                 split,
                 final_eval_unlock=self.adapter.dataset_id,
+                file_ids=file_ids,
+                segment_ids=segment_ids,
             )
-        return self.adapter.transform(split)
+        return self.adapter.transform(
+            split,
+            file_ids=file_ids,
+            segment_ids=segment_ids,
+        )
 
     def attach(self, cohort: Cohort) -> Cohort:
         if cohort.data_version != self.adapter.dataset_id:
             raise PIRC21RuntimeError(
                 "feature snapshot dataset does not match the cohort data version"
             )
-        batches: dict[str, PointFeatureBatch] = {}
+        scoped_segments: dict[str, list[Segment]] = {}
+        for role, segments in cohort.splits.items():
+            if not segments:
+                continue
+            snapshot_split = _ROLE_TO_SNAPSHOT_SPLIT.get(role)
+            if snapshot_split is None:
+                raise PIRC21RuntimeError(
+                    f"PIRC-21 features are unavailable for cohort role: {role}"
+                )
+            scoped_segments.setdefault(snapshot_split, []).extend(segments)
+        batches = {
+            split: self._batch(split, tuple(segments))
+            for split, segments in scoped_segments.items()
+        }
         attached_splits: dict[str, tuple[Segment, ...]] = {}
         for role, segments in cohort.splits.items():
             if not segments:
@@ -155,9 +190,6 @@ class PIRC21FeatureRuntime:
                 raise PIRC21RuntimeError(
                     f"PIRC-21 features are unavailable for cohort role: {role}"
                 )
-            if snapshot_split not in batches:
-                batch = self._batch(snapshot_split)
-                batches[snapshot_split] = batch
             batch = batches[snapshot_split]
             matrix = batch.model_matrix()
             attached: list[Segment] = []
