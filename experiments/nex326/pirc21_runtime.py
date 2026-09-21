@@ -12,9 +12,15 @@ import numpy as np
 from .cohort import Cohort, Segment
 from .pirc20_runtime import PIRC20NEX326Runner
 from .pirc21_adapter import FeatureSelection, FeatureSnapshotAdapter, PointFeatureBatch
+from .pirc21_interactions import (
+    INTERACTION_REGISTRY_VERSION,
+    evaluate_interactions,
+    interaction_output_columns,
+    interaction_registry_fingerprint,
+)
 
 
-RUNTIME_VERSION = "pirc21-nex326-runtime-v1"
+RUNTIME_VERSION = "pirc21-nex326-runtime-v2"
 _ROLE_TO_SNAPSHOT_SPLIT = {
     "train": "train",
     "adapt": "train",
@@ -124,12 +130,21 @@ class PIRC21FeatureRuntime:
         model_columns = [f"pirc21:{name}" for name in output_columns]
         if selection.include_validity_indicators:
             model_columns.extend(f"pirc21:{name}__valid" for name in output_columns)
+        interaction_columns = interaction_output_columns(selection.interaction_ids)
+        model_columns.extend(f"pirc21:{name}" for name in interaction_columns)
+        if selection.include_validity_indicators:
+            model_columns.extend(
+                f"pirc21:{name}__valid" for name in interaction_columns
+            )
+        self.interaction_columns = interaction_columns
         self.condition_names = tuple(model_columns)
 
     @property
     def identity_record(self) -> dict[str, object]:
         return {
             "runtime_version": RUNTIME_VERSION,
+            "interaction_registry_version": INTERACTION_REGISTRY_VERSION,
+            "interaction_registry_sha256": interaction_registry_fingerprint(),
             **self.adapter.identity_record,
             "model_condition_names": list(self.condition_names),
             "runtime_identity_sha256": _canonical_hash(
@@ -232,8 +247,49 @@ class PIRC21FeatureRuntime:
                     )
                 conditions = dict(segment.conditions)
                 selected = matrix[indexes]
-                for column_index, name in enumerate(self.condition_names):
+                base_condition_names = tuple(
+                    f"pirc21:{name}" for name in batch.columns
+                )
+                if self.adapter.selection.include_validity_indicators:
+                    base_condition_names += tuple(
+                        f"pirc21:{name}__valid" for name in batch.columns
+                    )
+                for column_index, name in enumerate(base_condition_names):
                     conditions[name] = selected[:, column_index].copy()
+                source_values = {
+                    name: batch.values[indexes, column_index].copy()
+                    for column_index, name in enumerate(batch.columns)
+                }
+                source_valid = {
+                    name: batch.valid[indexes, column_index].copy()
+                    for column_index, name in enumerate(batch.columns)
+                }
+                interactions = evaluate_interactions(
+                    segment,
+                    source_values,
+                    source_valid,
+                    self.adapter.selection.interaction_ids,
+                )
+                if (
+                    not self.adapter.selection.include_validity_indicators
+                    and not interactions.valid.all()
+                ):
+                    raise PIRC21RuntimeError(
+                        "validity indicators cannot be disabled while interaction "
+                        "values are missing"
+                    )
+                interaction_numeric = np.where(
+                    interactions.valid, interactions.values, 0.0
+                )
+                for column_index, name in enumerate(interactions.columns):
+                    conditions[f"pirc21:{name}"] = interaction_numeric[
+                        :, column_index
+                    ].copy()
+                if self.adapter.selection.include_validity_indicators:
+                    for column_index, name in enumerate(interactions.columns):
+                        conditions[f"pirc21:{name}__valid"] = interactions.valid[
+                            :, column_index
+                        ].astype(float)
                 attached.append(
                     PIRC21Segment(
                         segment_id=segment.segment_id,

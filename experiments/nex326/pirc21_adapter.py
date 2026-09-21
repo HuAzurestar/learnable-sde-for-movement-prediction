@@ -20,6 +20,13 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
+from .pirc21_interactions import (
+    INTERACTION_REGISTRY_VERSION,
+    PIRC21InteractionError,
+    interaction_registry_fingerprint,
+    validate_interaction_selection,
+)
+
 
 FEATURE_SPEC_SCHEMA_VERSION = "pirc21-feature-spec-v1"
 FEATURE_SNAPSHOT_SCHEMA_VERSION = "pirc21-feature-snapshot-v1"
@@ -151,6 +158,7 @@ class FeatureSelection:
 
     variant_ids: tuple[str, ...] = ()
     composition_ids: tuple[str, ...] = ()
+    interaction_ids: tuple[str, ...] = ()
     segment_aggregations: tuple[str, ...] = ()
     include_validity_indicators: bool = True
 
@@ -158,6 +166,7 @@ class FeatureSelection:
         for name, values in (
             ("variant_ids", self.variant_ids),
             ("composition_ids", self.composition_ids),
+            ("interaction_ids", self.interaction_ids),
             ("segment_aggregations", self.segment_aggregations),
         ):
             if not isinstance(values, tuple) or len(values) != len(set(values)):
@@ -359,6 +368,9 @@ class FeatureSnapshotAdapter:
             "processing_version": str(self.spec["processing_version"]),
             "variant_ids": list(self.selection.variant_ids),
             "composition_ids": list(self.selection.composition_ids),
+            "interaction_ids": list(self.selection.interaction_ids),
+            "interaction_registry_version": INTERACTION_REGISTRY_VERSION,
+            "interaction_registry_sha256": interaction_registry_fingerprint(),
             "segment_aggregation_ids": list(self.selection.segment_aggregations),
             "selection_fingerprint": self.selection_fingerprint,
             "fit_state": self._fit_state or {},
@@ -372,6 +384,8 @@ class FeatureSnapshotAdapter:
                 "adapter_version": ADAPTER_VERSION,
                 "variant_ids": self.selection.variant_ids,
                 "composition_ids": self.selection.composition_ids,
+                "interaction_ids": self.selection.interaction_ids,
+                "interaction_registry_sha256": interaction_registry_fingerprint(),
                 "segment_aggregations": self.selection.segment_aggregations,
                 "include_validity_indicators": self.selection.include_validity_indicators,
             }
@@ -466,6 +480,12 @@ class FeatureSnapshotAdapter:
             output_names.extend(columns)
         if len(output_names) != len(set(output_names)):
             raise PIRC21AdapterError("selected adapter output columns are not unique")
+        try:
+            validate_interaction_selection(
+                self.selection.interaction_ids, output_names
+            )
+        except PIRC21InteractionError as error:
+            raise PIRC21AdapterError(str(error)) from error
         aggregation_ids = {
             str(item["aggregation_id"])
             for item in self.spec.get("segment_aggregations", ())

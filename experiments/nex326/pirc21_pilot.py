@@ -2,7 +2,8 @@
 
 This is an execution/readiness check, not a feature-selection sweep or a source of
 paper conclusions.  It runs one frozen NEX326 arm with a deterministic small cohort
-while retaining one registered representation for every PIRC-21 factor.
+while retaining one primary representation for every PIRC-21 factor plus the
+explicit dependencies needed by the registered mathematical interactions.
 """
 
 from __future__ import annotations
@@ -38,6 +39,39 @@ PILOT_VARIANTS_BY_FACTOR = {
     "osm_cliff": "cliff.distance_log1p",
     "historical_motion": "history.direction",
 }
+PILOT_ADDITIONAL_VARIANT_IDS = (
+    "road.direction",
+    "path.direction",
+    "rail.direction",
+    "river.direction",
+    "jrc.direction",
+    "jrc.attributes",
+    "navigable_water.direction",
+    "ridge.direction",
+    "cliff.direction",
+)
+PILOT_INTERACTION_IDS = (
+    "history.motion",
+    "history.acceleration",
+    "surface.gradient",
+    "surface.velocity",
+    "surface.directional_curvature",
+    "worldcover.grouped_speed",
+    "worldcover.transition",
+    "road.motion",
+    "path.motion",
+    "rail.motion",
+    "river.motion",
+    "jrc.motion",
+    "jrc.attribute_rates",
+    "navigable_water.motion",
+    "ridge.motion",
+    "cliff.motion",
+)
+PILOT_VARIANT_IDS = (
+    *PILOT_VARIANTS_BY_FACTOR.values(),
+    *PILOT_ADDITIONAL_VARIANT_IDS,
+)
 
 
 class PIRC21PilotError(ValueError):
@@ -88,7 +122,8 @@ def build_pilot_receipt(
         "runtime_identity_sha256": runtime_identity_sha256,
         "transition_count": transition_count,
         "selected_factor_ids": sorted(PILOT_VARIANTS_BY_FACTOR),
-        "selected_variant_ids": list(PILOT_VARIANTS_BY_FACTOR.values()),
+        "selected_variant_ids": list(PILOT_VARIANT_IDS),
+        "selected_interaction_ids": list(PILOT_INTERACTION_IDS),
         "configuration_ids": list(PILOT_CONFIGURATION_IDS),
         "cohort_fingerprint": cohort_fingerprint,
         "maximum_segments_per_role": maximum_segments_per_role,
@@ -162,7 +197,8 @@ def run_pilot(
     baseline_record = baseline_runner.run_one(arm, subconfig)
 
     selection = FeatureSelection(
-        variant_ids=tuple(PILOT_VARIANTS_BY_FACTOR.values()),
+        variant_ids=PILOT_VARIANT_IDS,
+        interaction_ids=PILOT_INTERACTION_IDS,
         include_validity_indicators=True,
     )
     feature_runtime = PIRC21FeatureRuntime(snapshot_root, selection)
@@ -255,6 +291,8 @@ if __name__ == "__main__":  # pragma: no cover
 __all__ = [
     "PILOT_CONFIGURATION_IDS",
     "PILOT_SCHEMA_VERSION",
+    "PILOT_INTERACTION_IDS",
+    "PILOT_VARIANT_IDS",
     "PILOT_VARIANTS_BY_FACTOR",
     "PIRC21PilotError",
     "build_pilot_receipt",

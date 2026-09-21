@@ -4,6 +4,8 @@ import pytest
 
 from experiments.nex326.pirc21_pilot import (
     PILOT_CONFIGURATION_IDS,
+    PILOT_INTERACTION_IDS,
+    PILOT_VARIANT_IDS,
     PILOT_VARIANTS_BY_FACTOR,
     PIRC21PilotError,
     build_pilot_receipt,
@@ -36,6 +38,8 @@ def test_pilot_receipt_covers_every_factor_and_both_configurations():
 
     assert len(PILOT_VARIANTS_BY_FACTOR) == 13
     assert set(receipt["selected_factor_ids"]) == set(PILOT_VARIANTS_BY_FACTOR)
+    assert receipt["selected_variant_ids"] == list(PILOT_VARIANT_IDS)
+    assert receipt["selected_interaction_ids"] == list(PILOT_INTERACTION_IDS)
     assert tuple(receipt["configuration_ids"]) == PILOT_CONFIGURATION_IDS
     assert receipt["paper_conclusions_ready"] is False
     assert len(receipt["receipt_identity_sha256"]) == 64

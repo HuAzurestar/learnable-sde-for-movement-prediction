@@ -381,7 +381,11 @@ def test_cache_identity_changes_with_selected_factor_set(tmp_path):
     elevation = FeatureSnapshotAdapter(
         snapshot, FeatureSelection(variant_ids=("elevation.absolute",))
     ).transform("train")
+    motion = FeatureSnapshotAdapter(
+        snapshot, FeatureSelection(interaction_ids=("history.motion",))
+    ).transform("train")
     assert empty.cache_identity != elevation.cache_identity
+    assert empty.cache_identity != motion.cache_identity
 
 
 def test_transform_can_scope_large_snapshot_to_selected_segments(tmp_path):
@@ -471,7 +475,10 @@ def test_feature_runtime_attaches_adapter_matrix_to_actual_sde_transition_input(
     cohort.validate()
     runtime = PIRC21FeatureRuntime(
         snapshot,
-        FeatureSelection(variant_ids=("road.distance_log1p",)),
+        FeatureSelection(
+            variant_ids=("road.distance_log1p",),
+            interaction_ids=("history.motion",),
+        ),
     )
     attached = runtime.attach(cohort)
     attached_segment = attached.splits["train"][0]
@@ -479,6 +486,12 @@ def test_feature_runtime_attaches_adapter_matrix_to_actual_sde_transition_input(
     assert runtime.condition_names == (
         "pirc21:v_road_distance_log1p",
         "pirc21:v_road_distance_log1p__valid",
+        "pirc21:k_velocity_east_mps",
+        "pirc21:k_velocity_north_mps",
+        "pirc21:k_speed_mps",
+        "pirc21:k_velocity_east_mps__valid",
+        "pirc21:k_velocity_north_mps__valid",
+        "pirc21:k_speed_mps__valid",
     )
     assert np.allclose(
         attached_segment.conditions["pirc21:v_road_distance_log1p"],
@@ -490,6 +503,15 @@ def test_feature_runtime_attaches_adapter_matrix_to_actual_sde_transition_input(
     transitions = build_transition_data(
         attached.splits["train"], runtime.condition_names, "single_gaussian"
     )
-    assert transitions.features.shape == (3, 5)
+    assert attached_segment.conditions["pirc21:k_speed_mps"].tolist() == [
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+    ]
+    assert attached_segment.conditions[
+        "pirc21:k_speed_mps__valid"
+    ].tolist() == [0.0, 1.0, 1.0, 1.0]
+    assert transitions.features.shape == (3, 11)
     assert attached.fingerprint != cohort.fingerprint
     assert runtime.identity_record["runtime_identity_sha256"]
