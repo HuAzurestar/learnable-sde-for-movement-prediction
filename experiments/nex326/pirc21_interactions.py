@@ -30,6 +30,7 @@ class InteractionColumn:
 @dataclass(frozen=True)
 class InteractionDefinition:
     interaction_id: str
+    factor_ids: tuple[str, ...]
     operator: str
     formula: str
     required_columns: tuple[str, ...]
@@ -40,6 +41,7 @@ class InteractionDefinition:
     def record(self) -> dict[str, object]:
         return {
             "interaction_id": self.interaction_id,
+            "factor_ids": list(self.factor_ids),
             "operator": self.operator,
             "formula": self.formula,
             "required_columns": list(self.required_columns),
@@ -64,13 +66,17 @@ def _column(name: str, unit: str, role: str) -> InteractionColumn:
 
 
 def _geometry_definition(
-    prefix: str, distance_column: str, direction_prefix: str | None = None
+    prefix: str,
+    factor_id: str,
+    distance_column: str,
+    direction_prefix: str | None = None,
 ) -> InteractionDefinition:
     direction_prefix = direction_prefix or prefix
     direction_east = f"v_{direction_prefix}_direction_east"
     direction_north = f"v_{direction_prefix}_direction_north"
     return InteractionDefinition(
         interaction_id=f"{prefix}.motion",
+        factor_ids=(factor_id,),
         operator="geometry_motion",
         formula=(
             "d=expm1(log_distance); approach=dot(v,n); "
@@ -104,6 +110,7 @@ def _geometry_definition(
 _BASE_DEFINITIONS = (
     InteractionDefinition(
         interaction_id="history.motion",
+        factor_ids=("historical_motion",),
         operator="history_motion",
         formula="v_i=(x_i-x_(i-1))/(t_i-t_(i-1)); speed=||v_i||",
         required_columns=(),
@@ -116,6 +123,7 @@ _BASE_DEFINITIONS = (
     ),
     InteractionDefinition(
         interaction_id="history.acceleration",
+        factor_ids=("historical_motion",),
         operator="history_acceleration",
         formula=(
             "a_i=(v_i-v_(i-1))/(t_i-t_(i-1)); "
@@ -134,6 +142,7 @@ _BASE_DEFINITIONS = (
     ),
     InteractionDefinition(
         interaction_id="surface.gradient",
+        factor_ids=("dem_surface",),
         operator="surface_gradient",
         formula="gradient=-tan(slope)*downslope_unit",
         required_columns=(
@@ -149,6 +158,7 @@ _BASE_DEFINITIONS = (
     ),
     InteractionDefinition(
         interaction_id="surface.velocity",
+        factor_ids=("dem_surface",),
         operator="surface_velocity",
         formula=(
             "uphill_speed=dot(v,gradient/||gradient||); "
@@ -169,6 +179,7 @@ _BASE_DEFINITIONS = (
     ),
     InteractionDefinition(
         interaction_id="surface.directional_curvature",
+        factor_ids=("dem_surface",),
         operator="surface_directional_curvature",
         formula=(
             "speed^2*dot(gradient_i-gradient_(i-1),unit(v_i))/"
@@ -193,6 +204,7 @@ _BASE_DEFINITIONS = (
     ),
     InteractionDefinition(
         interaction_id="worldcover.grouped_speed",
+        factor_ids=("worldcover",),
         operator="categorical_speed",
         formula="grouped_one_hot(class)*||v||",
         required_columns=(
@@ -213,6 +225,7 @@ _BASE_DEFINITIONS = (
     ),
     InteractionDefinition(
         interaction_id="worldcover.transition",
+        factor_ids=("worldcover",),
         operator="categorical_transition",
         formula="1[argmax(group_i) != argmax(group_(i-1))]",
         required_columns=(
@@ -228,6 +241,7 @@ _BASE_DEFINITIONS = (
     ),
     InteractionDefinition(
         interaction_id="jrc.attribute_rates",
+        factor_ids=("jrc_surface_water",),
         operator="field_time_difference",
         formula="delta(field)/delta(t) over the visible trajectory prefix",
         required_columns=(
@@ -251,17 +265,18 @@ _BASE_DEFINITIONS = (
 )
 
 _GEOMETRY_COLUMNS = {
-    "road": ("v_road_distance_log1p", "road"),
-    "path": ("v_path_distance_log1p", "path"),
-    "rail": ("v_rail_distance_log1p", "rail"),
-    "river": ("v_river_distance_log1p", "river"),
-    "jrc": ("v_jrc_water_distance_log1p", "jrc_water"),
+    "road": ("overture_road", "v_road_distance_log1p", "road"),
+    "path": ("overture_path", "v_path_distance_log1p", "path"),
+    "rail": ("overture_rail", "v_rail_distance_log1p", "rail"),
+    "river": ("hydrorivers_river", "v_river_distance_log1p", "river"),
+    "jrc": ("jrc_surface_water", "v_jrc_water_distance_log1p", "jrc_water"),
     "navigable_water": (
+        "overture_navigable_water",
         "v_navigable_water_distance_log1p",
         "navigable_water",
     ),
-    "ridge": ("v_ridge_distance_log1p", "ridge"),
-    "cliff": ("v_cliff_distance_log1p", "cliff"),
+    "ridge": ("osm_ridge", "v_ridge_distance_log1p", "ridge"),
+    "cliff": ("osm_cliff", "v_cliff_distance_log1p", "cliff"),
 }
 
 INTERACTION_DEFINITIONS = {
@@ -269,8 +284,12 @@ INTERACTION_DEFINITIONS = {
     for item in (
         *_BASE_DEFINITIONS,
         *(
-            _geometry_definition(prefix, distance_column, direction_prefix)
-            for prefix, (distance_column, direction_prefix) in _GEOMETRY_COLUMNS.items()
+            _geometry_definition(prefix, factor_id, distance_column, direction_prefix)
+            for prefix, (
+                factor_id,
+                distance_column,
+                direction_prefix,
+            ) in _GEOMETRY_COLUMNS.items()
         ),
     )
 }
