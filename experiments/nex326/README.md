@@ -58,6 +58,45 @@ the RunRecord implementation identity; the receipt-bound legacy `runner.py` and
 to apply the approved exclusions (Arms 13, 17, and 22) to every replicate and record
 the policy hash in the batch manifest.
 
+### PIRC-21 versioned terrain features
+
+`experiments.nex326.pirc21_adapter.FeatureSnapshotAdapter` consumes an immutable
+PIRC-21 FeatureRow snapshot independently of the legacy PIRC-20 condition view.
+`FeatureSelection` orders variant IDs, composition IDs, causal interaction IDs, and
+optional segment aggregation IDs; changing any selection changes the cache identity
+without changing adapter code. An empty selection is the registered no-terrain
+configuration.
+
+Interactions are evaluated by `pirc21_interactions.py` after exact FeatureRow to
+trajectory alignment. They combine registered spatial fields with velocity derived
+only from the current point and its visible predecessor. Each interaction records its
+formula, dependency columns, units, validity rule, and stable registry hash. Examples
+include `surface.velocity` (`dot(v, gradient)`),
+`surface.directional_curvature` (a causal finite-difference approximation of
+`v^T H_h v`), and `road.motion` (approach speed, tangential speed, distance rate,
+time-to-contact, and speed-normalized distance). Interactions are independently
+selectable and are never enabled merely because their source factor is present.
+
+```python
+selection = FeatureSelection(
+    variant_ids=("surface.orientation", "road.distance_log1p", "road.direction"),
+    interaction_ids=("surface.velocity", "road.motion"),
+)
+```
+
+Call `fit()` before transforming a selection containing `train_only` variants. The
+adapter fits those statistics from the snapshot's `train` split only and exposes an
+`identity_record` suitable for RunRecord configuration. It includes the snapshot,
+content inventory, feature spec/version, ordered selection, and fitted-state hashes.
+Final evaluation remains sealed unless the exact dataset ID is supplied. Missing
+features remain NaN plus an explicit validity mask; `model_matrix()` may replace the
+numeric slot with zero only while appending that mask, and refuses to hide missingness
+when validity indicators are disabled.
+
+The old `dem_elev/dem_slope/landcover/has_map` reader remains available through the
+PIRC-20 path for reproduction only. The PIRC-21 adapter never reads `has_map` and does
+not use it to decide whether a configured experiment is valid.
+
 When a validated seed already exists as a standalone run, combine it with later
 replicate roots without rerunning or copying prediction artifacts:
 

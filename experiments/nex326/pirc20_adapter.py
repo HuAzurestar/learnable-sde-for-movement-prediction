@@ -100,14 +100,18 @@ def _rank(block_id: str) -> str:
     return hashlib.sha256(f"{ADAPT_SEED}:{block_id}".encode("utf-8")).hexdigest()
 
 
-def _roles(samples: Sequence[PIRC20Sample], final_eval_unlocked: bool) -> dict[str, str]:
+def _roles(
+    samples: Sequence[PIRC20Sample], final_eval_unlocked: bool
+) -> dict[str, str]:
     train_blocks = sorted(
         {sample.independent_block_id for sample in samples if sample.split == "train"},
         key=_rank,
     )
     if len(train_blocks) < 2:
         raise PIRC20AdapterError("outer train needs at least two independent blocks")
-    train_count = max(1, min(len(train_blocks) - 1, round((1.0 - ADAPT_FRACTION) * len(train_blocks))))
+    train_count = max(
+        1, min(len(train_blocks) - 1, round((1.0 - ADAPT_FRACTION) * len(train_blocks)))
+    )
     fit_blocks = set(train_blocks[:train_count])
     roles: dict[str, str] = {}
     for sample in samples:
@@ -143,7 +147,9 @@ class _ConditionStore:
                 try:
                     path.relative_to(self.root)
                 except ValueError as error:
-                    raise PIRC20AdapterError("condition path escapes its declared root") from error
+                    raise PIRC20AdapterError(
+                        "condition path escapes its declared root"
+                    ) from error
                 if file_id in self.entries:
                     raise PIRC20AdapterError(f"duplicate condition identity: {file_id}")
                 self.entries[file_id] = (path, digest)
@@ -178,7 +184,9 @@ class _ConditionStore:
             self.cache.popitem(last=False)
         return arrays
 
-    def select(self, file_id: str, indexes: np.ndarray) -> tuple[dict[str, np.ndarray], bool]:
+    def select(
+        self, file_id: str, indexes: np.ndarray
+    ) -> tuple[dict[str, np.ndarray], bool]:
         arrays = self._load(file_id)
         if indexes.size == 0 or indexes.min() < 0:
             raise PIRC20AdapterError(f"invalid condition indexes: {file_id}")
@@ -209,7 +217,9 @@ def _joined_rows(
 ) -> Iterator[list[dict[str, object]]]:
     connection = duckdb.connect()
     try:
-        connection.execute("CREATE TEMP TABLE wanted(segment_id VARCHAR, sample_ordinal BIGINT)")
+        connection.execute(
+            "CREATE TEMP TABLE wanted(segment_id VARCHAR, sample_ordinal BIGINT)"
+        )
         connection.executemany("INSERT INTO wanted VALUES (?, ?)", wanted)
         query = """
             WITH alignment_ranked AS (
@@ -287,7 +297,9 @@ def _joined_rows(
         if group:
             yield group
     except duckdb.Error as error:
-        raise PIRC20AdapterError(f"cannot join PIRC-20 point identities: {error}") from error
+        raise PIRC20AdapterError(
+            f"cannot join PIRC-20 point identities: {error}"
+        ) from error
     finally:
         connection.close()
 
@@ -306,15 +318,26 @@ def _segment(
     if any(str(row["segment_id"]) != sample.segment_id for row in rows):
         raise PIRC20AdapterError(f"segment identity mismatch: {sample.segment_id}")
     if any(str(row["file_id"]) != sample.file_id for row in rows):
-        raise PIRC20AdapterError(f"alignment file identity mismatch: {sample.segment_id}")
+        raise PIRC20AdapterError(
+            f"alignment file identity mismatch: {sample.segment_id}"
+        )
     if any(str(row["trajectory_file_id"]) != sample.file_id for row in rows):
-        raise PIRC20AdapterError(f"trajectory file identity mismatch: {sample.segment_id}")
-    if any(int(row["alignment_source_count"]) != int(row["trajectory_source_count"]) for row in rows):
+        raise PIRC20AdapterError(
+            f"trajectory file identity mismatch: {sample.segment_id}"
+        )
+    if any(
+        int(row["alignment_source_count"]) != int(row["trajectory_source_count"])
+        for row in rows
+    ):
         raise PIRC20AdapterError(f"source segment count mismatch: {sample.segment_id}")
 
-    epoch_ns = np.asarray([int(row["absolute_epoch_ns"]) for row in rows], dtype=np.int64)
+    epoch_ns = np.asarray(
+        [int(row["absolute_epoch_ns"]) for row in rows], dtype=np.int64
+    )
     if np.any(np.diff(epoch_ns) < 0):
-        raise PIRC20AdapterError(f"backward time survived refinement: {sample.segment_id}")
+        raise PIRC20AdapterError(
+            f"backward time survived refinement: {sample.segment_id}"
+        )
     # Exact duplicate timestamps cannot form a positive SDE step.  Keep the first
     # observation at each timestamp so a duplicate spanning the forecast boundary
     # can never import a target state into observed history.
@@ -326,6 +349,7 @@ def _segment(
         raise _UnusableSample(
             f"exact-time de-duplication leaves an unusable sample: {sample.segment_id}"
         )
+
     # The legacy NEX326 runner owns a midpoint boundary.  Preserve the published
     # history/target boundary by retaining h history points and h or h+1 target
     # points.  When duplicate removal made a side longer, downsample by position
@@ -345,23 +369,33 @@ def _segment(
     time = (kept_epoch_ns - kept_epoch_ns[0]).astype(float) / 1_000_000_000.0
     state = np.column_stack(
         (
-            np.asarray([float(row["x"]) for row in rows], dtype=float)[selected_positions],
-            np.asarray([float(row["y"]) for row in rows], dtype=float)[selected_positions],
+            np.asarray([float(row["x"]) for row in rows], dtype=float)[
+                selected_positions
+            ],
+            np.asarray([float(row["y"]) for row in rows], dtype=float)[
+                selected_positions
+            ],
         )
     )
     condition_indexes = np.asarray(
         [int(row["source_point_index"]) for row in rows], dtype=int
     )[selected_positions]
     feature_values, has_terrain = conditions.select(sample.file_id, condition_indexes)
-    source_relative = np.asarray([float(row["source_time"]) for row in rows], dtype=float)
+    source_relative = np.asarray(
+        [float(row["source_time"]) for row in rows], dtype=float
+    )
     release_relative = np.asarray(
         [float(row["relative_time_s"]) for row in rows], dtype=float
     )
     source_relative -= source_relative[0]
     if not np.allclose(source_relative, release_relative, rtol=1e-9, atol=1e-6):
-        raise PIRC20AdapterError(f"trajectory/release time mismatch: {sample.segment_id}")
+        raise PIRC20AdapterError(
+            f"trajectory/release time mismatch: {sample.segment_id}"
+        )
     city = str(rows[0]["city"] or "").strip()
-    region = city if city and city.lower() != "nan" else str(rows[0]["region"] or "unknown")
+    region = (
+        city if city and city.lower() != "nan" else str(rows[0]["region"] or "unknown")
+    )
     segment = Segment(
         segment_id=sample.segment_id,
         source_domain="human",
@@ -382,6 +416,8 @@ def _fingerprint(
     excluded_sample_ids: Sequence[str],
     *,
     final_eval_unlocked: bool,
+    maximum_segments_per_role: Mapping[str, int] | None,
+    selected_segment_ids: Sequence[str],
 ) -> str:
     role_digest = hashlib.sha256()
     for segment_id, role in sorted(roles.items()):
@@ -404,6 +440,15 @@ def _fingerprint(
         ).hexdigest(),
         "exact_time_excluded_sample_count": len(excluded_sample_ids),
         "final_eval_unlocked": final_eval_unlocked,
+        "maximum_segments_per_role": dict(
+            sorted((maximum_segments_per_role or {}).items())
+        ),
+        "selected_segment_ids_sha256": hashlib.sha256(
+            "".join(
+                f"{segment_id}\n" for segment_id in sorted(selected_segment_ids)
+            ).encode("utf-8")
+        ).hexdigest(),
+        "selected_segment_count": len(selected_segment_ids),
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -415,6 +460,7 @@ def load_pirc20_nex326_cohort(
     condition_root: str | Path,
     *,
     final_eval_unlock: str | None = None,
+    maximum_segments_per_role: Mapping[str, int] | None = None,
 ) -> Cohort:
     """Load one hash-bound PIRC-20 release as the common NEX326 cohort.
 
@@ -427,7 +473,9 @@ def load_pirc20_nex326_cohort(
     if pirc.window.get("mode") != "nex326_midpoint":
         raise PIRC20AdapterError("NEX326 requires the frozen nex326_midpoint window")
     if final_eval_unlock is not None and final_eval_unlock != pirc.cohort_id:
-        raise PIRC20AdapterError("final-eval unlock acknowledgement does not match cohort ID")
+        raise PIRC20AdapterError(
+            "final-eval unlock acknowledgement does not match cohort ID"
+        )
     final_eval_unlocked = final_eval_unlock == pirc.cohort_id
     trajectory = Path(trajectory_path).resolve()
     condition_source = Path(condition_root).resolve()
@@ -441,7 +489,42 @@ def load_pirc20_nex326_cohort(
     if len({sample.segment_id for sample in samples}) != len(samples):
         raise PIRC20AdapterError("nex326_midpoint must contain one sample per segment")
     roles = _roles(samples, final_eval_unlocked)
-    selected = [sample for sample in samples if sample.segment_id in roles]
+    limits = dict(maximum_segments_per_role or {})
+    unknown_roles = set(limits) - {"train", "validation", "adapt", "evaluation"}
+    if unknown_roles or any(
+        isinstance(value, bool) or not isinstance(value, int) or value <= 0
+        for value in limits.values()
+    ):
+        raise PIRC20AdapterError(
+            "maximum_segments_per_role requires positive integers for known roles"
+        )
+    eligible = [sample for sample in samples if sample.segment_id in roles]
+    if limits:
+        selected_ids: set[str] = set()
+        for role in ("train", "validation", "adapt", "evaluation"):
+            candidates = [
+                sample for sample in eligible if roles[sample.segment_id] == role
+            ]
+            limit = limits.get(role)
+            if limit is not None:
+                by_block: dict[str, list[PIRC20Sample]] = {}
+                for sample in candidates:
+                    by_block.setdefault(sample.independent_block_id, []).append(sample)
+                for values in by_block.values():
+                    values.sort(key=lambda sample: sample.segment_id)
+                ordered_blocks = sorted(
+                    by_block, key=lambda block: (_rank(block), block)
+                )
+                candidates = [
+                    sample
+                    for offset in range(max(map(len, by_block.values()), default=0))
+                    for block in ordered_blocks
+                    for sample in by_block[block][offset : offset + 1]
+                ][:limit]
+            selected_ids.update(sample.segment_id for sample in candidates)
+        selected = [sample for sample in eligible if sample.segment_id in selected_ids]
+    else:
+        selected = eligible
     wanted = [(sample.segment_id, ordinal) for ordinal, sample in enumerate(selected)]
     condition_store = _ConditionStore(condition_source, condition_manifest)
     splits: dict[str, list[Segment]] = {
@@ -492,6 +575,8 @@ def load_pirc20_nex326_cohort(
             roles,
             excluded_sample_ids,
             final_eval_unlocked=final_eval_unlocked,
+            maximum_segments_per_role=limits,
+            selected_segment_ids=[sample.segment_id for sample in selected],
         ),
     )
     result.validate()
