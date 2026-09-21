@@ -66,6 +66,10 @@ PUBLIC_NEX326_REFERENCES = {
     Path("tests/test_pirc20_dispersion_calibration.py"),
     Path("tests/test_pirc20_nex326_adapter.py"),
     Path("tests/test_pirc20_runtime.py"),
+    Path("tests/test_pirc21_ablation.py"),
+    Path("tests/test_pirc21_adapter.py"),
+    Path("tests/test_pirc21_interactions.py"),
+    Path("tests/test_pirc21_pilot.py"),
 }
 
 
