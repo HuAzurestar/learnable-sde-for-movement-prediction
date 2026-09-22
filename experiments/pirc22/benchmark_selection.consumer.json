@@ -1,0 +1,70 @@
+{
+  "admission_threshold": 1.8522514847752118,
+  "consumer_identity_sha256": "2b393cb8ce16e0dc9ea1b6f87c32be0744f1b5a713312955476f4ac89d374fb9",
+  "eligible_candidate_keys": [
+    "R12-registered-compositions::linear",
+    "R12-registered-compositions::mlp-medium-32-16",
+    "R12-registered-compositions::mlp-medium-64-32",
+    "R12-registered-compositions::mlp-small-16",
+    "R12-registered-compositions::mlp-small-32"
+  ],
+  "final_eval_read_count": 0,
+  "immutability_policy": "new_selection_version_required",
+  "matrix_id": "pirc22-terrain-representations-v1",
+  "matrix_identity_sha256": "94e91ad3bfe9a5421a697dd8c7f6d964f61bdf95478a7a4a68175707abaa9d4f",
+  "metric": "validation_mean_squared_error",
+  "metric_direction": "lower_is_better",
+  "raw_best": {
+    "candidate_key": "R12-registered-compositions::mlp-small-32",
+    "mean_score": 1.3560094555556153,
+    "trainable_parameter_count": 1890
+  },
+  "schema_version": "pirc22-benchmark-selection-consumer-v1",
+  "selected": {
+    "candidate_key": "R12-registered-compositions::linear",
+    "input_dimension": 56,
+    "layer_count": 0,
+    "mean_score": 1.4500990068043085,
+    "trainable_parameter_count": 114
+  },
+  "selected_configuration": {
+    "candidate_id": "R12-registered-compositions",
+    "categorical_embedding": null,
+    "composition_ids": [
+      "road.log_distance_x_direction",
+      "river.log_distance_x_direction",
+      "worldcover.grouped_x_road_distance",
+      "surface.orientation_x_history"
+    ],
+    "conditioner_id": "linear",
+    "derived_transforms": [],
+    "hidden_widths": [],
+    "interaction_ids": [],
+    "layer_count": 0,
+    "model_input_dim": 56,
+    "training_config": {
+      "batch_size": 256,
+      "learning_rate": 0.001,
+      "maximum_epochs": 40,
+      "minimum_delta": 1e-08,
+      "patience": 6,
+      "weight_decay": 0.0001
+    },
+    "variant_ids": [
+      "road.distance_log1p",
+      "road.direction",
+      "river.distance_log1p",
+      "river.direction",
+      "worldcover.grouped",
+      "surface.orientation",
+      "history.direction"
+    ]
+  },
+  "selection_rationale": "Selected the least complex eligible configuration under the registered parameter/input/layer/runtime ordering.",
+  "selection_version": "pirc22-production-selection-v1",
+  "source_protocol_identity_sha256": "c144a822f691d5af29bf2cff3d75fdd9ed317120b1e59164f452000662e83e82",
+  "source_selection_identity_sha256": "edef6e69e4ab16d36e4fd04f2313e6feb8ef97379b705eb45b18d4ffcd0f61ea",
+  "source_summary_identity_sha256": "04eb6ca287098ff308e28b582bca459147e7527c04323ebea81765dafdef8b32",
+  "standard_error_best": 0.4962420292195966,
+  "status": "selected"
+}
