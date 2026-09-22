@@ -17,14 +17,18 @@ from .representations import (
     RepresentationMatrixError,
     load_representation_matrix,
 )
+from .runner import BenchmarkRunner, BenchmarkRunnerError, PreparedBenchmark
 
 __all__ = [
     "CONDITIONER_SPECS",
     "DEFAULT_MATRIX_PATH",
+    "BenchmarkRunner",
+    "BenchmarkRunnerError",
     "ConditionerError",
     "RepresentationCandidate",
     "RepresentationMatrix",
     "RepresentationMatrixError",
+    "PreparedBenchmark",
     "TerrainConditioner",
     "TrainingConfig",
     "build_conditioner",
