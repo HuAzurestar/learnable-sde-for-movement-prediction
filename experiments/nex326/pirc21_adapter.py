@@ -30,7 +30,7 @@ from .pirc21_interactions import (
 
 FEATURE_SPEC_SCHEMA_VERSION = "pirc21-feature-spec-v1"
 FEATURE_SNAPSHOT_SCHEMA_VERSION = "pirc21-feature-snapshot-v1"
-ADAPTER_VERSION = "pirc21-psde-adapter-v1"
+ADAPTER_VERSION = "pirc21-psde-adapter-v2"
 _FINAL_EVAL_SPLIT = "final_eval"
 _AGGREGATIONS = {"mean", "std", "min", "max", "last", "valid_fraction"}
 _SUPPORTED_TRANSFORMS = {
@@ -326,6 +326,7 @@ class FeatureSnapshotAdapter:
                 self._column_factor[str(column["name"])] = factor_id
         self._validate_selection()
         self._fit_state: dict[str, dict[str, list[float]]] | None = None
+        self._fit_scope: dict[str, object] | None = None
 
     @property
     def dataset_id(self) -> str:
@@ -352,7 +353,9 @@ class FeatureSnapshotAdapter:
 
     @property
     def fit_state_fingerprint(self) -> str:
-        return _canonical_hash(self._fit_state or {})
+        return _canonical_hash(
+            {"statistics": self._fit_state or {}, "scope": self._fit_scope or {}}
+        )
 
     @property
     def identity_record(self) -> dict[str, object]:
@@ -374,6 +377,7 @@ class FeatureSnapshotAdapter:
             "segment_aggregation_ids": list(self.selection.segment_aggregations),
             "selection_fingerprint": self.selection_fingerprint,
             "fit_state": self._fit_state or {},
+            "fit_scope": self._fit_scope or {},
             "fit_state_fingerprint": self.fit_state_fingerprint,
         }
 
@@ -606,7 +610,12 @@ class FeatureSnapshotAdapter:
             valid &= _strings(table, status_name) == "valid"
         return arrays, valid
 
-    def fit(self) -> "FeatureSnapshotAdapter":
+    def fit(
+        self,
+        *,
+        file_ids: Sequence[str] | None = None,
+        segment_ids: Sequence[str] | None = None,
+    ) -> "FeatureSnapshotAdapter":
         """Fit registered train-only transforms from the train split and nothing else."""
 
         train_fitted = [
@@ -615,8 +624,28 @@ class FeatureSnapshotAdapter:
             if self._variant_by_id[variant_id]["fit_scope"] == "train_only"
         ]
         state: dict[str, dict[str, list[float]]] = {}
+        table = self._load(
+            "train",
+            final_eval_unlock=None,
+            file_ids=file_ids,
+            segment_ids=segment_ids,
+        )
+        selected_point_ids = tuple(_strings(table, "point_id").tolist())
+        selected_segment_ids = tuple(
+            sorted(set(_strings(table, "segment_id").tolist()))
+        )
+        self._fit_scope = {
+            "split": "train",
+            "requested_file_ids": sorted(file_ids) if file_ids is not None else None,
+            "requested_segment_ids": (
+                sorted(segment_ids) if segment_ids is not None else None
+            ),
+            "selected_segment_ids": list(selected_segment_ids),
+            "selected_segment_ids_sha256": _canonical_hash(selected_segment_ids),
+            "selected_point_ids_sha256": _canonical_hash(selected_point_ids),
+            "row_count": table.num_rows,
+        }
         if train_fitted:
-            table = self._load("train", final_eval_unlock=None)
             for variant_id in train_fitted:
                 variant = self._variant_by_id[variant_id]
                 values, valid = self._raw_inputs(table, variant)
