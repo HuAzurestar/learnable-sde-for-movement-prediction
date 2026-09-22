@@ -82,6 +82,8 @@ class PreparedBenchmark:
     validation_base_predictions: np.ndarray
     train_block_ids: tuple[str, ...]
     validation_block_ids: tuple[str, ...]
+    train_row_block_ids: tuple[str, ...]
+    validation_row_block_ids: tuple[str, ...]
     control_identity_sha256: str
     problem_identity_sha256: str
     train_tokens: np.ndarray | None = None
@@ -144,6 +146,14 @@ def _validate_problem(
         sorted(fold.validation_block_ids)
     ):
         raise BenchmarkRunnerError("prepared validation blocks do not match the fold")
+    if len(problem.train_row_block_ids) != len(problem.train_features) or len(
+        problem.validation_row_block_ids
+    ) != len(problem.validation_features):
+        raise BenchmarkRunnerError("prepared row block identities disagree")
+    if set(problem.train_row_block_ids) != set(problem.train_block_ids) or set(
+        problem.validation_row_block_ids
+    ) != set(problem.validation_block_ids):
+        raise BenchmarkRunnerError("prepared row block identities are inconsistent")
     if len(problem.control_identity_sha256) != 64 or len(problem.problem_identity_sha256) != 64:
         raise BenchmarkRunnerError("prepared benchmark identity is invalid")
 
@@ -243,6 +253,8 @@ class BenchmarkRunner:
                     "fold_id": fold.fold_id,
                     "identity_sha256": fold.identity_sha256,
                     "validation_block_ids": list(fold.validation_block_ids),
+                    "validation_independent_block_count": fold.independent_block_count,
+                    "validation_segment_count": fold.segment_count,
                 }
                 for fold in self.folds
             ],
@@ -448,6 +460,20 @@ class BenchmarkRunner:
             validation_loss = float(
                 np.mean((validation_predictions - problem.validation_targets) ** 2)
             )
+            validation_row_losses = np.mean(
+                (validation_predictions - problem.validation_targets) ** 2, axis=1
+            )
+            validation_block_metrics = {
+                block_id: float(
+                    np.mean(
+                        validation_row_losses[
+                            np.asarray(problem.validation_row_block_ids, dtype=object)
+                            == block_id
+                        ]
+                    )
+                )
+                for block_id in sorted(set(problem.validation_block_ids))
+            }
             record = {
                 **common,
                 "status": "success",
@@ -465,6 +491,7 @@ class BenchmarkRunner:
                 "validation_independent_block_count": len(
                     set(problem.validation_block_ids)
                 ),
+                "validation_block_metrics": validation_block_metrics,
                 "train_metric": train_loss,
                 "validation_metric": validation_loss,
                 "train_validation_gap": validation_loss - train_loss,

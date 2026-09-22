@@ -14,6 +14,7 @@ from experiments.pirc22.runner import (
     BenchmarkRunnerError,
     PreparedBenchmark,
 )
+from experiments.pirc22.selection import select_benchmark
 from experiments.terrain_benchmark import BenchmarkFold
 
 
@@ -100,6 +101,12 @@ class _Provider:
             validation_base_predictions=base_validation,
             train_block_ids=("train-block-a", "train-block-b"),
             validation_block_ids=fold.validation_block_ids,
+            train_row_block_ids=tuple(
+                "train-block-a" if index < train_rows // 2 else "train-block-b"
+                for index in range(train_rows)
+            ),
+            validation_row_block_ids=(fold.validation_block_ids[0],)
+            * validation_rows,
             control_identity_sha256=_hash(control),
             problem_identity_sha256=_hash(
                 {"candidate": candidate.candidate_id, "fold": fold.fold_id}
@@ -154,11 +161,23 @@ def test_fixture_cube_is_complete_auditable_and_resumable(tmp_path):
         assert record["primary_metric_direction"] == "lower_is_better"
         assert record["train_independent_block_count"] == 2
         assert record["validation_independent_block_count"] == 1
+        assert set(record["validation_block_metrics"]) == {
+            f"validation-block-{int(record['fold_id'].rsplit('-', 1)[1])}"
+        }
         assert record["epochs_completed"] <= 8
         assert set(record["artifacts"]) == {
             "checkpoint.json",
             "learning_curve.json",
         }
+    selection = select_benchmark(
+        tmp_path / "run",
+        matrix=load_representation_matrix(),
+        selection_version="fixture-v1",
+    )
+    assert selection["status"] == "inconclusive_insufficient_folds_and_blocks"
+    assert selection["source_summary_identity_sha256"] == first[
+        "summary_identity_sha256"
+    ]
 
 
 def test_failures_are_terminal_rows_and_control_drift_cannot_succeed(tmp_path):
