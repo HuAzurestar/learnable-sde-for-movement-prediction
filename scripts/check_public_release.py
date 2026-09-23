@@ -54,6 +54,9 @@ PUBLIC_NEX326_REFERENCES = {
     Path("experiments/nex326_phase_space_multi_seed.py"),
     Path("experiments/nex326_phase_space_uncertainty.py"),
     Path("experiments/nex326_process.py"),
+    Path("experiments/pirc22/production.py"),
+    Path("experiments/pirc22/representations.py"),
+    Path("experiments/terrain_benchmark.py"),
     Path("tests/test_geolife_confirmation_adapter.py"),
     Path("tests/test_nex326.py"),
     Path("tests/test_nex326_multi_seed_compose.py"),
@@ -70,6 +73,8 @@ PUBLIC_NEX326_REFERENCES = {
     Path("tests/test_pirc21_adapter.py"),
     Path("tests/test_pirc21_interactions.py"),
     Path("tests/test_pirc21_pilot.py"),
+    Path("tests/test_pirc22_production.py"),
+    Path("tests/test_terrain_benchmark.py"),
 }
 
 
