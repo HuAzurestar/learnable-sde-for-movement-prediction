@@ -9,6 +9,7 @@ ID as an unlock acknowledgement.
 from __future__ import annotations
 
 from collections import OrderedDict
+from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
@@ -23,7 +24,7 @@ from data.pirc20 import PIRC20Cohort, PIRC20Sample, load_pirc20_cohort
 from .cohort import Cohort, Segment
 
 
-ADAPTER_VERSION = "pirc20-nex326-adapter-v1"
+ADAPTER_VERSION = "pirc20-nex326-adapter-v2"
 ADAPT_SEED = 20260912
 ADAPT_FRACTION = 0.20
 
@@ -34,6 +35,20 @@ class PIRC20AdapterError(ValueError):
 
 class _UnusableSample(PIRC20AdapterError):
     """A sample has too few distinct exact timestamps for SDE execution."""
+
+
+@dataclass(frozen=True)
+class PIRC20Segment(Segment):
+    """Runtime segment retaining the published independent-block identity."""
+
+    independent_block_id: str = ""
+
+    def validate(self) -> None:
+        super().validate()
+        if not self.independent_block_id:
+            raise PIRC20AdapterError(
+                f"segment lacks independent_block_id: {self.segment_id}"
+            )
 
 
 def _sha256(path: Path) -> str:
@@ -396,7 +411,7 @@ def _segment(
     region = (
         city if city and city.lower() != "nan" else str(rows[0]["region"] or "unknown")
     )
-    segment = Segment(
+    segment = PIRC20Segment(
         segment_id=sample.segment_id,
         source_domain="human",
         region=region,
@@ -404,6 +419,7 @@ def _segment(
         state=state,
         conditions=feature_values,
         has_terrain=has_terrain,
+        independent_block_id=sample.independent_block_id,
     )
     segment.validate()
     return segment
@@ -588,5 +604,6 @@ __all__ = [
     "ADAPT_FRACTION",
     "ADAPT_SEED",
     "PIRC20AdapterError",
+    "PIRC20Segment",
     "load_pirc20_nex326_cohort",
 ]

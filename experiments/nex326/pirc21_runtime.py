@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 import numpy as np
 
@@ -20,7 +21,7 @@ from .pirc21_interactions import (
 )
 
 
-RUNTIME_VERSION = "pirc21-nex326-runtime-v2"
+RUNTIME_VERSION = "pirc21-nex326-runtime-v3"
 _ROLE_TO_SNAPSHOT_SPLIT = {
     "train": "train",
     "adapt": "train",
@@ -40,8 +41,11 @@ def _pirc20_file_id(segment_id: str) -> str | None:
     return parts[1]
 
 
+@dataclass(frozen=True)
 class PIRC21Segment(Segment):
     """A Segment whose additional conditions are owned by a PIRC-21 identity."""
+
+    independent_block_id: str | None = None
 
     def validate(self) -> None:
         legacy_conditions = {
@@ -124,8 +128,12 @@ class PIRC21FeatureRuntime:
         self,
         snapshot_root: str | Path,
         selection: FeatureSelection,
+        *,
+        fit_segment_ids: Sequence[str] | None = None,
     ) -> None:
-        self.adapter = FeatureSnapshotAdapter(snapshot_root, selection).fit()
+        self.adapter = FeatureSnapshotAdapter(snapshot_root, selection).fit(
+            segment_ids=fit_segment_ids
+        )
         output_columns = self.adapter.output_columns
         model_columns = [f"pirc21:{name}" for name in output_columns]
         if selection.include_validity_indicators:
@@ -299,6 +307,9 @@ class PIRC21FeatureRuntime:
                         state=segment.state,
                         conditions=conditions,
                         has_terrain=segment.has_terrain,
+                        independent_block_id=getattr(
+                            segment, "independent_block_id", None
+                        ),
                         endpoint_prior_mean=segment.endpoint_prior_mean,
                         endpoint_prior_covariance=segment.endpoint_prior_covariance,
                         endpoint_prior_source=segment.endpoint_prior_source,

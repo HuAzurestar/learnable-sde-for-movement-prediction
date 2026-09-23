@@ -340,6 +340,24 @@ def test_train_only_fit_and_visible_difference_never_fit_on_validation(tmp_path)
     )
 
 
+def test_train_only_fit_can_be_scoped_to_benchmark_train_segments(tmp_path):
+    snapshot = _write_snapshot(tmp_path)
+    selection = FeatureSelection(
+        variant_ids=("elevation.absolute_standardized",)
+    )
+
+    adapter = FeatureSnapshotAdapter(snapshot, selection).fit(
+        segment_ids=("train-segment-0",)
+    )
+    batch = adapter.transform("train", segment_ids=("train-segment-0",))
+
+    assert np.allclose(batch.values[:, 0], [-1.0, 1.0])
+    assert adapter.identity_record["fit_scope"]["split"] == "train"
+    assert adapter.identity_record["fit_scope"]["selected_segment_ids"] == [
+        "train-segment-0"
+    ]
+
+
 def test_information_groups_and_segment_aggregates_are_configuration_only(tmp_path):
     snapshot = _write_snapshot(tmp_path)
     selection = FeatureSelection(

@@ -189,6 +189,11 @@ def test_adapter_derives_block_disjoint_adapt_and_keeps_final_eval_sealed(tmp_pa
         for split in ("train", "adapt", "validation")
         for segment in cohort.splits[split]
     )
+    assert {
+        segment.independent_block_id
+        for split in ("train", "adapt", "validation")
+        for segment in cohort.splits[split]
+    } == {"block-a", "block-b", "block-c"}
 
 
 def test_bounded_pilot_selection_is_explicit_and_fingerprinted(tmp_path):
