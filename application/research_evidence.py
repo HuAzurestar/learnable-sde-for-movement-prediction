@@ -8,6 +8,21 @@ import json
 from infrastructure.research_store import ResearchError, ResearchStore, digest
 
 
+def evidence_visibility(spec, cells):
+    """Attachments cannot be declassified by a synthetic parent cell."""
+    if any(cell.get("visibility") != "synthetic" for cell in spec["cells"]):
+        return "restricted"
+    for cell in cells:
+        documents = cell.get("admission", {}).get("documents", {})
+        for key in ("package", "frozen_model"):
+            if key in documents and documents[key].get("visibility", "restricted") != "synthetic":
+                return "restricted"
+        for key in ("qualification_evidence", "model_qualification_evidence"):
+            if any(item["artifact"].get("visibility") != "synthetic" for item in documents.get(key, [])):
+                return "restricted"
+    return "synthetic"
+
+
 def authorize_study(store, study_id, authorization, purpose):
     try:
         grant = store.manifest("authorization-" + authorization["authorization_id"])
@@ -85,6 +100,7 @@ def export_evidence(store: ResearchStore, study_id: str, authorization: dict):
                "code_hash": spec["code_hash"], "feature_hash": spec["feature_hash"], "selection_hash": spec["selection_hash"],
                "comparison_family": spec["comparison_family"], "independent_unit": "block_id",
                "comparison_plan": spec.get("comparison_plan"),
+               "visibility": evidence_visibility(spec, cells),
                "expected_cells": [{"cell_hash": digest(c), "arm_id": c["arm_id"], "block_id": c["block_id"], "seed": c["seed"]} for c in spec["cells"]],
                "cells": cells, "disclosure_scope": "authorized-local-export"}
     bundle = {**payload, "bundle_hash": digest(payload)}
@@ -105,7 +121,7 @@ def accept_aggregate(store, aggregate, study_id):
             or aggregate.get("cell_dispositions") != bundle["cells"]):
         raise ResearchError("CONTRACT_MISMATCH", "aggregate is not bound to the frozen complete matrix")
     from infrastructure.research_store import encode
-    visibility = "synthetic" if all(c.get("visibility") == "synthetic" for c in spec["cells"]) else "restricted"
+    visibility = evidence_visibility(spec, bundle["cells"])
     return store.artifact(encode(aggregate), role="aggregate", visibility=visibility,
                           block_ids=[c["block_id"] for c in spec["cells"]], study_id=study_id)
 

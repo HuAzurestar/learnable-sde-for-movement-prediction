@@ -30,7 +30,7 @@ def fixture_command(output, value, cell):
             str(output), encode(result).decode()]
 
 
-def prepared(tmp_path, *, formal=False, two_arms=False):
+def prepared(tmp_path, *, formal=False, two_arms=False, package_visibility="synthetic"):
     store = ResearchStore(tmp_path, "admitted", initialize=True)
     value = spec()
     value["cells"][0].update(plugin_id="admitted-fixture", capability="generic-rollout", visibility="synthetic")
@@ -41,7 +41,7 @@ def prepared(tmp_path, *, formal=False, two_arms=False):
         ("x", "y", "vx", "vy"), ("m", "m", "m/s", "m/s"), "restart-only", fixture_command)
     registry = CapabilityRegistry()
     registry.register(plugin)
-    grant = admit_fixture(store, value, plugin, tmp_path, formal=formal)
+    grant = admit_fixture(store, value, plugin, tmp_path, formal=formal, package_visibility=package_visibility)
     return store, value, registry, grant
 
 
@@ -136,6 +136,24 @@ def test_r1_worker_cannot_promote_fixture_qualification(tmp_path):
     assert not any(a["state"] == "SUCCEEDED" for a in store.attempts().values())
 
 
+def test_private_admission_attachments_cannot_be_laundered_by_synthetic_cells(tmp_path):
+    from application.research_evidence import export_evidence, accept_aggregate
+    store, value, registry, grant = prepared(tmp_path, formal=True, package_visibility="restricted")
+    store.register(value, digest(value))
+    assert SharedRunner(store, registry).run_cell("synthetic", digest(value["cells"][0]), budget=BudgetSpec(10))["state"] == "SUCCEEDED"
+    bundle = export_evidence(store, "synthetic", grant)
+    aggregate = {"schema_version": "pirc25-aggregate-v1", "study_id": "synthetic", "spec_hash": digest(value),
+        "protocol_hash": value["protocol_hash"], "source_bundle_hash": bundle["bundle_hash"],
+        "expected_cell_count": len(value["cells"]), "cell_dispositions": bundle["cells"], "arms": []}
+    aggregate["aggregate_hash"] = digest(aggregate)
+    artifact = accept_aggregate(store, aggregate, "synthetic")
+    assert artifact["visibility"] == "restricted", "private evidence inherited synthetic cell visibility"
+    limited = {**grant, "authorization_id": "synthetic-only", "visibilities": ["synthetic"], "purposes": ["preview"]}
+    store.authorize(limited)
+    with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
+        store.read_artifact(artifact["artifact_id"], purpose="preview", authorization=limited)
+
+
 def test_r1_recovery_builder_must_match_accepted_package(tmp_path):
     from application.research_admission import AdmissionGate
     store, value, registry, _ = prepared(tmp_path)
@@ -153,7 +171,7 @@ def test_r1_recovery_builder_must_match_accepted_package(tmp_path):
 @pytest.mark.parametrize("permission", ["allowed", "missing-consumer", "evaluate-only", "wrong-model-protocol"])
 def test_frozen_model_cross_study_reuse_requires_explicit_read_and_export_grants(tmp_path, permission):
     from application.research_evidence import export_evidence
-    store, value, registry, grant = prepared(tmp_path, formal=True)
+    store, value, registry, grant = prepared(tmp_path, formal=True, two_arms=True)
     attach_foreign_model(store, value, consumer=permission != "missing-consumer", export=permission != "evaluate-only")
     if permission == "wrong-model-protocol":
         value["admission"]["model_protocol_id"] = "inputs"
@@ -174,8 +192,17 @@ def test_frozen_model_cross_study_reuse_requires_explicit_read_and_export_grants
         with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
             export_evidence(store, "synthetic", grant)
     else:
-        row = export_evidence(store, "synthetic", grant)["cells"][0]
+        bundle = export_evidence(store, "synthetic", grant)
+        row = bundle["cells"][0]
         assert row["admission"]["documents"]["frozen_model"]["study_id"] == "model-study"
+        aggregator = Path(__file__).resolve().parents[2] / "TSDE-SDE/scripts/pirc25/aggregate.py"
+        if aggregator.is_file():
+            source = tmp_path / "model-bundle.json"
+            source.write_bytes(encode(bundle))
+            accepted = subprocess.run([sys.executable, "-B", str(aggregator), str(source),
+                "--expected-hash", bundle["bundle_hash"], "--formal", "--output", str(tmp_path / "model-evidence")],
+                capture_output=True, text=True, timeout=30)
+            assert accepted.returncode == 0, accepted.stderr
 
 
 def test_formal_chain_roundtrip_and_resealed_tampering_rejected_by_tsde(tmp_path):

@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .research_contracts import validate_package, validate_result
 from .research_data import EvaluationExposureLedger
-from .research_preregistration import PreregistrationGate, hash_reference, source_identity, validate_preregistration
+from .research_preregistration import PreregistrationGate, hash_reference, source_identity, validate_preregistration, protocol_binding
 from infrastructure.research_store import ResearchError, digest, encode, utc_now
 
 
@@ -130,6 +130,8 @@ class AdmissionGate:
                 raise ResearchError("UNAUTHORIZED_DATA", "execution grant scope/expiry differs")
             package = self._document("package", settings.get("package_hash"))
             model = self._document("package", package["model_hash"]) if package.get("requires_frozen_model") else None
+            if package.get("visibility", "restricted") not in grant["visibilities"]:
+                raise ResearchError("UNAUTHORIZED_DATA", "execution grant cannot disclose this package")
             validate_package(package, kind=package["kind"], formal=mode == "formal", frozen_model=model)
             if (package["kind"] not in {"FrozenDynamicsPackage", "PropagationResult", "SwitchingResult"}
                     or package.get("qualification") not in {"fixture", "qualified"}
@@ -177,11 +179,21 @@ class AdmissionGate:
                             raise ResearchError("UNAUTHORIZED_DATA", "frozen model grant does not authorize this consumer study")
                     if not isinstance(model.get("payload"), dict) or digest(model["payload"]) != model["output_hash"]:
                         raise ResearchError("UNQUALIFIED", "frozen model payload binding differs")
+                    if model.get("visibility", "restricted") not in model_grant["visibilities"]:
+                        raise ResearchError("UNAUTHORIZED_DATA", "model source grant cannot disclose this package")
                     model_prereg = self._document("preregistration", model.get("preregistration_hash"))
+                    model_protocol = self.store.manifest("protocol-" + settings["model_protocol_id"])
+                    if (model_protocol.get("schema_version") != "pirc25-data-protocol-v1"
+                            or model_protocol["study_id"] != model["study_id"]
+                            or digest(model_protocol) != model["protocol_hash"]
+                            or data_binding(model_protocol) != model["data_hash"]
+                            or model_protocol.get("preregistration_hash") != model["preregistration_hash"]
+                            or protocol_binding(model_protocol) not in model_prereg["protocol_bindings"]):
+                        raise ResearchError("UNQUALIFIED", "frozen model source protocol binding differs")
                     model_report, model_evidence = self._qualification(model, model_prereg, model_grant)
                     documents.update(frozen_model=model, model_preregistration=model_prereg,
                                      model_qualification=model_report, model_qualification_evidence=model_evidence,
-                                     model_authorization=model_grant)
+                                     model_authorization=model_grant, model_protocol=model_protocol)
             purpose = settings.get("purpose")
             root = grant.get("data_root")
             if not isinstance(root, str) or not Path(root).is_absolute():

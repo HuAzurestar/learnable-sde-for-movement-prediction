@@ -66,7 +66,7 @@ Stage caps are fixture 15 minutes, pilot 30 minutes, formal 2 hours, all subject
 to the cumulative arm cap.
 
 Execution packages retain the child kind/state/unit/capability/recovery contract
-and additionally bind `study_id`, `plugin_hash=plugin_binding(plugin)`,
+and additionally bind `study_id`, `visibility`, `plugin_hash=plugin_binding(plugin)`,
 `command_hash=command_binding(builder)`, a JSON `payload` covered by `output_hash`,
 and `upstream_hash`. Code/data/input/protocol hashes must match the spec.
 Recovery additionally binds the actual adapter's `recovery_command_hash`.
@@ -81,10 +81,15 @@ artifact containing `check_id`, passed `outcome`, package binding and code/
 preregistration hashes. The runtime authorizes and checks these artifacts; it
 does not independently prove an operator-imported report's scientific truth.
 
+Frozen models also declare `model_protocol_id`, checked against their own
+source-study/data/preregistration bindings, not the consumer's protocol.
 Cross-study frozen models require `model_authorization_id` with the consumer
 study in the source grant's `consumer_study_ids`. Evaluation permission does not
 grant export permission. Export rechecks qualification artifact access, including
 foreign-model evidence; weights/evidence are not automatically public.
+Aggregate/CSV/index artifacts inherit restricted package or qualification
+attachment visibility even when every result cell is synthetic. Missing package
+visibility is conservatively restricted, never an implicit synthetic grant.
 
 The immutable `pirc25-admission-v1` receipt binds spec/cell, actual attempt/run,
 plugin/command, input read events and upstream/package/qualification evidence.

@@ -10,7 +10,7 @@ from experiments.pirc25.upstream import audit_inputs
 from infrastructure.research_store import digest, encode
 
 
-def admit_fixture(store, value, plugin, root, *, formal=False):
+def admit_fixture(store, value, plugin, root, *, formal=False, package_visibility="synthetic"):
     content = b"explicit synthetic plugin input"
     (root / "plugin-input.bin").write_bytes(content)
     blocks = [{"block_id": block, "dataset_id": "synthetic", "release_id": "v1",
@@ -41,12 +41,12 @@ def admit_fixture(store, value, plugin, root, *, formal=False):
         "expires_at": "2099-01-01T00:00:00+00:00", "evidence_hash": digest("explicit synthetic operator grant"),
         "protocol_hash": digest(protocol), "data_root": str(root), "test_authorization": formal,
         "purposes": ["fit", "execute", "evaluate", "preview", "export", "resume"],
-        "visibilities": ["synthetic"], "block_ids": [b["block_id"] for b in blocks]}
+        "visibilities": sorted({"synthetic", package_visibility}), "block_ids": [b["block_id"] for b in blocks]}
     store.authorize(grant)
     upstream = audit_inputs(ROOT, ())
     payload = {"synthetic_adapter": plugin.plugin_id}
     package = {"schema_version": "pirc25-package-v1", "kind": "PropagationResult",
-        "study_id": value["study_id"],
+        "study_id": value["study_id"], "visibility": package_visibility,
         "state_order": list(plugin.state_order), "units": list(plugin.units),
         "resume_level": plugin.resume_level, "capabilities": sorted(plugin.capabilities),
         "code_hash": value["code_hash"], "data_hash": value["data_hash"], "input_hash": value["data_hash"],
@@ -58,7 +58,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False):
         package["preregistration_hash"] = protocol["preregistration_hash"]
         check = {"check_id": "contract", "outcome": "passed", "package_binding": package_binding(package),
                  "code_hash": value["code_hash"], "preregistration_hash": protocol["preregistration_hash"]}
-        artifact = store.artifact(encode(check), role="qualification", visibility="synthetic",
+        artifact = store.artifact(encode(check), role="qualification", visibility=package_visibility,
                                    block_ids=grant["block_ids"], study_id=value["study_id"])
         qualification = {"schema_version": "pirc25-qualification-v1", "status": "passed",
             "package_binding": package_binding(package), "code_hash": value["code_hash"],
