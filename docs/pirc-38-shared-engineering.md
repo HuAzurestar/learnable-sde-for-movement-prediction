@@ -266,6 +266,20 @@ previews ≤64 trajectories and ≤512 points each. Oversized content is explici
 rejected. Cursors bind filters and the data watermark. Empty, incomplete,
 unauthorized and corrupt states are distinguishable.
 
+Run queries accept exact-match `model`, `version` (registered spec hash), `horizon`,
+`seed`, `trainer`, and `predictor` in addition to arm/state. Model is the registered
+arm's model family, trainer is its explicit trainer ID (or study trainer ID), and
+predictor is the cell's plugin ID; missing declarations remain unknown. Responses
+include the selectors and comparison dimensions, including unstarted cells.
+All filters bind pagination cursors. Budget reservations, settlements and arm
+closure also invalidate a cursor, so pages cannot silently mix charge snapshots.
+
+Each run includes cumulative arm balance in `slot-ms` and per-run reservation/
+settlement sources with event hash/sequence. `cost_basis` distinguishes active
+reservation, measured monotonic cost, and unknown conservatively charged cost;
+unknown elapsed time remains null. Balances cover the whole registered arm, not
+only the currently filtered horizon. Source records are limited to this study/run.
+
 ## Verification and delivery
 
 ### Comparison dimensions

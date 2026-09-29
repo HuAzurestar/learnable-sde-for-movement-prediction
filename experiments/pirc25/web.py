@@ -57,6 +57,8 @@ def make_server(store, authorization_id, *, port=0):
                         raise ResearchError("UNAUTHORIZED_DATA", "requested study is outside session scope")
                     kind = {"/api/studies": "study", "/api/runs": "run", "/api/comparisons": "comparison"}[path]
                     value = query.list(kind, arm_id=parameters.get("arm_id", [None])[0], state=parameters.get("state", [None])[0],
+                                       **{key: parameters.get(key, [None])[0] for key in
+                                          ("model", "version", "horizon", "seed", "trainer", "predictor")},
                                        limit=int(parameters.get("limit", [50])[0]), cursor=parameters.get("cursor", [None])[0])
                 elif path.startswith("/api/runs/"):
                     value = query.run(path.removeprefix("/api/runs/"))

@@ -6,6 +6,8 @@ import base64
 import json
 
 from .research_evidence import authorize_study
+from .research_budget import BudgetLedger
+from .research_dimensions import comparison_dimensions
 from infrastructure.research_index import ResearchIndex
 from infrastructure.research_store import ResearchError, digest, identifier
 
@@ -40,16 +42,43 @@ class ResearchQuery:
             after = page["next_cursor"]
         return items
 
-    def list(self, kind, *, arm_id=None, state=None, limit=50, cursor=None):
+    def _run_metadata(self, row, spec, events):
+        manifest = row["manifest"]
+        arm = next(a for a in spec["arms"] if a["arm_id"] == manifest["arm_id"])
+        cell = manifest["cell"]
+        dimensions = comparison_dimensions(cell)
+        row["selectors"] = {"model": arm["model_family_id"], "version": digest(spec),
+                            "trainer": arm.get("trainer_id", spec.get("trainer_id")),
+                            "predictor": cell.get("plugin_id"), "seed": cell["seed"],
+                            "horizon": dimensions.get("horizon")}
+        row["comparison_dimensions"] = dimensions
+        sources = {}
+        for event in events:
+            payload = event["payload"]
+            if (event["event_kind"] in {"RESERVE", "SETTLE"} and
+                    payload.get("study_id") == spec["study_id"] and payload.get("run_id") == manifest["run_id"]):
+                basis = ("reservation" if not payload["settled"] else "measured-monotonic" if
+                         payload["monotonic_elapsed_ms"] is not None else "unknown-conservative-reservation")
+                sources[payload["reservation_id"]] = {**payload, "event_hash": event["hash"],
+                    "event_sequence": event["sequence"], "cost_basis": basis}
+        row["budget"] = {**BudgetLedger(self.store).balance(arm["arm_id"]), "unit": "slot-ms",
+                         "limit_ms": 86400000, "scope": "cumulative-arm-all-attempts",
+                         "sources": list(sources.values())}
+        return row
+
+    def list(self, kind, *, arm_id=None, state=None, model=None, version=None, horizon=None,
+             seed=None, trainer=None, predictor=None, limit=50, cursor=None):
         if kind not in {"study", "run", "comparison"} or not 1 <= limit <= 200:
             raise ResearchError("CONTRACT_MISMATCH", "invalid query kind or page limit")
         grant = self._grant()
         def data_watermark():
             return max((e["sequence"] for e in self.store.events()
-                        if e["event_kind"] in {"MANIFEST", "ATTEMPT"}), default=0)
+                        if e["event_kind"] in {"MANIFEST", "ATTEMPT", "RESERVE", "SETTLE", "ARM_CLOSED"}), default=0)
 
         snapshot_start = data_watermark()
-        selector = digest([kind, grant["study_id"], arm_id, state])
+        filters = {"model": model, "version": version, "horizon": horizon, "seed": seed,
+                   "trainer": trainer, "predictor": predictor}
+        selector = digest([kind, grant["study_id"], arm_id, state, filters])
         rows = self._objects(kind, grant)
         attempts = self.store.attempts()
         for row in rows:
@@ -66,6 +95,11 @@ class ResearchQuery:
                                  "manifest": {"run_id": None, "study_id": grant["study_id"], "cell_hash": digest(cell),
                                               "cell": cell, "arm_id": cell["arm_id"], "seed": cell["seed"]},
                                  "attempts": [], "state": "MISSING"})
+            events = self.store.events()
+            rows = [self._run_metadata(row, spec, events) for row in rows]
+            rows = [row for row in rows if all(selected is None or
+                    (row["selectors"][key] is not None and str(row["selectors"][key]) == str(selected))
+                    for key, selected in filters.items())]
         rows = [r for r in rows if (arm_id is None or r["manifest"].get("arm_id") == arm_id)
                 and (state is None or r.get("state") == state)]
         # Disclosure logging must not invalidate its own continuation cursor.
@@ -99,7 +133,10 @@ class ResearchQuery:
         if value["study_id"] != grant["study_id"]:
             raise ResearchError("UNAUTHORIZED_DATA", "run is outside session scope")
         history = [a for a in self.store.attempts().values() if a["run_id"] == run_id]
-        return {"run": value, "attempts": history, "schema_version": self.store.SCHEMA}
+        spec = self.store.manifest("study-" + grant["study_id"])["spec"]
+        row = self._run_metadata({"manifest": value}, spec, self.store.events())
+        return {"run": value, "attempts": history, "schema_version": self.store.SCHEMA,
+                "selectors": row["selectors"], "comparison_dimensions": row["comparison_dimensions"], "budget": row["budget"]}
 
     def artifact(self, artifact_id, *, export=False):
         grant = self._grant("export" if export else "preview")

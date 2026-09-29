@@ -177,3 +177,39 @@ def test_ui_budget_provenance_distinguishes_unknown_cost_from_zero(tmp_path):
         assert source["monotonic_elapsed_ms"] is None and source["charged_ms"] == 10000
         assert source["cost_basis"] == "unknown-conservative-reservation"
         assert source["event_hash"] in {event["hash"] for event in store.events()}
+
+
+def test_ui_filter_matches_and_budget_changes_invalidate_pagination(tmp_path):
+    from application.research_budget import BudgetLedger, BudgetSpec
+    store = ResearchStore(tmp_path, "filters", initialize=True)
+    value = spec()
+    value["arms"][0]["trainer_id"] = "fixture-trainer"
+    value["cells"] = [{**value["cells"][0], "seed": seed, "horizon": horizon,
+                       "plugin_id": "fixture-predictor", "visibility": "synthetic"}
+                      for horizon in (1, 2) for seed in (1, 2)]
+    store.register(value, digest(value))
+    store.authorize({"authorization_id": "ui", "study_id": "synthetic", "expires_at": "2099-01-01T00:00:00+00:00",
+                     "evidence_hash": digest("synthetic filters grant"), "purposes": ["preview"],
+                     "visibilities": ["synthetic"], "block_ids": ["fixture-1"]})
+    query = ResearchQuery(store, "ui")
+    selected = query.list("run", model="affine", version=digest(value), horizon="2", seed="1",
+                          trainer="fixture-trainer", predictor="fixture-predictor", state="MISSING")
+    assert len(selected["items"]) == 1
+    assert selected["items"][0]["comparison_dimensions"] == {"horizon": 2}
+    run = store.register_run("synthetic", value["cells"][0])
+    attempt = store.new_attempt(run)
+    first = query.list("run", limit=1)
+    with pytest.raises(ResearchError, match="CURSOR_STALE"):
+        query.list("run", limit=1, cursor=first["next_cursor"], horizon="2")
+    ledger = BudgetLedger(store)
+    reservation = ledger.reserve(attempt, BudgetSpec(10))
+    with pytest.raises(ResearchError, match="CURSOR_STALE"):
+        query.list("run", limit=1, cursor=first["next_cursor"])
+    reserved = query.run(run)["budget"]["sources"][0]
+    assert reserved["cost_basis"] == "reservation" and reserved["settled"] is False
+    second = query.list("run", limit=1)
+    ledger.settle(reservation["reservation_id"], 123, outcome="SUCCEEDED")
+    with pytest.raises(ResearchError, match="CURSOR_STALE"):
+        query.list("run", limit=1, cursor=second["next_cursor"])
+    measured = query.run(run)["budget"]["sources"][0]
+    assert measured["cost_basis"] == "measured-monotonic" and measured["charged_ms"] == 123
