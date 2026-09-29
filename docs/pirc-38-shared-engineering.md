@@ -280,6 +280,25 @@ reservation, measured monotonic cost, and unknown conservatively charged cost;
 unknown elapsed time remains null. Balances cover the whole registered arm, not
 only the currently filtered horizon. Source records are limited to this study/run.
 
+The page exposes these exact filters, run budget/source tables, comparison strata
+and explicit paired interval availability. Comparison horizon selection only
+selects frozen summary rows; it does not recalculate scores or independent sample
+counts. Each metric uses its own visual scale. Case horizon selection requires an
+explicit `forecast.horizons` grid; absent grids are reported as unavailable, not
+invented. The existing single-axis fixture now exports its actual requested grid.
+
+Case/comparison SVG exports perform a fresh authorized export read, include
+artifact/spec/protocol references in captions and structured metadata, and preserve
+selected horizon and units. Preview permission alone cannot export figures. Frozen
+CSV remains the original TSDE byte stream. Run budgets are current ledger views,
+not retrospectively attached scientific costs to an older aggregate.
+
+An explicit synthetic browser check is available with an existing isolated
+Playwright environment and Edge: `python -B -m tests.browser_research_ui`. It needs
+the sibling TSDE checkout, uses temporary Git-external fixtures, and checks filter
+interactions, budget provenance, horizon selection, source-bound figure downloads,
+exact CSV bytes and preview-only export denial. It is not scientific validation.
+
 ## Verification and delivery
 
 ### Comparison dimensions

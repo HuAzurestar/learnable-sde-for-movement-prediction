@@ -105,6 +105,30 @@ def main():
                 page.get_by_role("button", name="Download frozen CSV", exact=True).click()
             assert Path(downloaded.value.path()).read_bytes() == (root / "evidence/metrics.csv").read_bytes()
             page.screenshot(path=str(root / "ui.png"), full_page=True)
+            # A preview-only session can inspect the same data, but exporting a
+            # client-rendered figure must still pass a fresh server export gate.
+            preview = {**store.manifest("authorization-browser"), "authorization_id": "preview-only", "purposes": ["preview"]}
+            store.authorize(preview)
+            restricted_server = make_server(store, "preview-only")
+            restricted_thread = threading.Thread(target=restricted_server.serve_forever, daemon=True)
+            restricted_thread.start()
+            try:
+                denied_page = browser.new_page()
+                downloads = []
+                denied_page.on("download", lambda download: downloads.append(download))
+                denied_page.goto(f"http://127.0.0.1:{restricted_server.server_port}/#session={restricted_server.session_token}")
+                denied_page.get_by_role("button", name="Comparisons & evidence", exact=True).click()
+                denied_page.get_by_role("button", name="Compare & export", exact=True).click()
+                with denied_page.expect_response(lambda response: 'download=1' in response.url) as response:
+                    denied_page.get_by_role("button", name="Export comparison figure", exact=True).click()
+                assert response.value.status == 403
+                expect(denied_page.locator('#error')).to_be_visible()
+                assert not downloads
+                denied_page.close()
+            finally:
+                restricted_server.shutdown()
+                restricted_server.server_close()
+                restricted_thread.join(timeout=5)
             assert not errors, errors
             browser.close()
         receipt = {"status": "passed", "spec_hash": digest(spec), "aggregate_hash": aggregate["aggregate_hash"],

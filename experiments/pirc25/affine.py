@@ -52,7 +52,7 @@ def single_axis(seed):
                               torch.tensor([1.0, 2.0], dtype=torch.float64), 8, ModelContext(regime=0))
     forecast = app.predict(trained.model, request)
     report = app.evaluate(forecast, ObservationSet(torch.zeros((2, 2), dtype=torch.float64)))
-    return {"metrics": report.aggregate, "forecast": {"samples": forecast.samples.tolist()},
+    return {"metrics": report.aggregate, "forecast": {"samples": forecast.samples.tolist(), "horizons": [1.0, 2.0]},
             "fit": trained.fit.to_dict(), "source_schema": "ExperimentApplication"}
 
 
