@@ -50,6 +50,8 @@ def fixture(root, *, failure_states=False):
             "state_order": ["x", "y"], "units": ["m", "m"], "time_unit": "s", "qualification": "fixture",
             "metrics": {"error": cell["horizon"] + (1 if cell["arm_id"] == "baseline" else 0)},
             "metric_units": {"error": "m"}, "forecast": {"horizons": [1, 2],
+                "preview": {"case_selection_rule": "registered-synthetic-case", "sample_ids": ["sample-0", "sample-1"],
+                            "generation_version": "ui-fixture-v1", "n_samples": 2},
                 "samples": [[[0, 0], [1, 2]], [[0, 1], [2, 3]]]}}
         artifact = store.artifact(encode(result), role="result", visibility="synthetic", block_ids=["block-1"], study_id=spec["study_id"])
         ledger.settle(reservation["reservation_id"], 100, outcome="SUCCEEDED")
@@ -133,6 +135,11 @@ def main():
             page.get_by_role("button", name="Inspect", exact=True).click()
             expect(page.locator("#detail-content")).to_contain_text("measured-monotonic")
             page.get_by_role("button", name="Inspect result", exact=False).click()
+            expect(page.locator("#preview-provenance")).to_contain_text("registered-synthetic-case")
+            expect(page.locator("#preview-provenance")).to_contain_text("sample-0")
+            expect(page.locator("#preview-provenance")).to_contain_text("ui-fixture-v1")
+            expect(page.locator("#optional-payloads")).to_contain_text("Density: unavailable")
+            expect(page.locator("#optional-payloads")).to_contain_text("Evaluation truth: unavailable")
             page.locator("#case-horizon").select_option("1")
             expect(page.locator("#case-chart")).to_have_attribute("data-horizon", "2")
             with page.expect_download() as downloaded:

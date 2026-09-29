@@ -99,6 +99,22 @@ def test_result_manifest_requires_export_permission(tmp_path):
             ResearchQuery(store, "preview-only").result_manifest(artifact["artifact_id"])
 
 
+def test_run_trace_preserves_spec_hashes_and_checkpoint_references(tmp_path):
+    with service(tmp_path) as (store, value, server):
+        run = store.register_run("synthetic", value["cells"][0])
+        attempt = store.new_attempt(run)
+        checkpoint = store.artifact(b"{}", role="checkpoint", visibility="synthetic", block_ids=["fixture-1"], study_id="synthetic")
+        store.append("CHECKPOINT", {"attempt_id": attempt, "artifact_id": checkpoint["artifact_id"], "resume_level": "exact"})
+        status, _, content = request(server, "/api/runs/" + run)
+        assert status == 200
+        trace = json.loads(content)
+        assert trace["provenance"]["code_hash"] == value["code_hash"]
+        assert trace["provenance"]["data_hash"] == value["data_hash"]
+        assert trace["provenance"]["schema_version"] == value["schema_version"]
+        assert trace["checkpoints"][0]["artifact_id"] == checkpoint["artifact_id"]
+        assert trace["paper_evidence"] == []
+
+
 def test_result_manifest_export_has_provenance_without_trajectory_payload(tmp_path):
     with service(tmp_path) as (store, value, server):
         result = {"spec_hash": digest(value), "protocol_hash": value["protocol_hash"],
