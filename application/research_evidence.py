@@ -7,6 +7,7 @@ import json
 
 from infrastructure.research_store import ResearchError, ResearchStore, digest
 from application.research_dimensions import comparison_dimensions
+from application.research_cost import frozen_cost
 
 
 def evidence_visibility(spec, cells):
@@ -43,7 +44,9 @@ def export_evidence(store: ResearchStore, study_id: str, authorization: dict):
     spec = store.manifest("study-" + study_id)["spec"]
     if not {c["block_id"] for c in spec["cells"]} <= set(authorization["block_ids"]):
         raise ResearchError("UNAUTHORIZED_DATA", "export does not cover the complete study matrix")
-    attempts = store.attempts()
+    with store.lock():
+        attempts = store._attempts()
+        cost_events = store._events()
     runs = {}
     for attempt in attempts.values():
         run = store.manifest("run-" + attempt["run_id"])
@@ -61,7 +64,8 @@ def export_evidence(store: ResearchStore, study_id: str, authorization: dict):
                "run_id": latest["run_id"] if latest else None,
                "artifact_id": latest.get("artifact_id") if latest else None,
                "history": [{"attempt_id": a["attempt_id"], "state": a["state"], "error_code": a["error_code"]} for a in history],
-               "metrics": None, "metric_units": None, "qualification": None}
+               "metrics": None, "metric_units": None, "qualification": None,
+               "cost": frozen_cost(history, cost_events)}
         if successful:
             result = json.loads(store.read_artifact(latest["artifact_id"], purpose="export", authorization=authorization))
             if result["spec_hash"] != digest(spec) or result["cell_hash"] != digest(cell):

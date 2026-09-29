@@ -293,6 +293,18 @@ selected horizon and units. Preview permission alone cannot export figures. Froz
 CSV remains the original TSDE byte stream. Run budgets are current ledger views,
 not retrospectively attached scientific costs to an older aggregate.
 
+Separately, new evidence bundles freeze each cell's latest reservation/settlement
+events for **all** its attempts, including failures and retries. TSDE validates
+event hashes and identities and summarizes these costs within the same comparison
+stratum. The comparison page, CSV, evidence index and exported comparison figure
+use those frozen costs. `charged_ms` is settled ledger charge; `reserved_ms` is
+still-held capacity; `measured_ms` remains null if any elapsed cost is unknown,
+pending or missing. Unknown-cost settlement retains the conservative reservation
+charge. Missing legacy cost records mean unavailable, never free execution.
+Costs include unscored/incomplete blocks, whereas quality metrics use complete
+blocks; the page labels this different denominator explicitly. Later settlement
+produces a new bundle version; previously published cost evidence is unchanged.
+
 An explicit synthetic browser check is available with an existing isolated
 Playwright environment and Edge: `python -B -m tests.browser_research_ui`. It needs
 the sibling TSDE checkout, uses temporary Git-external fixtures, and checks filter

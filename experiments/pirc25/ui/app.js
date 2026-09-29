@@ -87,6 +87,7 @@ function comparisonFigure(aggregate, horizon) {
     lines.push(`${arm.arm_id} · ${dimensionsLabel(arm.comparison_dimensions)} · n=${arm.independent_n} · ${arm.status}`);
     Object.entries(arm.metrics).forEach(([metric,value]) => lines.push(`  ${metric}: ${value} ${arm.metric_units[metric]} · cells ${arm.successful_cells}/${arm.expected_cells}`));
     if (!Object.keys(arm.metrics).length) lines.push('  No complete metric; missing/failed cells retained');
+    lines.push(`  Frozen cost (all attempts): charged ${arm.cost?.charged_ms ?? 'unavailable'}, reserved ${arm.cost?.reserved_ms ?? 'unavailable'}, measured ${arm.cost?.measured_ms ?? 'unknown'} slot-ms`);
   });
   svg.setAttribute('viewBox', `0 0 1100 ${50 + lines.length * 25}`); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'Frozen comparison values and provenance');
   lines.forEach((line,i) => {const node = document.createElementNS(ns,'text'); node.setAttribute('x','12'); node.setAttribute('y',String(25 + i*25)); node.setAttribute('font-size','13'); node.textContent=line; svg.append(node);});
@@ -120,6 +121,10 @@ function showComparison(target, data) {
       return metrics.length ? metrics.map(([name,result]) => [`${c.reference} / ${c.candidate}`,dimensionsLabel(c.comparison_dimensions),name,result.candidate_minus_reference,result.interval95 ? result.interval95.join(' to ') : 'Unavailable',c.independent_n,c.interval_kind]) : [[`${c.reference} / ${c.candidate}`,dimensionsLabel(c.comparison_dimensions),'No paired metric','—','Unavailable',c.independent_n,c.interval_kind]];
     })));
     pane.append(table(['Arm / dimensions', 'Dispositions'], comparisonRows(aggregate,horizon).map(arm => [arm.arm_id + ' ' + dimensionsLabel(arm.comparison_dimensions),JSON.stringify(arm.dispositions)])));
+    pane.append(text('h3','Frozen quality & cost'));
+    pane.append(text('p','Costs cover all attempts in this stratum, including failed retries and unscored blocks. Unknown is not zero; these are frozen export costs, not the current arm balance.'));
+    const costs = table(['Arm / dimensions','Charged slot-ms','Reserved slot-ms','Measured slot-ms','Unknown / pending attempts','Cost sources'], comparisonRows(aggregate,horizon).map(arm => [arm.arm_id + ' ' + dimensionsLabel(arm.comparison_dimensions),arm.cost?.charged_ms ?? 'Unavailable',arm.cost?.reserved_ms ?? 'Unavailable',arm.cost?.measured_ms ?? 'Unknown',`${arm.cost?.unknown_attempt_ids?.length ?? '?'} / ${arm.cost?.pending_attempt_ids?.length ?? '?'}`,arm.cost?.source_event_hashes?.join('\n') || 'No frozen source']));
+    costs.id = 'comparison-costs'; pane.append(costs);
     pane.append(comparisonFigure(aggregate,horizon));
   };
   target.append(text('p','Aggregate version: ' + aggregate.aggregate_hash));
@@ -130,7 +135,7 @@ function showComparison(target, data) {
     if (fresh.aggregate_hash !== aggregate.aggregate_hash) throw new Error('Aggregate version changed.');
     sourceFigure(comparisonFigure(fresh,horizon), {artifact_id:data.package.aggregate_id, aggregate_hash:fresh.aggregate_hash,
       spec_hash:fresh.spec_hash, protocol_hash:fresh.protocol_hash, horizon:horizon === 'all' ? null : Number(horizon),
-      strata:comparisonRows(fresh,horizon).map(arm => ({stratum_id:arm.stratum_id,dimensions:arm.comparison_dimensions,units:arm.metric_units}))}, 'Frozen comparison');
+      strata:comparisonRows(fresh,horizon).map(arm => ({stratum_id:arm.stratum_id,dimensions:arm.comparison_dimensions,units:arm.metric_units,cost:arm.cost}))}, 'Frozen comparison');
   }));
   target.append(action('Download frozen CSV', () => download(data.package.table)));
   target.append(text('h3','Comparison and provenance'),text('pre',JSON.stringify(aggregate,null,2)));

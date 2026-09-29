@@ -96,6 +96,9 @@ def main():
             page.locator("#comparison-horizon").select_option("2")
             expect(page.locator("#comparison-table tbody tr")).to_have_count(2)
             expect(page.locator("#comparison-table")).to_contain_text("3")
+            expect(page.locator("#comparison-costs tbody tr")).to_have_count(2)
+            expect(page.locator("#comparison-costs")).to_contain_text("200")
+            assert all(arm["cost"]["charged_ms"] == 200 for arm in aggregate["arms"])
             with page.expect_download() as downloaded:
                 page.get_by_role("button", name="Export comparison figure", exact=True).click()
             content = Path(downloaded.value.path()).read_text(encoding="utf-8")
