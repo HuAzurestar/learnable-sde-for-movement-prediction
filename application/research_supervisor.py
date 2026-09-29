@@ -20,7 +20,7 @@ class ResearchSupervisor:
         self.budget = BudgetLedger(store)
         self.monotonic = monotonic
 
-    def run(self, attempt_id: str, command_builder, budget: BudgetSpec):
+    def run(self, attempt_id: str, command_builder, budget: BudgetSpec, *, result_validator=None):
         reservation = self.budget.reserve(attempt_id, budget)
         if reservation["settled"]:
             raise ResearchError("IDENTITY_CONFLICT", "settled attempt cannot execute again")
@@ -90,6 +90,8 @@ class ResearchSupervisor:
                         encode(result)
                         if not isinstance(result, dict):
                             raise ResearchError("CONTRACT_MISMATCH", "worker result must be an object")
+                        if result_validator is not None:
+                            result_validator(result)
                         artifact = self.store.artifact(content, role="result", visibility=run["cell"].get("visibility", "restricted"),
                             block_ids=[run["cell"]["block_id"]], study_id=run["study_id"])
                         outcome, artifact_id, error_code = "SUCCEEDED", artifact["artifact_id"], None

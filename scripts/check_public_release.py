@@ -44,6 +44,7 @@ PUBLIC_PREREGISTRATION_REFERENCES = {
 # command-line entry points, and their contract tests.
 PUBLIC_NEX326 = Path("experiments/nex326")
 PUBLIC_NEX326_REFERENCES = {
+    Path("experiments/pirc25/affine.py"),
     Path("experiments/pirc25/upstream.py"),
     Path("tests/test_shared_upstream.py"),
     Path(".gitattributes"),
