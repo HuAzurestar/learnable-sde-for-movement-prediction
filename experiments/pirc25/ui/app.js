@@ -78,7 +78,7 @@ async function inspectCase(target, artifactId) {
   const optional = document.createElement('section'); optional.id = 'optional-payloads';
   optional.append(text('h3','Saved optional payloads'));
   const fields = [['History',result.observations?.history],['Evaluation truth',result.observations?.truth],
-    ['Analytic moments',result.forecast?.moments],['Density',result.forecast?.density],
+    ['Moments (estimation kind as stored)',result.forecast?.moments],['Density',result.forecast?.density],
     ['Region estimates',result.forecast?.region_estimates],['Uncertainty',result.forecast?.uncertainty],
     ['Mode probabilities',result.forecast?.mode_probabilities],['Mode paths',result.forecast?.mode_paths],
     ['Per-segment results',result.forecast?.per_segment]];
@@ -180,11 +180,15 @@ async function detail(row) {
     target.append(text('h3','Trace bindings'),table(['Field','Frozen value'],Object.entries(data.provenance)));
     target.append(text('h3','Checkpoint references'),data.checkpoints.length ? table(['Attempt','Artifact','Recovery level'],data.checkpoints.map(c => [c.attempt_id,c.artifact_id,c.resume_level])) : text('p','No checkpoint recorded for this run.'));
     target.append(text('h3','Study paper evidence references'));
+    target.append(text('p','These references share this study; contributing runs and attempts are identified by each frozen evidence package, not by this navigation list.'));
     if (!data.paper_evidence.length) target.append(text('p','No frozen paper evidence imported for this study.'));
+    const evidenceSection = document.createElement('section'); let evidenceOpenCount = 0;
     data.paper_evidence.forEach(packageInfo => target.append(action('Open evidence ' + packageInfo.aggregate_hash.slice(0,12),async () => {
       const evidence = await api('/api/comparisons/' + encodeURIComponent(packageInfo.aggregate_hash));
-      const evidenceSection = document.createElement('section'); showComparison(evidenceSection,evidence); target.append(evidenceSection);
+      evidenceSection.replaceChildren(); showComparison(evidenceSection,evidence);
+      evidenceSection.dataset.evidenceOpenCount = String(++evidenceOpenCount);
     })));
+    target.append(evidenceSection);
     target.append(text('pre', JSON.stringify(data, null, 2)));
     data.attempts.filter(a => a.artifact_id).forEach(attempt => target.append(action('Inspect result ' + attempt.attempt_id.slice(0, 8), async () => {
       await inspectCase(target, attempt.artifact_id);
