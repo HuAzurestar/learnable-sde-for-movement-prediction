@@ -45,9 +45,10 @@ class ResearchSupervisor:
             command = list(command_builder(result_path))
             if not command or any(not isinstance(arg, str) for arg in command):
                 raise ResearchError("CONTRACT_MISMATCH", "worker command must be a string argument list")
-        except BaseException:
+        except BaseException as exc:
             self.budget.settle(reservation["reservation_id"], 0, outcome="PREFLIGHT_FAILED")
-            self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code="CONTRACT_MISMATCH")
+            self.store.transition(attempt_id, "PREFLIGHT_FAILED",
+                                  error_code=exc.code if isinstance(exc, ResearchError) else "CONTRACT_MISMATCH")
             raise
         start = self.monotonic()
         deadline = start + budget.job_seconds
@@ -106,6 +107,9 @@ class ResearchSupervisor:
                             raise ResearchError("CONTRACT_MISMATCH", "worker result must be an object")
                         if result_validator is not None:
                             result_validator(result)
+                        # Supervisor-owned admission bindings added by the
+                        # validator must be part of the published artifact.
+                        content = encode(result)
                         artifact = self.store.artifact(content, role="result", visibility=run["cell"].get("visibility", "restricted"),
                             block_ids=[run["cell"]["block_id"]], study_id=run["study_id"])
                         outcome, artifact_id, error_code = "SUCCEEDED", artifact["artifact_id"], None

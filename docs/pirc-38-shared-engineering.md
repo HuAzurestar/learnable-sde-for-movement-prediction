@@ -46,6 +46,58 @@ silently reclassified as blind. These plan and history hashes are recorded in
 each read event. This read gate is separate from package qualification and does
 not itself grant formal-comparison eligibility.
 
+### Execution admission and formal evidence
+
+`SharedRunner` and `SharedRecovery.resume` use `AdmissionGate` before invoking
+a command builder. A registered capability alone is not permission. The source
+tree code hash must match the registered spec. Reused legacy successes without
+an admission event fail closed. Built-in affine fixtures must match the complete
+frozen synthetic recipe and pass their public upstream audit; they receive only
+fixture qualification.
+
+Other plugins declare an immutable spec `admission` object with `mode`
+(`fixture`, `pilot`, `formal`), `protocol_id`, `authorization_id`, `package_hash`,
+`upstream_ids` (explicit, possibly empty), `upstream_hash`, and a role-appropriate
+read `purpose`. The grant covers study/protocol/block/visibility, `execute` and
+the read purpose, remains unexpired and supplies an absolute `data_root`.
+`data_binding(protocol)` binds source identities/content hashes/roles; the ledger
+checks actual input bytes and records the attempt/run before a plugin is invoked.
+Stage caps are fixture 15 minutes, pilot 30 minutes, formal 2 hours, all subject
+to the cumulative arm cap.
+
+Execution packages retain the child kind/state/unit/capability/recovery contract
+and additionally bind `study_id`, `plugin_hash=plugin_binding(plugin)`,
+`command_hash=command_binding(builder)`, a JSON `payload` covered by `output_hash`,
+and `upstream_hash`. Code/data/input/protocol hashes must match the spec.
+Recovery additionally binds the actual adapter's `recovery_command_hash`.
+The standalone package validator does not itself grant execution permission.
+
+Formal admission requires a blind frozen plan, reserved-test input and a
+registered `qualification-HASH` report. Its `pirc25-qualification-v1` schema
+records passed status, `package_binding(package)` (excluding the circular
+qualification hash), code/preregistration hashes and `checks`. Each
+preregistered `qualification_checks` name links a canonical JSON qualification
+artifact containing `check_id`, passed `outcome`, package binding and code/
+preregistration hashes. The runtime authorizes and checks these artifacts; it
+does not independently prove an operator-imported report's scientific truth.
+
+Cross-study frozen models require `model_authorization_id` with the consumer
+study in the source grant's `consumer_study_ids`. Evaluation permission does not
+grant export permission. Export rechecks qualification artifact access, including
+foreign-model evidence; weights/evidence are not automatically public.
+
+The immutable `pirc25-admission-v1` receipt binds spec/cell, actual attempt/run,
+plugin/command, input read events and upstream/package/qualification evidence.
+The supervisor attaches its hash to the validated result; a worker cannot promote
+fixture qualification or substitute another receipt. Export verifies the receipt
+against the successful attempt. TSDE formal aggregation checks internal hashes,
+scopes, freeze/read order, qualification artifacts and result identities, not
+just `qualified` text. The expected bundle hash is the transport trust boundary,
+not a signature proving arbitrary external claims. Legacy fixture evidence can
+still be inspected, but legacy qualified results without admission cannot be
+exported or formally aggregated. Register new versioned inputs rather than
+rewriting an immutable legacy success.
+
 ## Independent reproduction
 
 From this repository, with the matching paper repository checked out:

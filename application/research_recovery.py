@@ -6,8 +6,7 @@ from dataclasses import dataclass
 import json
 
 from .research_budget import BudgetLedger, BudgetSpec
-from .research_contracts import validate_result
-from .research_supervisor import ResearchSupervisor
+from .research_admission import AdmissionGate
 from infrastructure.research_store import ResearchError, ResearchStore, digest
 
 
@@ -105,7 +104,6 @@ class SharedRecovery:
                                        reason="resume from verified " + checkpoint_id)
         self.store.append("RESUME", {"attempt_id": retry, "parent_attempt_id": attempt_id,
                                     "checkpoint_id": checkpoint_id, "resume_level": prepared["plugin"].resume_level})
-        return ResearchSupervisor(self.store).run(retry,
+        return AdmissionGate(self.store).run(retry, prepared["spec"], prepared["cell"], prepared["plugin"],
             lambda output: prepared["adapter"].command_builder(output, prepared["spec"], prepared["cell"], prepared["state"]),
-            budget, result_validator=lambda result: validate_result(result, spec=prepared["spec"],
-                                      cell=prepared["cell"], plugin=prepared["plugin"]))
+            budget, recovery_builder=prepared["adapter"].command_builder)

@@ -32,13 +32,21 @@ class EvaluationExposureLedger:
         self.store.publish("protocol-" + protocol["protocol_id"], protocol)
 
     def read(self, protocol_id: str, block_id: str, *, purpose: str,
-             authorization_id: str, data_root: Path) -> bytes:
+             authorization_id: str, data_root: Path, consumer=None) -> bytes:
         with self.store.lock():
             protocol = self.store._manifest("protocol-" + identifier(protocol_id))
             selected = [b for b in protocol["blocks"] if b["block_id"] == block_id]
             if len(selected) != 1:
                 raise ResearchError("UNAUTHORIZED_DATA", "block is not in frozen protocol")
             block = selected[0]
+            consumer = consumer or {}
+            if consumer:
+                attempt = self.store._attempts().get(consumer.get("attempt_id"))
+                if not attempt or attempt["run_id"] != consumer.get("run_id"):
+                    raise ResearchError("CONTRACT_MISMATCH", "data consumer attempt/run mismatch")
+                run = self.store._manifest("run-" + attempt["run_id"])
+                if run["study_id"] != protocol["study_id"] or run["cell"]["block_id"] != block_id:
+                    raise ResearchError("CONTRACT_MISMATCH", "data consumer study/block mismatch")
             allowed = False
             evidence = {}
             try:
@@ -62,6 +70,7 @@ class EvaluationExposureLedger:
                        "block_id": block_id, "dataset_id": block["dataset_id"],
                        "release_id": block["release_id"], "purpose": purpose,
                        **source_identity(block), **evidence,
+                       **{key: consumer[key] for key in ("attempt_id", "run_id", "entrypoint") if key in consumer},
                        "authorization_id": authorization_id, "allowed": bool(allowed)}
             self.store._append("EXPOSURE_ALLOWED" if allowed else "EXPOSURE_DENIED", request)
             if not allowed:

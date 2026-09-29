@@ -5,8 +5,8 @@ from __future__ import annotations
 import sys
 
 from application.research_budget import BudgetSpec
-from application.research_contracts import CapabilityRegistry, ExecutionPlugin, validate_result
-from application.research_supervisor import ResearchSupervisor
+from application.research_contracts import CapabilityRegistry, ExecutionPlugin
+from application.research_admission import AdmissionGate
 from infrastructure.research_store import ResearchStore, ResearchError, digest
 
 
@@ -29,6 +29,7 @@ def affine_registry(store: ResearchStore):
 class SharedRunner:
     def __init__(self, store: ResearchStore, registry=None):
         self.store = store
+        self.builtin_fixture = registry is None
         self.registry = registry if registry is not None else affine_registry(store)
 
     def run_cell(self, study_id, cell_hash, *, budget=BudgetSpec(60, category="smoke"), parent_attempt_id=None, reason=None):
@@ -41,8 +42,10 @@ class SharedRunner:
         run_id = self.store.register_run(study_id, cell)
         for attempt in self.store.attempts().values():
             if attempt["run_id"] == run_id and attempt["state"] == "SUCCEEDED":
+                if not any(e["event_kind"] == "ADMISSION" and e["payload"].get("attempt_id") == attempt["attempt_id"]
+                           for e in self.store.events()):
+                    raise ResearchError("UNQUALIFIED", "legacy success has no input admission evidence")
                 return {**attempt, "reused": True, "exit_code": 0}
         attempt = self.store.new_attempt(run_id, parent_attempt_id=parent_attempt_id, reason=reason)
-        return ResearchSupervisor(self.store).run(attempt,
-            lambda output: plugin.command_builder(output, spec, cell), budget,
-            result_validator=lambda result: validate_result(result, spec=spec, cell=cell, plugin=plugin))
+        return AdmissionGate(self.store).run(attempt, spec, cell, plugin,
+            lambda output: plugin.command_builder(output, spec, cell), budget, builtin_fixture=self.builtin_fixture)

@@ -13,7 +13,6 @@ def test_fixture_method_exact_state_recovery_uses_existing_supervisor(tmp_path):
     store = ResearchStore(tmp_path, "onboarding", initialize=True)
     value = spec()
     value["cells"][0].update(plugin_id="counter-fixture", capability="generic-rollout", visibility="synthetic")
-    store.register(value, digest(value))
     cell = value["cells"][0]
 
     def command(output, spec_value, cell_value, state):
@@ -30,6 +29,9 @@ def test_fixture_method_exact_state_recovery_uses_existing_supervisor(tmp_path):
     execution = CapabilityRegistry()
     execution.register(ExecutionPlugin("counter-fixture", frozenset({"generic-rollout"}),
         ("x", "y", "vx", "vy"), ("m", "m", "m/s", "m/s"), "exact", command))
+    from tests.research_admission_fixtures import admit_fixture
+    admit_fixture(store, value, execution.resolve("counter-fixture", "generic-rollout"), tmp_path)
+    store.register(value, digest(value))
     recovery_registry = RecoveryRegistry()
     recovery_registry.register(RecoveryPlugin("counter-fixture", "exact", command))
     recovery = SharedRecovery(store, execution, recovery_registry)

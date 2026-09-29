@@ -51,6 +51,34 @@ def export_evidence(store: ResearchStore, study_id: str, authorization: dict):
                 raise ResearchError("CORRUPT_ARTIFACT", "evidence result/spec binding mismatch")
             row.update(metrics=result["metrics"], metric_units=result["metric_units"], qualification=result["qualification"],
                        state_order=result["state_order"], units=result["units"], protocol_hash=result["protocol_hash"])
+            if result.get("admission_hash"):
+                admission = store.manifest("admission-" + result["admission_hash"])
+                body = {key: value for key, value in admission.items() if key != "admission_hash"}
+                if (digest(body) != result["admission_hash"] or admission.get("admission_hash") != digest(body)
+                        or admission["spec_hash"] != digest(spec) or admission["cell_hash"] != digest(cell)
+                        or admission["attempt_id"] != latest["attempt_id"] or admission["run_id"] != latest["run_id"]
+                        or admission["qualification"] != result["qualification"]):
+                    raise ResearchError("UNQUALIFIED", "result admission identity differs from authoritative attempt")
+                # Qualification attachments are additional disclosures, not
+                # automatically public because execution was authorized.
+                documents = admission.get("documents", {})
+                from infrastructure.research_store import encode
+                for attachment in documents.get("qualification_evidence", []):
+                    content = store.read_artifact(attachment["artifact"]["artifact_id"], purpose="export", authorization=authorization)
+                    if content != encode(attachment["content"]):
+                        raise ResearchError("CORRUPT_ARTIFACT", "qualification export binding changed")
+                if documents.get("model_qualification_evidence"):
+                    model_grant = documents["model_authorization"]
+                    if (model_grant["study_id"] != study_id and
+                            study_id not in model_grant.get("consumer_study_ids", [])):
+                        raise ResearchError("UNAUTHORIZED_DATA", "model evidence export consumer differs")
+                    for attachment in documents["model_qualification_evidence"]:
+                        content = store.read_artifact(attachment["artifact"]["artifact_id"], purpose="export", authorization=model_grant)
+                        if content != encode(attachment["content"]):
+                            raise ResearchError("CORRUPT_ARTIFACT", "model qualification export binding changed")
+                row.update(admission=admission, admission_hash=result["admission_hash"])
+            elif result["qualification"] == "qualified":
+                raise ResearchError("UNQUALIFIED", "qualified result lacks execution admission evidence")
         cells.append(row)
     payload = {"schema_version": "pirc25-evidence-bundle-v1", "study_id": study_id,
                "spec_hash": digest(spec), "protocol_hash": spec["protocol_hash"], "data_hash": spec["data_hash"],
