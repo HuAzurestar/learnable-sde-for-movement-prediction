@@ -148,3 +148,32 @@ def test_stable_multi_page_cursor_and_invalid_position(tmp_path):
     store.register_run("synthetic", value["cells"][0])
     with pytest.raises(ResearchError, match="CURSOR_STALE"):
         query.list("run", cursor=first["next_cursor"])
+
+
+@pytest.mark.parametrize("selector", ["model=unregistered", "version=unregistered", "horizon=99", "seed=99",
+                                     "trainer=unregistered", "predictor=unregistered"])
+def test_ui_filters_do_not_silently_return_unfiltered_matrix(tmp_path, selector):
+    with service(tmp_path) as (_, _, server):
+        status, _, content = request(server, "/api/runs?" + selector)
+        assert status == 200
+        assert json.loads(content)["items"] == []
+
+
+def test_ui_budget_provenance_distinguishes_unknown_cost_from_zero(tmp_path):
+    from application.research_budget import BudgetLedger, BudgetSpec
+    with service(tmp_path) as (store, value, server):
+        run = store.register_run("synthetic", value["cells"][0])
+        attempt = store.new_attempt(run)
+        ledger = BudgetLedger(store)
+        reservation = ledger.reserve(attempt, BudgetSpec(10))
+        ledger.settle(reservation["reservation_id"], None, outcome="INTERRUPTED")
+        status, _, content = request(server, "/api/runs")
+        assert status == 200
+        budget = json.loads(content)["items"][0]["budget"]
+        assert budget["unit"] == "slot-ms" and budget["committed_ms"] == 10000
+        assert budget["remaining_ms"] == 86400000 - 10000 and budget["closed"] is True
+        source = budget["sources"][0]
+        assert source["reservation_id"] == reservation["reservation_id"]
+        assert source["monotonic_elapsed_ms"] is None and source["charged_ms"] == 10000
+        assert source["cost_basis"] == "unknown-conservative-reservation"
+        assert source["event_hash"] in {event["hash"] for event in store.events()}
