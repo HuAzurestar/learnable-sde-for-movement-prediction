@@ -16,6 +16,36 @@ reservation is released. After settlement, an explicit child attempt can retry
 under the existing retry limit. A closed arm or insufficient remaining lifetime
 budget yields terminal `BUDGET_EXHAUSTED`, not an untracked active attempt.
 
+### Frozen test-read evidence
+
+`test` and `final-eval` protocol reads require both `preregistration_hash` and
+`history_hash`, resolved from immutable manifests. `history_status="known"`
+alone is never evidence. Use `PreregistrationGate.register_preregistration`
+and `import_history` with the expected canonical content hashes before reading.
+The Python interfaces live in `application.research_preregistration`.
+
+A `pirc25-preregistration-v1` document contains `study_ids`,
+`protocol_bindings`, `primary_metrics`, `selection_rule`, `stopping_rule`,
+`comparisons`, and an explicit `test_mode` (`blind` or `exploratory`). Compute
+each protocol binding with `protocol_binding(protocol)`: it hashes the protocol
+except its evidence pointers and obsolete history-status hint, avoiding circular
+hashes while binding all data identities and semantic fields. A joint plan can
+freeze multiple study/protocol bindings before any included data is exposed.
+
+A `pirc25-exposure-history-v1` document records its `source`, the imported
+`source_evidence` object, and `source_evidence_hash`. Its `records` bind
+dataset/release/source-block/content SHA to `unexposed`, `exposed`, or `unknown`.
+The importer is responsible for external source truth; the runtime verifies
+content, scope and ledger consistency, not off-platform activity. Keep these
+records outside Git. Missing, unknown or mismatched history refuses test reads.
+Blind mode also rejects previous imported exposure and controlled reads before
+the plan's authoritative publication sequence, even across renamed studies or
+windows. Partial/failed reads count as possible exposure. Known exposed data can
+be read under an explicitly exploratory plan and matching authorization, never
+silently reclassified as blind. These plan and history hashes are recorded in
+each read event. This read gate is separate from package qualification and does
+not itself grant formal-comparison eligibility.
+
 ## Independent reproduction
 
 From this repository, with the matching paper repository checked out:

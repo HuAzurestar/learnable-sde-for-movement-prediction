@@ -7,6 +7,7 @@ import hashlib
 from pathlib import Path
 
 from infrastructure.research_store import ResearchError, ResearchStore, digest, identifier
+from .research_preregistration import PreregistrationGate, source_identity
 
 
 class EvaluationExposureLedger:
@@ -39,6 +40,7 @@ class EvaluationExposureLedger:
                 raise ResearchError("UNAUTHORIZED_DATA", "block is not in frozen protocol")
             block = selected[0]
             allowed = False
+            evidence = {}
             try:
                 grant = self.store._manifest("authorization-" + identifier(authorization_id))
                 purposes = {"train": {"fit"}, "selection": {"select"}, "validation": {"validate"},
@@ -49,9 +51,9 @@ class EvaluationExposureLedger:
                            and grant.get("protocol_hash") == digest(protocol)
                            and datetime.fromisoformat(grant["expires_at"]) > datetime.now(timezone.utc))
                 if block["split_role"] in {"test", "final-eval"}:
-                    allowed = (allowed and protocol.get("preregistration_hash") is not None
-                               and protocol.get("history_status") == "known"
-                               and grant.get("test_authorization") is True)
+                    allowed = allowed and grant.get("test_authorization") is True
+                    if allowed:
+                        evidence = PreregistrationGate(self.store)._validate(protocol, block)
                 if purpose == "fit" and not block.get("fit_scope"):
                     allowed = False
             except (ResearchError, KeyError, ValueError, TypeError):
@@ -59,6 +61,7 @@ class EvaluationExposureLedger:
             request = {"study_id": protocol["study_id"], "protocol_hash": digest(protocol),
                        "block_id": block_id, "dataset_id": block["dataset_id"],
                        "release_id": block["release_id"], "purpose": purpose,
+                       **source_identity(block), **evidence,
                        "authorization_id": authorization_id, "allowed": bool(allowed)}
             self.store._append("EXPOSURE_ALLOWED" if allowed else "EXPOSURE_DENIED", request)
             if not allowed:
