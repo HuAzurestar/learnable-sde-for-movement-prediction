@@ -350,12 +350,13 @@ class ResearchStore:
             raise ResearchError("UNAUTHORIZED_DATA", "authorization expired or missing expiry") from exc
         self.publish("authorization-" + authorization["authorization_id"], authorization)
 
-    def artifact(self, content: bytes, *, role: str, visibility: str, block_ids: list[str], study_id: str) -> dict:
+    def artifact(self, content: bytes, *, role: str, visibility: str, block_ids: list[str], study_id: str,
+                 media_type="application/json") -> dict:
         if visibility not in {"synthetic", "restricted", "public"}:
             raise ResearchError("CONTRACT_MISMATCH", "unknown visibility")
         sha = hashlib.sha256(content).hexdigest()
         metadata = {"artifact_id": sha, "sha256": sha, "size_bytes": len(content), "study_id": identifier(study_id),
-                    "media_type": "application/json", "role": role,
+                    "media_type": media_type, "role": role,
                     "visibility": visibility, "block_ids": sorted(set(block_ids))}
         with self.lock():
             path = self.path / "artifacts" / sha

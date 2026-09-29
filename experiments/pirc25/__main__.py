@@ -43,6 +43,13 @@ def main(argv=None):
     recovery.add_argument("reservation_id")
     authorization = commands.add_parser("authorize")
     authorization.add_argument("grant", type=Path)
+    export = commands.add_parser("export")
+    export.add_argument("study")
+    export.add_argument("--authorization-id", required=True)
+    export.add_argument("--output", type=Path, required=True)
+    evidence = commands.add_parser("import-evidence")
+    evidence.add_argument("directory", type=Path)
+    evidence.add_argument("--expected-hash", required=True)
     args = parser.parse_args(argv)
     if not args.root:
         parser.error("--root or SDE_RUNTIME_ROOT is required; no implicit store")
@@ -69,6 +76,23 @@ def main(argv=None):
             grant = json.loads(args.grant.read_text(encoding="utf-8"))
             store.authorize(grant)
             result = {"authorization_id": grant["authorization_id"]}
+        elif args.command == "export":
+            from application.research_evidence import export_evidence
+            from infrastructure.research_store import atomic_write, encode
+            grant = store.manifest("authorization-" + args.authorization_id)
+            bundle = export_evidence(store, args.study, grant)
+            output = args.output.resolve()
+            if any((parent / ".git").exists() for parent in (output.parent, *output.parents)):
+                raise ResearchError("UNAUTHORIZED_DATA", "export must stay outside Git")
+            content = encode(bundle)
+            if output.exists() and output.read_bytes() != content:
+                raise ResearchError("IDENTITY_CONFLICT", "export exists with different content")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write(output, content)
+            result = {"bundle_hash": bundle["bundle_hash"]}
+        elif args.command == "import-evidence":
+            from application.research_evidence import accept_evidence_package
+            result = accept_evidence_package(store, args.directory, args.expected_hash)
         else:
             spec = store.manifest("study-" + args.study)["spec"]
             cells = [c for c in spec["cells"] if args.cell is None or digest(c) == args.cell]
