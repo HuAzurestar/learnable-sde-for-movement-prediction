@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Research results</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body><header><div><p class="eyebrow">Shared research workspace</p><h1>Research results</h1></div><span class="badge">Read only</span></header>
+<main><section class="toolbar"><div><h2 id="study">Your study</h2><p id="summary">Connect using the local session link.</p></div><button id="refresh">Refresh</button></section>
+<p id="error" role="alert" hidden></p>
+<nav aria-label="Results views"><button data-view="runs" class="active">Runs &amp; attempts</button><button data-view="comparisons">Comparisons &amp; evidence</button></nav>
+<section id="results" aria-live="polite"></section><button id="more" hidden>Load more</button>
+<section id="detail" hidden><div class="toolbar"><h2>Result &amp; provenance</h2><button id="close">Close</button></div><div id="detail-content"></div></section>
+<footer>Missing, failed and timed-out runs remain visible. Seed repeats are not independent samples.</footer></main></body></html>

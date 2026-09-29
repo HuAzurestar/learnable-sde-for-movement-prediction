@@ -50,6 +50,9 @@ def main(argv=None):
     evidence = commands.add_parser("import-evidence")
     evidence.add_argument("directory", type=Path)
     evidence.add_argument("--expected-hash", required=True)
+    server = commands.add_parser("serve")
+    server.add_argument("--authorization-id", required=True)
+    server.add_argument("--port", type=int, default=0)
     args = parser.parse_args(argv)
     if not args.root:
         parser.error("--root or SDE_RUNTIME_ROOT is required; no implicit store")
@@ -93,6 +96,10 @@ def main(argv=None):
         elif args.command == "import-evidence":
             from application.research_evidence import accept_evidence_package
             result = accept_evidence_package(store, args.directory, args.expected_hash)
+        elif args.command == "serve":
+            from .web import serve
+            serve(store, args.authorization_id, args.port)
+            return 0
         else:
             spec = store.manifest("study-" + args.study)["spec"]
             cells = [c for c in spec["cells"] if args.cell is None or digest(c) == args.cell]
