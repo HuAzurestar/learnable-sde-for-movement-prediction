@@ -5,6 +5,7 @@ No worker/scientific qualification is claimed by this display fixture.
 """
 
 import json
+import platform
 from pathlib import Path
 import subprocess
 import sys
@@ -53,6 +54,15 @@ def fixture(root, *, failure_states=False):
                 "preview": {"case_selection_rule": "registered-synthetic-case", "sample_ids": ["sample-0", "sample-1"],
                             "generation_version": "ui-fixture-v1", "n_samples": 2},
                 "samples": [[[0, 0], [1, 2]], [[0, 1], [2, 3]]]}}
+        result["forecast"].update({
+            "moments": {"estimation_kind": "sample-estimate", "mean": [0.5, 1.5]},
+            "region_estimates": [{"region": "synthetic-region", "probability": 0.75,
+                                  "estimator": "weighted-samples", "standard_error": 0.1, "ess": 1.6}],
+            "mode_probabilities": {"labels": ["left", "right"], "probabilities": [0.25, 0.75],
+                                   "role": "predictive", "K": 2},
+            "uncertainty": {"kind": "synthetic-interval", "level": 0.9, "bounds": [0.1, 0.9]}})
+        if cell["arm_id"] == "candidate" and cell["horizon"] == 2 and cell["seed"] == 2:
+            result["forecast"]["samples"] *= 33  # 66 saved paths: preview must refuse, not truncate.
         artifact = store.artifact(encode(result), role="result", visibility="synthetic", block_ids=["block-1"], study_id=spec["study_id"])
         ledger.settle(reservation["reservation_id"], 100, outcome="SUCCEEDED")
         store.transition(attempt, "SUCCEEDED", artifact_id=artifact["artifact_id"])
@@ -111,6 +121,12 @@ def check_failure_states(browser, root, expect):
 def main():
     from playwright.sync_api import sync_playwright, expect
     root = Path(tempfile.mkdtemp(prefix="pirc38-ui-acceptance-"))
+    repo_root = Path(__file__).resolve().parents[1]
+    def refs():
+        return {name: {"head": subprocess.check_output(["git", "-C", str(path), "rev-parse", "HEAD"], text=True).strip(),
+                       "status": subprocess.check_output(["git", "-C", str(path), "status", "--porcelain"], text=True).strip()}
+                for name, path in (("PSDE", repo_root), ("TSDE", repo_root.parent / "TSDE-SDE"))}
+    start_refs = refs()
     store, spec, aggregate, package = fixture(root)
     server = make_server(store, "browser")
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -151,6 +167,9 @@ def main():
             expect(page.locator("#preview-provenance")).to_contain_text("ui-fixture-v1")
             expect(page.locator("#optional-payloads")).to_contain_text("Density: unavailable")
             expect(page.locator("#optional-payloads")).to_contain_text("Evaluation truth: unavailable")
+            for saved in ("sample-estimate", "weighted-samples", "standard_error", "ess", "predictive", "synthetic-interval"):
+                expect(page.locator("#optional-payloads")).to_contain_text(saved)
+            expect(page.locator("#optional-payloads")).not_to_contain_text("Analytic moments")
             page.locator("#case-horizon").select_option("1")
             expect(page.locator("#case-chart")).to_have_attribute("data-horizon", "2")
             with page.expect_download() as downloaded:
@@ -162,6 +181,16 @@ def main():
                 page.get_by_role("button", name="Export case figure", exact=True).click()
             content = Path(downloaded.value.path()).read_text(encoding="utf-8")
             assert '"horizon":2' in content and '"artifact_id"' in content and digest(spec) in content
+            page.locator("#filter-model").fill("candidate")
+            page.locator("#filter-seed").fill("2")
+            page.get_by_role("button", name="Apply filters", exact=True).click()
+            expect(page.locator("#results tbody tr")).to_have_count(1)
+            expect(page.locator("#results")).to_contain_text("candidate")
+            page.get_by_role("button", name="Inspect", exact=True).click()
+            page.get_by_role("button", name="Inspect result", exact=False).click()
+            expect(page.locator("#error")).to_contain_text("TOO_LARGE")
+            expect(page.locator("#error")).to_contain_text("64 trajectories")
+            expect(page.locator("#case-chart")).to_have_count(0)
             page.get_by_role("button", name="Comparisons & evidence", exact=True).click()
             page.get_by_role("button", name="Compare & export", exact=True).click()
             page.locator("#comparison-horizon").select_option("2")
@@ -210,9 +239,13 @@ def main():
                 restricted_thread.join(timeout=5)
             assert not errors, errors
             check_failure_states(browser, root, expect)
+            browser_version = browser.version
             browser.close()
+        end_refs = refs()
+        assert start_refs == end_refs, "Source refs changed during browser acceptance"
         receipt = {"status": "passed", "spec_hash": digest(spec), "aggregate_hash": aggregate["aggregate_hash"],
-                   "scientific_qualification": "not-granted", "root": str(root)}
+                   "scientific_qualification": "not-granted", "root": str(root), "repositories": end_refs,
+                   "python": platform.python_version(), "browser": browser_version}
         (root / "receipt.json").write_bytes(encode(receipt))
         print(json.dumps(receipt))
     finally:
