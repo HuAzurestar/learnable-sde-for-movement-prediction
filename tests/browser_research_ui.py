@@ -4,6 +4,8 @@ python -B -m tests.browser_research_ui
 No worker/scientific qualification is claimed by this display fixture.
 """
 
+import csv
+import io
 import json
 import platform
 from pathlib import Path
@@ -49,8 +51,9 @@ def fixture(root, *, failure_states=False):
             continue
         result = {"spec_hash": digest(spec), "cell_hash": digest(cell), "protocol_hash": spec["protocol_hash"],
             "state_order": ["x", "y"], "units": ["m", "m"], "time_unit": "s", "qualification": "fixture",
-            "metrics": {"error": cell["horizon"] + (1 if cell["arm_id"] == "baseline" else 0)},
-            "metric_units": {"error": "m"}, "forecast": {"horizons": [1, 2],
+            "metrics": {"error": cell["horizon"] + (1 if cell["arm_id"] == "baseline" else 0),
+                        "calibration_coverage90_fixture_v1": 0.875 if cell["arm_id"] == "baseline" else 0.75},
+            "metric_units": {"error": "m", "calibration_coverage90_fixture_v1": "fraction"}, "forecast": {"horizons": [1, 2],
                 "preview": {"case_selection_rule": "registered-synthetic-case", "sample_ids": ["sample-0", "sample-1"],
                             "generation_version": "ui-fixture-v1", "n_samples": 2},
                 "samples": [[[0, 0], [1, 2]], [[0, 1], [2, 3]]]}}
@@ -105,6 +108,12 @@ def check_failure_states(browser, root, expect):
         expect(page.locator("#comparison-table")).to_contain_text("No complete metric")
         expect(page.locator("#detail-content")).to_contain_text("TIMEOUT")
         expect(page.locator("#detail-content")).to_contain_text("insufficient-independent-blocks")
+        expect(page.locator("#comparison-status-rates")).to_contain_text("TIMEOUT")
+        expect(page.locator("#comparison-status-rates")).to_contain_text("0.5")
+        for arm in aggregate["arms"]:
+            rates = arm["status_rates"]
+            assert rates["denominator"] == 2
+            assert rates["values"] == {state: count / 2 for state, count in arm["dispositions"].items()}
         # Corrupt only this disposable synthetic test artifact, never user data.
         (store.path / "artifacts" / package["aggregate_id"]).write_bytes(b"corrupt synthetic fixture")
         page.get_by_role("button", name="Compare & export", exact=True).click()
@@ -160,7 +169,7 @@ def main():
                 page.wait_for_function("document.querySelector('[data-evidence-open-count]')?.dataset.evidenceOpenCount === '" + str(_ + 1) + "'")
                 expect(page.locator("#comparison-horizon")).to_have_count(1)
             page.locator("#comparison-horizon").select_option("2")
-            expect(page.locator("#comparison-table tbody tr")).to_have_count(2)
+            expect(page.locator("#comparison-table tbody tr")).to_have_count(4)
             page.get_by_role("button", name="Inspect result", exact=False).click()
             expect(page.locator("#preview-provenance")).to_contain_text("registered-synthetic-case")
             expect(page.locator("#preview-provenance")).to_contain_text("sample-0")
@@ -194,7 +203,12 @@ def main():
             page.get_by_role("button", name="Comparisons & evidence", exact=True).click()
             page.get_by_role("button", name="Compare & export", exact=True).click()
             page.locator("#comparison-horizon").select_option("2")
-            expect(page.locator("#comparison-table tbody tr")).to_have_count(2)
+            expect(page.locator("#comparison-table tbody tr")).to_have_count(4)
+            calibration_rows = page.locator("#comparison-table tbody tr").filter(has_text="calibration_coverage90_fixture_v1")
+            expect(calibration_rows).to_have_count(2)
+            expect(calibration_rows.filter(has_text="baseline")).to_contain_text("0.875")
+            expect(calibration_rows.filter(has_text="candidate")).to_contain_text("0.75")
+            expect(page.locator("#comparison-status-rates")).to_contain_text("registered-cells-in-arm-stratum")
             expect(page.locator("#comparison-table")).to_contain_text("3")
             expect(page.locator("#comparison-costs tbody tr")).to_have_count(2)
             expect(page.locator("#comparison-costs")).to_contain_text("200")
@@ -207,6 +221,12 @@ def main():
             with page.expect_download() as downloaded:
                 page.get_by_role("button", name="Download frozen CSV", exact=True).click()
             assert Path(downloaded.value.path()).read_bytes() == (root / "evidence/metrics.csv").read_bytes()
+            csv_rows = list(csv.DictReader(io.StringIO(Path(downloaded.value.path()).read_text(encoding="utf-8"))))
+            for arm in aggregate["arms"]:
+                row = next(row for row in csv_rows if row["arm_id"] == arm["arm_id"] and row["stratum_id"] == arm["stratum_id"] and row["metric"] == "calibration_coverage90_fixture_v1")
+                assert float(row["value"]) == arm["metrics"]["calibration_coverage90_fixture_v1"]
+                assert row["unit"] == "fraction"
+                assert json.loads(row["status_rates"]) == arm["status_rates"]
             with page.expect_download() as downloaded:
                 page.get_by_role("button", name="Download aggregate manifest", exact=True).click()
             manifest = json.loads(Path(downloaded.value.path()).read_bytes())
