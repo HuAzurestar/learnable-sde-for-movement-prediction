@@ -48,6 +48,28 @@ def test_export_cannot_use_preview_only_or_partial_block_grants(tmp_path):
         export_evidence(store, "synthetic", partial)
 
 
+def test_export_preserves_registered_comparison_dimensions_for_missing_cells(tmp_path):
+    store = ResearchStore(tmp_path, "dimensions", initialize=True)
+    value = spec()
+    base = value["cells"][0]
+    value["cells"] = [{**base, "horizon": horizon, "region": "whole",
+                       "scenario": "synthetic", "visibility": "synthetic"}
+                      for horizon in (1, 2)]
+    store.register(value, digest(value))
+    grant = {"authorization_id": "export", "study_id": "synthetic",
+             "expires_at": "2099-01-01T00:00:00+00:00",
+             "evidence_hash": digest("synthetic permission"), "purposes": ["export"],
+             "visibilities": ["synthetic"], "block_ids": ["fixture-1"]}
+    store.authorize(grant)
+    bundle = export_evidence(store, "synthetic", grant)
+    assert len({row["cell_hash"] for row in bundle["cells"]}) == 2
+    assert {row["arm_id"] for row in bundle["cells"]} == {"affine"}
+    for expected, row, cell in zip(bundle["expected_cells"], bundle["cells"], value["cells"]):
+        dimensions = {key: cell[key] for key in ("horizon", "region", "scenario")}
+        assert row["comparison_dimensions"] == expected["comparison_dimensions"] == dimensions
+        assert row["status"] == "MISSING"
+
+
 def test_aggregate_import_binds_hash_and_registered_spec(tmp_path):
     store, value, grant = setup(tmp_path)
     aggregate = {"schema_version": "pirc25-aggregate-v1", "study_id": "synthetic", "spec_hash": digest(value),
