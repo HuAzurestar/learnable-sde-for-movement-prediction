@@ -73,7 +73,17 @@ class BudgetLedger:
                 raise ResearchError("CONTRACT_MISMATCH", "reservation requires registered attempt")
             balance = self._balance(run["arm_id"])
             if balance["closed"] or requested > balance["remaining_ms"]:
-                raise ResearchError("BUDGET_EXHAUSTED", "arm closed or insufficient unreserved budget")
+                # Classify and persist rejection while still holding the same
+                # authority lock as the capacity check. No reservation exists
+                # for this attempt, so never settle another caller's work.
+                charged = sum(r["charged_ms"] for r in reservations.values()
+                              if r["arm_id"] == run["arm_id"] and r["settled"])
+                final = balance["closed"] or requested > 86400000 - charged
+                code = "BUDGET_EXHAUSTED" if final else "BUDGET_BUSY"
+                self.store._transition(attempt_id,
+                    "BUDGET_EXHAUSTED" if final else "PREFLIGHT_FAILED", error_code=code)
+                raise ResearchError(code, "arm budget cannot fund this job" if final else
+                                    "capacity is reserved by other attempts; retry explicitly after settlement")
             data = {"reservation_id": reservation_id, "arm_id": run["arm_id"],
                     "attempt_id": attempt_id, "run_id": run["run_id"], "study_id": run["study_id"],
                     "reserved_ms": requested, "charged_ms": 0, "monotonic_elapsed_ms": None,

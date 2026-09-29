@@ -25,7 +25,7 @@ class ResearchError(ValueError):
         super().__init__(f"{code}: {detail}")
 
     def envelope(self, *, run_id=None, attempt_id=None):
-        return {"code": self.code, "retryable": False, "trace_id": uuid.uuid4().hex,
+        return {"code": self.code, "retryable": self.code == "BUDGET_BUSY", "trace_id": uuid.uuid4().hex,
                 "run_id": run_id, "attempt_id": attempt_id, "safe_details": self.safe_details}
 
 

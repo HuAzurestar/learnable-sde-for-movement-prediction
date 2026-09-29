@@ -4,6 +4,18 @@ PR #22 integrates the shared runtime. The contract remains `pirc25-contract-v1`;
 changing the implementing issue does not create a new ledger or reset a research
 arm. Child packages retain ownership of scientific algorithms and qualification.
 
+`show` is a registration-metadata command restricted to `study-*`, `run-*` and
+`artifact-*` manifests. It never displays frozen bundles or arbitrary manifest
+kinds. Use `export --authorization-id ...` or the authorized read-only service
+to disclose results; an earlier export does not authorize a later disclosure.
+
+Budget refusal is recorded atomically before returning an error. If other
+attempts temporarily reserve the available capacity, the rejected attempt ends
+as `PREFLIGHT_FAILED` with retryable `BUDGET_BUSY`; no worker starts and no other
+reservation is released. After settlement, an explicit child attempt can retry
+under the existing retry limit. A closed arm or insufficient remaining lifetime
+budget yields terminal `BUDGET_EXHAUSTED`, not an untracked active attempt.
+
 ## Independent reproduction
 
 From this repository, with the matching paper repository checked out:

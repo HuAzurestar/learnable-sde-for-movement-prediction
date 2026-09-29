@@ -7,7 +7,7 @@ from pathlib import Path
 
 from application.research_budget import BudgetLedger, BudgetSpec
 from infrastructure.research_index import ResearchIndex
-from infrastructure.research_store import ResearchStore, ResearchError, digest
+from infrastructure.research_store import ResearchStore, ResearchError, digest, identifier
 from .affine import fixture_spec
 from .runner import SharedRunner
 
@@ -29,7 +29,7 @@ def main(argv=None):
     listing.add_argument("--kind", default="study", choices=["study", "run", "artifact"])
     listing.add_argument("--limit", type=int, default=50)
     commands.add_parser("rebuild-index")
-    show = commands.add_parser("show")
+    show = commands.add_parser("show", help="registration metadata only; use authorized export/serve for results")
     show.add_argument("object_id")
     run = commands.add_parser("run")
     run.add_argument("study")
@@ -74,6 +74,11 @@ def main(argv=None):
         elif args.command == "list":
             result = ResearchIndex(store).list(kind=args.kind, limit=args.limit)
         elif args.command == "show":
+            # Fail closed for bundles and any future result-bearing manifest
+            # kind. A past export grant is not a grant for this invocation.
+            kind = identifier(args.object_id).split("-", 1)[0]
+            if kind not in {"study", "run", "artifact"}:
+                raise ResearchError("UNAUTHORIZED_DATA", "show is limited to registration metadata; use authorized export or serve for results")
             result = store.manifest(args.object_id)
         elif args.command == "budget":
             result = BudgetLedger(store).balance(args.arm)

@@ -32,7 +32,7 @@ def test_concurrent_reservations_never_overallocate_and_restart_keeps_cost(tmp_p
         try:
             return ledger.reserve(attempt, BudgetSpec())
         except ResearchError as exc:
-            assert exc.code == "BUDGET_EXHAUSTED"
+            assert exc.code == "BUDGET_BUSY"
             return None
 
     with ThreadPoolExecutor(max_workers=4) as pool:
