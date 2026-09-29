@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import re
 
 from infrastructure.research_store import ResearchError, ResearchStore, digest
 
@@ -81,39 +82,62 @@ class BudgetLedger:
             return data
 
     def settle(self, reservation_id: str, elapsed_ms: int | None, *, outcome: str):
+        with self.store.lock():
+            return self._settle(reservation_id, elapsed_ms, outcome=outcome)
+
+    def _settle(self, reservation_id: str, elapsed_ms: int | None, *, outcome: str):
         if elapsed_ms is not None and (not isinstance(elapsed_ms, int) or elapsed_ms < 0):
             raise ResearchError("CONTRACT_MISMATCH", "invalid elapsed cost")
-        with self.store.lock():
-            reservations, _ = self._state()
-            if reservation_id not in reservations:
-                raise ResearchError("MISSING_INPUT", "reservation missing")
-            reservation = reservations[reservation_id]
-            if reservation["settled"]:
-                if reservation["monotonic_elapsed_ms"] != elapsed_ms or reservation["outcome"] != outcome:
-                    raise ResearchError("IDENTITY_CONFLICT", "settlement replay changed cost/outcome")
-                return reservation
-            charged = reservation["reserved_ms"] if elapsed_ms is None else elapsed_ms
-            data = {**reservation, "settled": True, "charged_ms": charged,
-                    "monotonic_elapsed_ms": elapsed_ms, "outcome": outcome}
-            self.store._append("SETTLE", data, "settle-" + reservation_id)
-            if (elapsed_ms is None or outcome in {"TIMEOUT", "BUDGET_EXHAUSTED", "INTERRUPTED"}
-                    or self._balance(reservation["arm_id"])["remaining_ms"] == 0):
-                self.store._append("ARM_CLOSED", {"arm_id": reservation["arm_id"], "reason": outcome},
-                                   "close-" + reservation_id)
-            return data
+        reservations, _ = self._state()
+        if reservation_id not in reservations:
+            raise ResearchError("MISSING_INPUT", "reservation missing")
+        reservation = reservations[reservation_id]
+        if reservation["settled"]:
+            if reservation["monotonic_elapsed_ms"] != elapsed_ms or reservation["outcome"] != outcome:
+                raise ResearchError("IDENTITY_CONFLICT", "settlement replay changed cost/outcome")
+            return reservation
+        charged = reservation["reserved_ms"] if elapsed_ms is None else elapsed_ms
+        data = {**reservation, "settled": True, "charged_ms": charged,
+                "monotonic_elapsed_ms": elapsed_ms, "outcome": outcome}
+        self.store._append("SETTLE", data, "settle-" + reservation_id)
+        if (elapsed_ms is None or outcome in {"TIMEOUT", "BUDGET_EXHAUSTED", "INTERRUPTED"}
+                or self._balance(reservation["arm_id"])["remaining_ms"] == 0):
+            self.store._append("ARM_CLOSED", {"arm_id": reservation["arm_id"], "reason": outcome},
+                               "close-" + reservation_id)
+        return data
 
-    def recover_unknown(self, reservation_id: str):
-        """Explicit recovery charges the full reservation; it never releases cost."""
+    def recover_unknown(self, reservation_id: str, *, stop_evidence_hash=None):
+        """Reconcile stopped work at full cost, never silently release a live slot.
+
+        An operator must attest whole-tree stop for any possibly launched attempt.
+        The OS probe is an additional veto, not a replacement for that evidence.
+        """
         with self.store.lock():
             reservations, _ = self._state()
             if reservation_id not in reservations:
                 raise ResearchError("MISSING_INPUT", "reservation missing")
             result = reservations[reservation_id]
-        if not result["settled"]:
-            result = self.settle(reservation_id, None, outcome="INTERRUPTED")
-        attempt = self.store.attempts()[result["attempt_id"]]
-        if attempt["state"] not in self.store.TERMINAL:
-            self.store.append("ARM_CLOSED", {"arm_id": result["arm_id"], "reason": "recovered interrupted attempt"},
-                              "recovery-close-" + reservation_id)
-            self.store.transition(result["attempt_id"], "INTERRUPTED", error_code="UNKNOWN_WORKER_COST")
-        return result
+            if not result["settled"]:
+                attempt = self.store._attempts()[result["attempt_id"]]
+                workers = [e["payload"] for e in self.store._events()
+                           if e["event_kind"] == "WORKER_STARTED"
+                           and e["payload"].get("reservation_id") == reservation_id]
+                if workers or attempt["state"] != "REGISTERED":
+                    from infrastructure.process_tree import process_may_be_alive
+                    if any(process_may_be_alive(worker.get("pid")) for worker in workers):
+                        raise ResearchError("WORKER_ACTIVE", "recorded worker/tree may still be alive; reservation retained")
+                    if not re.fullmatch(r"[0-9a-f]{64}", str(stop_evidence_hash or "")):
+                        raise ResearchError("RECOVERY_REQUIRED", "whole-tree stop evidence is required before releasing a claimed slot")
+                    self.store._append("WORKER_STOP_CONFIRMED", {
+                        "reservation_id": reservation_id, "attempt_id": result["attempt_id"],
+                        "stop_evidence_hash": stop_evidence_hash,
+                        "kind": "operator-whole-tree-stop-attestation",
+                        "observed_pids": [worker["pid"] for worker in workers]},
+                        "stop-confirmed-" + reservation_id)
+                result = self._settle(reservation_id, None, outcome="INTERRUPTED")
+            attempt = self.store._attempts()[result["attempt_id"]]
+            if attempt["state"] not in self.store.TERMINAL:
+                self.store._append("ARM_CLOSED", {"arm_id": result["arm_id"], "reason": "recovered interrupted attempt"},
+                                   "recovery-close-" + reservation_id)
+                self.store._transition(result["attempt_id"], "INTERRUPTED", error_code="UNKNOWN_WORKER_COST")
+            return result

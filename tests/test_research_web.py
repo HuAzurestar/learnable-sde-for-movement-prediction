@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import http.client
 import json
 import threading
+import base64
 
 import pytest
 
@@ -108,3 +109,42 @@ def test_query_page_limits_and_filter_bound_cursor(tmp_path):
             query.list("run", cursor="not-a-valid-cursor")
         with pytest.raises(ResearchError, match="CURSOR_STALE"):
             query.list("run", cursor="W10=")
+
+
+def test_query_rejects_authority_change_during_snapshot(tmp_path, monkeypatch):
+    with service(tmp_path) as (store, value, server):
+        query = ResearchQuery(store, "ui")
+        original = query._objects
+        def publish_during_enumeration(kind, grant):
+            rows = original(kind, grant)
+            store.register_run("synthetic", value["cells"][0])
+            return rows
+        monkeypatch.setattr(query, "_objects", publish_during_enumeration)
+        with pytest.raises(ResearchError, match="INDEX_STALE"):
+            query.list("run")
+        monkeypatch.setattr(query, "_objects", original)
+        assert query.list("run")["items"][0]["state"] == "REGISTERED"
+
+
+def test_stable_multi_page_cursor_and_invalid_position(tmp_path):
+    store = ResearchStore(tmp_path, "pagination", initialize=True)
+    value = spec()
+    value["cells"] = [{**value["cells"][0], "seed": seed, "visibility": "synthetic"} for seed in range(3)]
+    store.register(value, digest(value))
+    store.authorize({"authorization_id": "pages", "study_id": "synthetic", "expires_at": "2099-01-01T00:00:00+00:00",
+                     "evidence_hash": digest("synthetic pagination grant"), "purposes": ["preview"],
+                     "visibilities": ["synthetic"], "block_ids": ["fixture-1"]})
+    query = ResearchQuery(store, "pages")
+    first = query.list("run", limit=1)
+    second = query.list("run", limit=1, cursor=first["next_cursor"])
+    third = query.list("run", limit=1, cursor=second["next_cursor"])
+    assert len({p["items"][0]["object_id"] for p in (first, second, third)}) == 3
+    assert first["watermark"] == second["watermark"] == third["watermark"]
+    assert third["next_cursor"] is None
+    cursor = json.loads(base64.urlsafe_b64decode(first["next_cursor"]))
+    cursor["after"] = None
+    with pytest.raises(ResearchError, match="CURSOR_STALE"):
+        query.list("run", cursor=base64.urlsafe_b64encode(json.dumps(cursor).encode()).decode())
+    store.register_run("synthetic", value["cells"][0])
+    with pytest.raises(ResearchError, match="CURSOR_STALE"):
+        query.list("run", cursor=first["next_cursor"])

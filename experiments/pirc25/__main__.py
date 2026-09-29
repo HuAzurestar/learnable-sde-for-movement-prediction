@@ -41,6 +41,7 @@ def main(argv=None):
     budget.add_argument("arm")
     recovery = commands.add_parser("recover-unknown")
     recovery.add_argument("reservation_id")
+    recovery.add_argument("--stop-evidence-hash", help="hash of verified whole-tree stop evidence for launched work")
     quarantine = commands.add_parser("quarantine-tail")
     quarantine.add_argument("--reason", required=True)
     authorization = commands.add_parser("authorize")
@@ -77,7 +78,7 @@ def main(argv=None):
         elif args.command == "budget":
             result = BudgetLedger(store).balance(args.arm)
         elif args.command == "recover-unknown":
-            result = BudgetLedger(store).recover_unknown(args.reservation_id)
+            result = BudgetLedger(store).recover_unknown(args.reservation_id, stop_evidence_hash=args.stop_evidence_hash)
         elif args.command == "quarantine-tail":
             result = store.quarantine_tail(args.reason)
         elif args.command == "authorize":

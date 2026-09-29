@@ -83,6 +83,16 @@ the arm. Deadline/lost-worker outcomes close the affected arm. Unknown cost reta
 the full reservation; `recover-unknown` records interruption. At most two explicit
 retries are supported. No timer launches a new study.
 
+For possibly launched work, recovery requires `--stop-evidence-hash` identifying
+the operator's verified whole-tree stop evidence. A live or uninspectable
+recorded PID (or POSIX process group) vetoes release even with that attestation.
+Missing launch metadata also requires explicit evidence, never an assumed stop.
+Recovery records the attestation, full-cost settlement and terminal attempt
+under one lock. It does not terminate arbitrary PIDs from metadata. On Windows,
+the operator's evidence must cover the Job Object's descendants, not just the
+wrapper PID. A changed authority snapshot causes a query to return INDEX_STALE;
+retry the list instead of continuing with a cursor from mixed versions.
+
 `ResearchQueue` persists reservations, resource classes and claims. The default
 store has one CPU slot and no GPU slot; initialize `ResearchQueue(store,
 slots={"cpu": N, "gpu": M})` before its first use to fix a different local layout.

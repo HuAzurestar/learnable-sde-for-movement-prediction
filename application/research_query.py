@@ -44,6 +44,11 @@ class ResearchQuery:
         if kind not in {"study", "run", "comparison"} or not 1 <= limit <= 200:
             raise ResearchError("CONTRACT_MISMATCH", "invalid query kind or page limit")
         grant = self._grant()
+        def data_watermark():
+            return max((e["sequence"] for e in self.store.events()
+                        if e["event_kind"] in {"MANIFEST", "ATTEMPT"}), default=0)
+
+        snapshot_start = data_watermark()
         selector = digest([kind, grant["study_id"], arm_id, state])
         rows = self._objects(kind, grant)
         attempts = self.store.attempts()
@@ -64,14 +69,17 @@ class ResearchQuery:
         rows = [r for r in rows if (arm_id is None or r["manifest"].get("arm_id") == arm_id)
                 and (state is None or r.get("state") == state)]
         # Disclosure logging must not invalidate its own continuation cursor.
-        watermark = max((e["sequence"] for e in self.store.events() if e["event_kind"] in {"MANIFEST", "ATTEMPT"}), default=0)
+        watermark = data_watermark()
+        if watermark != snapshot_start:
+            raise ResearchError("INDEX_STALE", "authority changed while assembling query snapshot; retry the request")
         after = ""
         if cursor:
             try:
                 saved = json.loads(base64.urlsafe_b64decode(cursor.encode()))
             except (ValueError, TypeError) as exc:
                 raise ResearchError("CURSOR_STALE", "invalid cursor") from exc
-            if not isinstance(saved, dict) or saved.get("selector") != selector or saved.get("watermark") != watermark:
+            if (not isinstance(saved, dict) or saved.get("selector") != selector
+                    or saved.get("watermark") != watermark or not isinstance(saved.get("after"), str)):
                 raise ResearchError("CURSOR_STALE", "query version or filters changed")
             after = saved["after"]
         rows = sorted((r for r in rows if r["object_id"] > after), key=lambda r: r["object_id"])

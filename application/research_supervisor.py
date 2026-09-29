@@ -65,10 +65,13 @@ class ResearchSupervisor:
                     env={**os.environ, "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"},
                 )
                 tree = ProcessTree(process)
-                self.store.append("WORKER_STARTED", {"attempt_id": attempt_id, "pid": process.pid,
-                                  "reservation_id": reservation["reservation_id"], "deadline_monotonic": deadline})
-                process.stdin.write(b"GO\n")
-                process.stdin.flush()
+                with self.store.lock():
+                    if self.store._attempts()[attempt_id]["state"] != "RUNNING":
+                        raise ResearchError("IDENTITY_CONFLICT", "attempt reconciled before worker launch")
+                    self.store._append("WORKER_STARTED", {"attempt_id": attempt_id, "pid": process.pid,
+                                       "reservation_id": reservation["reservation_id"], "deadline_monotonic": deadline})
+                    process.stdin.write(b"GO\n")
+                    process.stdin.flush()
                 warned = False
                 last_logged = start
                 while process.poll() is None:

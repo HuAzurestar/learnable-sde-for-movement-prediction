@@ -358,34 +358,37 @@ class ResearchStore:
 
     def transition(self, attempt_id: str, state: str, *, error_code=None, artifact_id=None):
         with self.lock():
-            attempts = self._attempts()
-            if attempt_id not in attempts:
-                raise ResearchError("MISSING_INPUT", "attempt not registered")
-            current = attempts[attempt_id]
-            if current["state"] in self.TERMINAL:
-                if current["state"] == state and current.get("artifact_id") == artifact_id and current["error_code"] == error_code:
-                    return current
-                raise ResearchError("IDENTITY_CONFLICT", "attempt terminal state cannot change")
-            if state not in self.TERMINAL | {"RUNNING"} or (state == "RUNNING" and current["state"] != "REGISTERED"):
-                raise ResearchError("CONTRACT_MISMATCH", "invalid attempt transition")
-            artifact_hash = None
-            if state == "SUCCEEDED":
-                if current["state"] != "RUNNING" or artifact_id is None or error_code is not None:
-                    raise ResearchError("CONTRACT_MISMATCH", "success needs running attempt and published artifact")
-                metadata = self._manifest("artifact-" + identifier(artifact_id))
-                run = self._manifest("run-" + current["run_id"])
-                if metadata["study_id"] != run["study_id"]:
-                    raise ResearchError("CONTRACT_MISMATCH", "artifact belongs to another study")
-                content = (self.path / "artifacts" / artifact_id).read_bytes()
-                if hashlib.sha256(content).hexdigest() != metadata["sha256"]:
-                    raise ResearchError("CORRUPT_ARTIFACT", "success artifact hash mismatch")
-                artifact_hash = digest(metadata)
-            updated = {**current, "state": state, "error_code": error_code,
-                       "artifact_id": artifact_id, "artifact_manifest_hash": artifact_hash,
-                       "started_at": utc_now() if state == "RUNNING" else current["started_at"],
-                       "ended_at": utc_now() if state in self.TERMINAL else None}
-            self._append("ATTEMPT", updated)
-            return updated
+            return self._transition(attempt_id, state, error_code=error_code, artifact_id=artifact_id)
+
+    def _transition(self, attempt_id: str, state: str, *, error_code=None, artifact_id=None):
+        attempts = self._attempts()
+        if attempt_id not in attempts:
+            raise ResearchError("MISSING_INPUT", "attempt not registered")
+        current = attempts[attempt_id]
+        if current["state"] in self.TERMINAL:
+            if current["state"] == state and current.get("artifact_id") == artifact_id and current["error_code"] == error_code:
+                return current
+            raise ResearchError("IDENTITY_CONFLICT", "attempt terminal state cannot change")
+        if state not in self.TERMINAL | {"RUNNING"} or (state == "RUNNING" and current["state"] != "REGISTERED"):
+            raise ResearchError("CONTRACT_MISMATCH", "invalid attempt transition")
+        artifact_hash = None
+        if state == "SUCCEEDED":
+            if current["state"] != "RUNNING" or artifact_id is None or error_code is not None:
+                raise ResearchError("CONTRACT_MISMATCH", "success needs running attempt and published artifact")
+            metadata = self._manifest("artifact-" + identifier(artifact_id))
+            run = self._manifest("run-" + current["run_id"])
+            if metadata["study_id"] != run["study_id"]:
+                raise ResearchError("CONTRACT_MISMATCH", "artifact belongs to another study")
+            content = (self.path / "artifacts" / artifact_id).read_bytes()
+            if hashlib.sha256(content).hexdigest() != metadata["sha256"]:
+                raise ResearchError("CORRUPT_ARTIFACT", "success artifact hash mismatch")
+            artifact_hash = digest(metadata)
+        updated = {**current, "state": state, "error_code": error_code,
+                   "artifact_id": artifact_id, "artifact_manifest_hash": artifact_hash,
+                   "started_at": utc_now() if state == "RUNNING" else current["started_at"],
+                   "ended_at": utc_now() if state in self.TERMINAL else None}
+        self._append("ATTEMPT", updated)
+        return updated
 
     def authorize(self, authorization: dict):
         """Explicit local-owner operation, never exposed by the read-only API."""

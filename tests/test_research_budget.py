@@ -61,6 +61,46 @@ def test_unknown_worker_charges_upper_bound_and_closes_only_its_arm(tmp_path):
     assert store.attempts()[attempts[0]]["state"] == "INTERRUPTED"
 
 
+def test_unknown_recovery_never_releases_a_live_worker_and_requires_stop_evidence(tmp_path):
+    store, attempts = registered(tmp_path)
+    ledger = BudgetLedger(store)
+    reservation = ledger.reserve(attempts[0], BudgetSpec(5))
+    store.transition(attempts[0], "RUNNING")
+    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                               start_new_session=os.name != "nt")
+    try:
+        store.append("WORKER_STARTED", {"attempt_id": attempts[0], "pid": process.pid,
+                                      "reservation_id": reservation["reservation_id"]})
+        with pytest.raises(ResearchError, match="WORKER_ACTIVE"):
+            ledger.recover_unknown(reservation["reservation_id"], stop_evidence_hash=digest("premature"))
+        assert not ledger._state()[0][reservation["reservation_id"]]["settled"]
+        assert process.poll() is None
+    finally:
+        process.terminate()
+        process.wait(timeout=5)
+    with pytest.raises(ResearchError, match="RECOVERY_REQUIRED"):
+        ledger.recover_unknown(reservation["reservation_id"])
+    proof = digest("owned child terminated and reaped; no descendants launched")
+    result = ledger.recover_unknown(reservation["reservation_id"], stop_evidence_hash=proof)
+    assert result["charged_ms"] == 5000 and ledger.balance("affine")["closed"]
+    assert any(e["event_kind"] == "WORKER_STOP_CONFIRMED" and e["payload"]["stop_evidence_hash"] == proof
+               for e in store.events())
+    assert ledger.recover_unknown(reservation["reservation_id"]) == result
+
+
+def test_incomplete_launch_metadata_needs_explicit_audited_reconciliation(tmp_path):
+    store, attempts = registered(tmp_path)
+    ledger = BudgetLedger(store)
+    reservation = ledger.reserve(attempts[0], BudgetSpec(5))
+    store.transition(attempts[0], "RUNNING")
+    with pytest.raises(ResearchError, match="RECOVERY_REQUIRED"):
+        ledger.recover_unknown(reservation["reservation_id"])
+    ledger.recover_unknown(reservation["reservation_id"], stop_evidence_hash=digest("verified no worker was launched"))
+    assert store.attempts()[attempts[0]]["state"] == "INTERRUPTED"
+    with pytest.raises(ResearchError, match="terminal"):
+        store.transition(attempts[0], "RUNNING")
+
+
 @pytest.mark.parametrize("budget", [BudgetSpec(7201), BudgetSpec(901, category="smoke"), BudgetSpec(1801, category="pilot"), BudgetSpec(float("nan")), BudgetSpec(1, arm_seconds=86401)])
 def test_budget_hard_caps_cannot_be_overridden(budget):
     with pytest.raises(ResearchError):
