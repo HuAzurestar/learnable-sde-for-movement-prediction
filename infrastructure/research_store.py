@@ -109,7 +109,7 @@ class ResearchStore:
     SCHEMA = "pirc25-contract-v1"
     TERMINAL = {"SUCCEEDED", "FAILED", "INTERRUPTED", "TIMEOUT", "BUDGET_EXHAUSTED", "PREFLIGHT_FAILED", "CANCELLED"}
 
-    def __init__(self, runtime_root: Path, store_id: str, *, initialize=False):
+    def __init__(self, runtime_root: Path, store_id: str, *, initialize=False, allow_corrupt=False):
         root = Path(runtime_root)
         if not root.is_absolute():
             raise ResearchError("CONTRACT_MISMATCH", "runtime root must be absolute")
@@ -139,7 +139,8 @@ class ResearchStore:
                 atomic_write(self.path / "head.json", encode({"sequence": 0, "hash": "0" * 64}))
             else:
                 raise ResearchError("STORE_MISSING", "store identity missing")
-            self._events()
+            if not allow_corrupt:
+                self._events()
 
     def lock(self):
         return file_lock(self.path / ".writer.lock")
@@ -178,6 +179,44 @@ class ResearchStore:
     def events(self) -> list[dict]:
         with self.lock():
             return self._events()
+
+    def quarantine_tail(self, reason: str):
+        """Preserve invalid bytes and put every budget under a permanent hold.
+
+        This is an explicit forensic recovery operation, not permission to
+        recalculate or replenish a budget from incomplete history.
+        """
+        if not reason.strip():
+            raise ResearchError("CONTRACT_MISMATCH", "recovery requires a reason")
+        with self.lock():
+            paths = sorted((self.path / "events").glob("*.json"))
+            prefix = []
+            previous = "0" * 64
+            for sequence, path in enumerate(paths, 1):
+                try:
+                    value = self._json(path)
+                    body = {key: item for key, item in value.items() if key != "hash"}
+                    if (path.name != f"{sequence:016d}.json" or body.get("sequence") != sequence
+                            or body.get("previous_hash") != previous or value.get("hash") != digest(body)):
+                        break
+                except (ResearchError, ValueError, AttributeError):
+                    break
+                prefix.append(value)
+                previous = value["hash"]
+            quarantine = self.path / ("quarantine-" + uuid.uuid4().hex)
+            quarantine.mkdir()
+            hold = {"reason": reason, "valid_prefix_sequence": len(prefix), "valid_prefix_hash": previous,
+                    "quarantine": quarantine.name, "budget_action": "all-arms-held-no-replenishment"}
+            # Written first: interruption during recovery can never reopen budget.
+            atomic_write(self.path / "recovery-hold.json", encode(hold))
+            head_path = self.path / "head.json"
+            if head_path.exists():
+                atomic_write(quarantine / "original-head.json", head_path.read_bytes())
+            for path in paths[len(prefix):]:
+                path.rename(quarantine / path.name)
+            atomic_write(head_path, encode({"sequence": len(prefix), "hash": previous}))
+            self._append("RECOVERY_HOLD", hold)
+            return hold
 
     def _append(self, kind: str, payload: dict, event_id: str | None = None) -> dict:
         events = self._events()
@@ -252,7 +291,19 @@ class ResearchStore:
         if any(c.get("arm_id") not in {a["arm_id"] for a in arms} for c in spec["cells"]):
             raise ResearchError("CONTRACT_MISMATCH", "cell arm is not registered")
         object_id = "study-" + spec["study_id"]
-        self.publish(object_id, {"spec": spec, "spec_hash": expected_hash})
+        with self.lock():
+            for event in self._events():
+                if event["event_kind"] != "MANIFEST" or not event["payload"]["object_id"].startswith("study-"):
+                    continue
+                old = self._manifest(event["payload"]["object_id"])["spec"]
+                for registered in old["arms"]:
+                    for proposed in arms:
+                        keys = ("model_family_id", "method_family_id", "objective_id")
+                        same_family = all(registered[k] == proposed[k] for k in keys)
+                        if (registered["arm_id"] == proposed["arm_id"]) != same_family:
+                            raise ResearchError("IDENTITY_CONFLICT", "arm family cannot be relabeled to reset its budget")
+            sha = self._publish(object_id, {"spec": spec, "spec_hash": expected_hash})
+            self._append("MANIFEST", {"object_id": object_id, "sha256": sha}, "manifest-" + digest([object_id, sha]))
         return {"study_id": spec["study_id"], "experiment_id": spec["experiment_id"], "spec_hash": expected_hash}
 
     def register_run(self, study_id: str, cell: dict) -> str:
@@ -279,6 +330,8 @@ class ResearchStore:
             if any(a["state"] not in self.TERMINAL for a in related):
                 raise ResearchError("IDENTITY_CONFLICT", "cell already has a live attempt")
             if related:
+                if len(related) >= 3:
+                    raise ResearchError("RETRY_EXHAUSTED", "at most two explicit retries are supported")
                 parent = states.get(parent_attempt_id)
                 if not reason or not parent or parent["run_id"] != run_id:
                     raise ResearchError("CONTRACT_MISMATCH", "retry requires failed parent and reason")

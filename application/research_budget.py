@@ -44,7 +44,7 @@ class BudgetLedger:
         used = sum(r["charged_ms"] if r["settled"] else r["reserved_ms"]
                    for r in reservations.values() if r["arm_id"] == arm_id)
         return {"arm_id": arm_id, "remaining_ms": max(0, 86400000 - used),
-                "committed_ms": used, "closed": arm_id in closed}
+                "committed_ms": used, "closed": arm_id in closed or (self.store.path / "recovery-hold.json").exists()}
 
     def balance(self, arm_id):
         with self.store.lock():
@@ -53,6 +53,8 @@ class BudgetLedger:
     def reserve(self, attempt_id: str, budget: BudgetSpec, *, worker_slot=0):
         budget.validate()
         with self.store.lock():
+            if (self.store.path / "recovery-hold.json").exists():
+                raise ResearchError("RECOVERY_REQUIRED", "authoritative recovery holds all budgets for reconciliation")
             attempts = self.store._attempts()
             if attempt_id not in attempts:
                 raise ResearchError("MISSING_INPUT", "attempt not registered")

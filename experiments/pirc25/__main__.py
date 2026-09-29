@@ -41,6 +41,8 @@ def main(argv=None):
     budget.add_argument("arm")
     recovery = commands.add_parser("recover-unknown")
     recovery.add_argument("reservation_id")
+    quarantine = commands.add_parser("quarantine-tail")
+    quarantine.add_argument("--reason", required=True)
     authorization = commands.add_parser("authorize")
     authorization.add_argument("grant", type=Path)
     export = commands.add_parser("export")
@@ -57,7 +59,8 @@ def main(argv=None):
     if not args.root:
         parser.error("--root or SDE_RUNTIME_ROOT is required; no implicit store")
     try:
-        store = ResearchStore(Path(args.root), args.store_id, initialize=args.command == "init")
+        store = ResearchStore(Path(args.root), args.store_id, initialize=args.command == "init",
+                              allow_corrupt=args.command == "quarantine-tail")
         if args.command == "init":
             result = {"store_id": store.store_id, "schema_version": store.SCHEMA}
         elif args.command == "fixture":
@@ -75,6 +78,8 @@ def main(argv=None):
             result = BudgetLedger(store).balance(args.arm)
         elif args.command == "recover-unknown":
             result = BudgetLedger(store).recover_unknown(args.reservation_id)
+        elif args.command == "quarantine-tail":
+            result = store.quarantine_tail(args.reason)
         elif args.command == "authorize":
             grant = json.loads(args.grant.read_text(encoding="utf-8"))
             store.authorize(grant)

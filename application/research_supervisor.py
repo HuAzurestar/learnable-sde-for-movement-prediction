@@ -12,6 +12,7 @@ import time
 from infrastructure.process_tree import ProcessTree
 from infrastructure.research_store import ResearchError, ResearchStore
 from .research_budget import BudgetLedger, BudgetSpec
+from .research_queue import ResearchQueue
 
 
 class ResearchSupervisor:
@@ -25,17 +26,26 @@ class ResearchSupervisor:
         if reservation["settled"]:
             raise ResearchError("IDENTITY_CONFLICT", "settled attempt cannot execute again")
         run = self.store.manifest("run-" + reservation["run_id"])
-        work = self.store.path / "artifacts" / (".attempt-" + attempt_id)
-        work.mkdir(exist_ok=True)
-        result_path = work / "result.json"
-        if result_path.exists():
-            raise ResearchError("IDENTITY_CONFLICT", "attempt output already exists; use explicit recovery")
-        heartbeat = work / "heartbeat.json"
+        queue = ResearchQueue(self.store)
         try:
+            queue.enqueue(reservation, run["cell"].get("resource_class", "cpu"))
+            while queue.claim(reservation["reservation_id"]) is None:
+                time.sleep(0.05)
+        except BaseException as exc:
+            # A duplicate caller must not release the original worker's claim.
+            if not isinstance(exc, ResearchError) or exc.code != "IDENTITY_CONFLICT":
+                self.budget.settle(reservation["reservation_id"], 0, outcome="PREFLIGHT_FAILED")
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code="QUEUE_REJECTED")
+            raise
+        try:
+            work = self.store.path / "artifacts" / (".attempt-" + attempt_id)
+            work.mkdir(exist_ok=False)
+            result_path = work / "result.json"
+            heartbeat = work / "heartbeat.json"
             command = list(command_builder(result_path))
             if not command or any(not isinstance(arg, str) for arg in command):
                 raise ResearchError("CONTRACT_MISMATCH", "worker command must be a string argument list")
-        except Exception:
+        except BaseException:
             self.budget.settle(reservation["reservation_id"], 0, outcome="PREFLIGHT_FAILED")
             self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code="CONTRACT_MISMATCH")
             raise
@@ -52,6 +62,7 @@ class ResearchSupervisor:
                     stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT,
                     start_new_session=os.name != "nt",
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                    env={**os.environ, "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"},
                 )
                 tree = ProcessTree(process)
                 self.store.append("WORKER_STARTED", {"attempt_id": attempt_id, "pid": process.pid,

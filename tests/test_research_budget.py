@@ -161,3 +161,34 @@ def test_preflight_error_is_terminal_and_does_not_charge_execution(tmp_path):
         supervisor.run(attempts[0], lambda _: [], BudgetSpec(1))
     assert store.attempts()[attempts[0]]["state"] == "PREFLIGHT_FAILED"
     assert supervisor.budget.balance("affine")["committed_ms"] == 0
+
+
+def test_changing_study_or_arm_label_cannot_refresh_same_family_budget(tmp_path):
+    store, attempts = registered(tmp_path)
+    ledger = BudgetLedger(store)
+    reservation = ledger.reserve(attempts[0], BudgetSpec(1))
+    ledger.settle(reservation["reservation_id"], 500, outcome="FAILED")
+    original = store.manifest("study-synthetic")["spec"]
+    renamed = {**original, "study_id": "renamed"}
+    renamed["arms"] = [{**original["arms"][0], "arm_id": "fresh-arm"}]
+    renamed["cells"] = [{**original["cells"][0], "arm_id": "fresh-arm"}]
+    with pytest.raises(ResearchError, match="relabeled"):
+        store.register(renamed, digest(renamed))
+    second = {**original, "study_id": "second-study"}
+    store.register(second, digest(second))
+    assert ledger.balance("affine")["committed_ms"] == 500
+
+
+def test_bad_tail_is_quarantined_without_replenishing_budget(tmp_path):
+    store, attempts = registered(tmp_path)
+    BudgetLedger(store).reserve(attempts[0], BudgetSpec(1))
+    files = sorted((store.path / "events").glob("*.json"))
+    files[-1].write_bytes(b"truncated")
+    with pytest.raises(ResearchError, match="CORRUPT_ARTIFACT"):
+        ResearchStore(tmp_path, "budget-fixture")
+    repair = ResearchStore(tmp_path, "budget-fixture", allow_corrupt=True)
+    hold = repair.quarantine_tail("fixture power-cut recovery")
+    assert (repair.path / hold["quarantine"] / files[-1].name).read_bytes() == b"truncated"
+    reopened = ResearchStore(tmp_path, "budget-fixture")
+    with pytest.raises(ResearchError, match="RECOVERY_REQUIRED"):
+        BudgetLedger(reopened).reserve(attempts[0], BudgetSpec(1))
