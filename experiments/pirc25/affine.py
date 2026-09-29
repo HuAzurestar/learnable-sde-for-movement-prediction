@@ -52,7 +52,9 @@ def single_axis(seed):
                               torch.tensor([1.0, 2.0], dtype=torch.float64), 8, ModelContext(regime=0))
     forecast = app.predict(trained.model, request)
     report = app.evaluate(forecast, ObservationSet(torch.zeros((2, 2), dtype=torch.float64)))
-    return {"metrics": report.aggregate, "forecast": {"samples": forecast.samples.tolist(), "horizons": [1.0, 2.0]},
+    return {"metrics": report.aggregate, "forecast": {"samples": forecast.samples.tolist(), "horizons": [1.0, 2.0],
+            "preview": {"case_selection_rule": "registered-synthetic-fixture", "sample_selection_rule": "all-generated-samples",
+                        "sample_ids": list(range(len(forecast.samples))), "n_samples": len(forecast.samples), "generation_version": FIXTURE_VERSION}},
             "fit": trained.fit.to_dict(), "source_schema": "ExperimentApplication"}
 
 

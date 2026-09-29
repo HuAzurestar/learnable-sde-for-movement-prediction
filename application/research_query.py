@@ -134,8 +134,15 @@ class ResearchQuery:
             raise ResearchError("UNAUTHORIZED_DATA", "run is outside session scope")
         history = [a for a in self.store.attempts().values() if a["run_id"] == run_id]
         spec = self.store.manifest("study-" + grant["study_id"])["spec"]
-        row = self._run_metadata({"manifest": value}, spec, self.store.events())
+        events = self.store.events()
+        row = self._run_metadata({"manifest": value}, spec, events)
+        attempt_ids = {a["attempt_id"] for a in history}
+        checkpoints = [event["payload"] for event in events if event["event_kind"] == "CHECKPOINT"
+                       and event["payload"].get("attempt_id") in attempt_ids]
+        provenance = {key: spec[key] for key in ("schema_version", "code_hash", "data_hash", "protocol_hash", "feature_hash", "selection_hash")}
+        paper_evidence = [entry["manifest"] for entry in self._objects("comparison", grant)]
         return {"run": value, "attempts": history, "schema_version": self.store.SCHEMA,
+                "provenance": provenance, "checkpoints": checkpoints, "paper_evidence": paper_evidence,
                 "selectors": row["selectors"], "comparison_dimensions": row["comparison_dimensions"], "budget": row["budget"]}
 
     def artifact(self, artifact_id, *, export=False):

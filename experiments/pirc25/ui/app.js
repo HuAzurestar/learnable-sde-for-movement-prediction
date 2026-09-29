@@ -69,6 +69,29 @@ async function inspectCase(target, artifactId) {
   if (Array.isArray(horizons) && horizons.length) section.append(selector('case-horizon', 'Case horizon', [['all','All horizons'], ...horizons.map((h,i) => [String(i), `${h} ${result.time_unit || '(time unit unspecified)'}`])], () => {const value = el('case-horizon').value; selected = value === 'all' ? null : Number(value); draw();}));
   else section.append(text('p', 'No explicit horizon grid in this artifact; horizon switching is unavailable.'));
   draw(); section.append(chart);
+  const preview = document.createElement('section'); preview.id = 'preview-provenance';
+  preview.append(text('h3','Preview provenance'));
+  const policy = result.forecast?.preview || {};
+  preview.append(table(['Declared field','Value'], ['case_selection_rule','sample_selection_rule','sample_ids','generation_version','n_samples'].map(key => [key,policy[key] === undefined ? 'Unavailable — not declared in this artifact' : JSON.stringify(policy[key])])));
+  preview.append(text('p',`${result.forecast?.samples?.length ?? 0} saved paths displayed; no best-case selection or metric recomputation is performed by this viewer.`));
+  section.append(preview);
+  const optional = document.createElement('section'); optional.id = 'optional-payloads';
+  optional.append(text('h3','Saved optional payloads'));
+  const fields = [['History',result.observations?.history],['Evaluation truth',result.observations?.truth],
+    ['Analytic moments',result.forecast?.moments],['Density',result.forecast?.density],
+    ['Region estimates',result.forecast?.region_estimates],['Uncertainty',result.forecast?.uncertainty],
+    ['Mode probabilities',result.forecast?.mode_probabilities],['Mode paths',result.forecast?.mode_paths],
+    ['Per-segment results',result.forecast?.per_segment]];
+  fields.forEach(([name,value]) => {
+    if (value === undefined || value === null) {optional.append(text('p',`${name}: unavailable — not saved in this artifact.`)); return;}
+    optional.append(text('h4',name + ' (saved values; original definitions retained)'));
+    if (Array.isArray(value) && value.every(item => item && typeof item === 'object' && !Array.isArray(item))) {
+      const keys = [...new Set(value.flatMap(Object.keys))];
+      optional.append(table(keys,value.slice(0,200).map(item => keys.map(key => JSON.stringify(item[key]) ?? 'Unavailable'))));
+      if (value.length > 200) optional.append(text('p',`Showing first 200 of ${value.length} saved rows in stored order; no changes to metrics.`));
+    } else optional.append(text('pre',JSON.stringify(value,null,2)));
+  });
+  section.append(optional);
   section.append(action('Download result manifest', async () => saveBlob(await api('/api/artifacts/' + encodeURIComponent(artifactId) + '?manifest=1',true),'research-result-manifest.json')));
   section.append(action('Export case figure', async () => {
     const fresh = await (await api('/api/artifacts/' + encodeURIComponent(artifactId) + '?download=1', true)).text();
@@ -154,6 +177,14 @@ async function detail(row) {
   } else {
     const data = await api('/api/runs/' + encodeURIComponent(row.manifest.run_id));
     target.append(budgetView(data.budget));
+    target.append(text('h3','Trace bindings'),table(['Field','Frozen value'],Object.entries(data.provenance)));
+    target.append(text('h3','Checkpoint references'),data.checkpoints.length ? table(['Attempt','Artifact','Recovery level'],data.checkpoints.map(c => [c.attempt_id,c.artifact_id,c.resume_level])) : text('p','No checkpoint recorded for this run.'));
+    target.append(text('h3','Study paper evidence references'));
+    if (!data.paper_evidence.length) target.append(text('p','No frozen paper evidence imported for this study.'));
+    data.paper_evidence.forEach(packageInfo => target.append(action('Open evidence ' + packageInfo.aggregate_hash.slice(0,12),async () => {
+      const evidence = await api('/api/comparisons/' + encodeURIComponent(packageInfo.aggregate_hash));
+      const evidenceSection = document.createElement('section'); showComparison(evidenceSection,evidence); target.append(evidenceSection);
+    })));
     target.append(text('pre', JSON.stringify(data, null, 2)));
     data.attempts.filter(a => a.artifact_id).forEach(attempt => target.append(action('Inspect result ' + attempt.attempt_id.slice(0, 8), async () => {
       await inspectCase(target, attempt.artifact_id);
