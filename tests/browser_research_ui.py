@@ -136,6 +136,11 @@ def main():
             page.locator("#case-horizon").select_option("1")
             expect(page.locator("#case-chart")).to_have_attribute("data-horizon", "2")
             with page.expect_download() as downloaded:
+                page.get_by_role("button", name="Download result manifest", exact=True).click()
+            manifest = json.loads(Path(downloaded.value.path()).read_bytes())
+            assert manifest["bindings"]["spec_hash"] == digest(spec)
+            assert "forecast" not in manifest and "samples" not in json.dumps(manifest)
+            with page.expect_download() as downloaded:
                 page.get_by_role("button", name="Export case figure", exact=True).click()
             content = Path(downloaded.value.path()).read_text(encoding="utf-8")
             assert '"horizon":2' in content and '"artifact_id"' in content and digest(spec) in content
@@ -155,6 +160,11 @@ def main():
             with page.expect_download() as downloaded:
                 page.get_by_role("button", name="Download frozen CSV", exact=True).click()
             assert Path(downloaded.value.path()).read_bytes() == (root / "evidence/metrics.csv").read_bytes()
+            with page.expect_download() as downloaded:
+                page.get_by_role("button", name="Download aggregate manifest", exact=True).click()
+            manifest = json.loads(Path(downloaded.value.path()).read_bytes())
+            assert manifest["artifact"]["artifact_id"] == package["aggregate_id"]
+            assert manifest["bindings"]["aggregate_hash"] == aggregate["aggregate_hash"]
             page.screenshot(path=str(root / "ui.png"), full_page=True)
             # A preview-only session can inspect the same data, but exporting a
             # client-rendered figure must still pass a fresh server export gate.

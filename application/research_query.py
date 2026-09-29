@@ -161,3 +161,14 @@ class ResearchQuery:
             raise ResearchError("UNAUTHORIZED_DATA", "comparison outside session scope")
         content, _ = self.artifact(package["aggregate_id"])
         return {"aggregate": json.loads(content), "package": package}
+
+    def result_manifest(self, artifact_id):
+        content, media = self.artifact(artifact_id, export=True)
+        metadata = self.store.manifest("artifact-" + identifier(artifact_id))
+        value = json.loads(content) if media == "application/json" else {}
+        if not isinstance(value, dict):
+            raise ResearchError("CONTRACT_MISMATCH", "result manifest requires an object artifact")
+        keys = ("schema_version", "spec_hash", "cell_hash", "protocol_hash", "input_hash", "output_hash",
+                "admission_hash", "aggregate_hash", "source_bundle_hash", "code_hash", "data_hash")
+        return {"schema_version": "pirc25-result-manifest-v1", "artifact": metadata,
+                "bindings": {key: value[key] for key in keys if key in value}}

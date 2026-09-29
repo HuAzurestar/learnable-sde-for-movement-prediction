@@ -293,6 +293,13 @@ selected horizon and units. Preview permission alone cannot export figures. Froz
 CSV remains the original TSDE byte stream. Run budgets are current ledger views,
 not retrospectively attached scientific costs to an older aggregate.
 
+Result and aggregate manifest downloads use `?manifest=1` on the authorized
+artifact-ID endpoint. They require export permission, verify the source artifact,
+and return registered artifact metadata plus result/aggregate binding references;
+they do not attach forecast trajectories. Filtered empty lists are distinguished
+from an unregistered matrix. UI errors retain the diagnostic code alongside safe
+details, including corrupt artifacts and oversized previews.
+
 Separately, new evidence bundles freeze each cell's latest reservation/settlement
 events for **all** its attempts, including failures and retries. TSDE validates
 event hashes and identities and summarizes these costs within the same comparison

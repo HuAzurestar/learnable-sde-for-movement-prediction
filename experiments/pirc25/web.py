@@ -65,6 +65,10 @@ def make_server(store, authorization_id, *, port=0):
                 elif path.startswith("/api/comparisons/"):
                     value = query.comparison(path.removeprefix("/api/comparisons/"))
                 elif path.startswith("/api/artifacts/"):
+                    if parameters.get("manifest") == ["1"]:
+                        value = query.result_manifest(path.removeprefix("/api/artifacts/"))
+                        self.send(200, json.dumps(value, allow_nan=False).encode(), attachment=True)
+                        return
                     exported = parameters.get("download") == ["1"]
                     content, media = query.artifact(path.removeprefix("/api/artifacts/"), export=exported)
                     self.send(200, content, media, attachment=exported)

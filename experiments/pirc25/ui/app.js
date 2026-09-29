@@ -69,6 +69,7 @@ async function inspectCase(target, artifactId) {
   if (Array.isArray(horizons) && horizons.length) section.append(selector('case-horizon', 'Case horizon', [['all','All horizons'], ...horizons.map((h,i) => [String(i), `${h} ${result.time_unit || '(time unit unspecified)'}`])], () => {const value = el('case-horizon').value; selected = value === 'all' ? null : Number(value); draw();}));
   else section.append(text('p', 'No explicit horizon grid in this artifact; horizon switching is unavailable.'));
   draw(); section.append(chart);
+  section.append(action('Download result manifest', async () => saveBlob(await api('/api/artifacts/' + encodeURIComponent(artifactId) + '?manifest=1',true),'research-result-manifest.json')));
   section.append(action('Export case figure', async () => {
     const fresh = await (await api('/api/artifacts/' + encodeURIComponent(artifactId) + '?download=1', true)).text();
     const exported = JSON.parse(fresh);
@@ -138,6 +139,7 @@ function showComparison(target, data) {
       strata:comparisonRows(fresh,horizon).map(arm => ({stratum_id:arm.stratum_id,dimensions:arm.comparison_dimensions,units:arm.metric_units,cost:arm.cost}))}, 'Frozen comparison');
   }));
   target.append(action('Download frozen CSV', () => download(data.package.table)));
+  target.append(action('Download aggregate manifest', async () => saveBlob(await api('/api/artifacts/' + encodeURIComponent(data.package.aggregate_id) + '?manifest=1',true),'research-aggregate-manifest.json')));
   target.append(text('h3','Comparison and provenance'),text('pre',JSON.stringify(aggregate,null,2)));
 }
 async function download(id) {

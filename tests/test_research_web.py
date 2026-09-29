@@ -90,6 +90,15 @@ def test_csv_is_exact_frozen_artifact_and_corruption_fails_closed(tmp_path):
         assert status == 409 and json.loads(content)["error"]["code"] == "CORRUPT_ARTIFACT"
 
 
+def test_result_manifest_requires_export_permission(tmp_path):
+    with service(tmp_path) as (store, value, server):
+        grant = {**store.manifest("authorization-ui"), "authorization_id": "preview-only", "purposes": ["preview"]}
+        store.authorize(grant)
+        artifact = store.artifact(b"{}", role="result", visibility="synthetic", block_ids=["fixture-1"], study_id="synthetic")
+        with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
+            ResearchQuery(store, "preview-only").result_manifest(artifact["artifact_id"])
+
+
 def test_result_manifest_export_has_provenance_without_trajectory_payload(tmp_path):
     with service(tmp_path) as (store, value, server):
         result = {"spec_hash": digest(value), "protocol_hash": value["protocol_hash"],
