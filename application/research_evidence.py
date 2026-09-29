@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import json
 
 from infrastructure.research_store import ResearchError, ResearchStore, digest
+from application.research_dimensions import comparison_dimensions
 
 
 def evidence_visibility(spec, cells):
@@ -54,6 +55,7 @@ def export_evidence(store: ResearchStore, study_id: str, authorization: dict):
         successful = [a for a in history if a["state"] == "SUCCEEDED"]
         latest = successful[0] if successful else history[-1] if history else None
         row = {"cell_hash": digest(cell), "arm_id": cell["arm_id"], "block_id": cell["block_id"],
+               "comparison_dimensions": comparison_dimensions(cell), "registered_cell": cell,
                "seed": cell["seed"], "status": latest["state"] if latest else "MISSING",
                "attempt_id": latest["attempt_id"] if latest else None,
                "run_id": latest["run_id"] if latest else None,
@@ -101,7 +103,8 @@ def export_evidence(store: ResearchStore, study_id: str, authorization: dict):
                "comparison_family": spec["comparison_family"], "independent_unit": "block_id",
                "comparison_plan": spec.get("comparison_plan"),
                "visibility": evidence_visibility(spec, cells),
-               "expected_cells": [{"cell_hash": digest(c), "arm_id": c["arm_id"], "block_id": c["block_id"], "seed": c["seed"]} for c in spec["cells"]],
+               "expected_cells": [{"cell_hash": digest(c), "arm_id": c["arm_id"], "block_id": c["block_id"], "seed": c["seed"],
+                                   "comparison_dimensions": comparison_dimensions(c)} for c in spec["cells"]],
                "cells": cells, "disclosure_scope": "authorized-local-export"}
     bundle = {**payload, "bundle_hash": digest(payload)}
     store.publish("bundle-" + bundle["bundle_hash"], bundle)

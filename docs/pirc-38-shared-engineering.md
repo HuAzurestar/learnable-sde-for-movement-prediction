@@ -268,6 +268,26 @@ unauthorized and corrupt states are distinguishable.
 
 ## Verification and delivery
 
+### Comparison dimensions
+
+Evidence export preserves each registered cell and its `comparison_dimensions`.
+The standard cell axes `horizon`, `horizons`, `region`, `scenario`, `initialization`,
+`prediction_origin`, `context_profile`, and `time_grid` are automatically included.
+Additional scientific strata must be explicitly registered in the cell's
+`comparison_dimensions` mapping; conflicting duplicate axis values are rejected.
+`arm_id`, `block_id`, and `seed` remain identities, not strata. A different horizon
+does not create a new budget arm or reset its cumulative charges.
+
+TSDE groups by exact dimensions plus arm, averages seeds within each complete
+block, and compares arms only within the same stratum. Missing arms or incomplete
+blocks yield no paired score, not a cross-horizon fallback. Each arm summary and
+comparison carries `stratum_id` and `comparison_dimensions`; CSV includes both,
+and evidence claims reference only contributing complete-block attempts in that
+stratum. Consumers must use `(arm_id, stratum_id)`, not `arm_id` alone, as the
+summary key. Legacy dimensionless bundles remain a single `{}` stratum; discarded
+dimensions cannot be reconstructed from an old export, so re-export its registered
+study when dimensions are needed. Existing frozen packages are never rewritten.
+
 ```console
 python -m pytest -q
 python scripts/check_public_release.py

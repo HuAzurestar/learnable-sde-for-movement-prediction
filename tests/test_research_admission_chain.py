@@ -205,12 +205,16 @@ def test_frozen_model_cross_study_reuse_requires_explicit_read_and_export_grants
             assert accepted.returncode == 0, accepted.stderr
 
 
-def test_formal_chain_roundtrip_and_resealed_tampering_rejected_by_tsde(tmp_path):
+@pytest.mark.parametrize("horizons", [None, (1, 2)])
+def test_formal_chain_roundtrip_and_resealed_tampering_rejected_by_tsde(tmp_path, horizons):
     from application.research_evidence import export_evidence
     aggregator = Path(__file__).resolve().parents[2] / "TSDE-SDE/scripts/pirc25/aggregate.py"
     if not aggregator.is_file():
         pytest.skip("cross-repository check requires explicit sibling TSDE checkout")
     store, value, registry, grant = prepared(tmp_path, formal=True, two_arms=True)
+    if horizons:
+        value["cells"] = [{**cell, "horizon": horizon, "region": "whole"}
+                          for horizon in horizons for cell in value["cells"]]
     store.register(value, digest(value))
     for cell in value["cells"]:
         assert SharedRunner(store, registry).run_cell("synthetic", digest(cell), budget=BudgetSpec(10))["state"] == "SUCCEEDED"
@@ -226,9 +230,12 @@ def test_formal_chain_roundtrip_and_resealed_tampering_rejected_by_tsde(tmp_path
     accepted = invoke(bundle, "accepted")
     assert accepted.returncode == 0, accepted.stdout + accepted.stderr
     result = json.loads((tmp_path / "accepted/aggregate.json").read_bytes())
-    assert result["qualification"] == "formal" and result["successful_cell_count"] == 2
+    assert result["qualification"] == "formal" and result["successful_cell_count"] == len(value["cells"])
+    assert len(result["comparisons"]) == (len(horizons) if horizons else 1)
+    if horizons:
+        assert {arm["comparison_dimensions"]["horizon"] for arm in result["arms"]} == set(horizons)
     assert result["comparisons"][0]["independent_n"] == 1  # Engineering evidence, not scientific power.
-    for mutation in ("no-admission", "no-reads", "other-attempt", "changed-package", "expired-grant", "no-qualification"):
+    for mutation in ("no-admission", "no-reads", "other-attempt", "changed-package", "expired-grant", "no-qualification", "changed-dimensions"):
         changed = deepcopy(bundle)
         row = changed["cells"][0]
         receipt = row["admission"]
@@ -242,6 +249,10 @@ def test_formal_chain_roundtrip_and_resealed_tampering_rejected_by_tsde(tmp_path
             receipt["documents"]["package"]["code_hash"] = "0" * 64
         elif mutation == "expired-grant":
             receipt["documents"]["authorization"]["expires_at"] = "2000-01-01T00:00:00+00:00"
+        elif mutation == "changed-dimensions":
+            row.pop("registered_cell")  # Try the legacy transport path too.
+            row["comparison_dimensions"] = {"horizon": 99}
+            changed["expected_cells"][0]["comparison_dimensions"] = {"horizon": 99}
         else:
             receipt["documents"].pop("qualification")
         # Deliberately recompute enclosing hashes: the validator must check
