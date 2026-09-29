@@ -7,7 +7,7 @@ let appliedFilters = {}, loadSequence = 0;
 const filterKeys = ['model', 'version', 'trainer', 'predictor', 'horizon', 'seed', 'state'];
 async function api(path, raw = false) {
   const response = await fetch(path, {headers: {'X-Session-Token': token}});
-  if (!response.ok) { const body = await response.json(); throw new Error(body.error?.safe_details || body.error?.code || 'Result unavailable'); }
+  if (!response.ok) { const body = await response.json(); throw new Error([body.error?.code, body.error?.safe_details].filter(Boolean).join(': ') || 'Result unavailable'); }
   return raw ? response.blob() : response.json();
 }
 function text(tag, value, className) {const node = document.createElement(tag); node.textContent = String(value ?? '—'); if (className) node.className = className; return node;}
@@ -161,7 +161,7 @@ async function detail(row) {
 }
 function render() {
   const target = el('results'); target.replaceChildren();
-  if (!rows.length) {target.append(text('p', view === 'runs' ? 'No runs yet. Registered cells remain available for execution through the CLI.' : 'No frozen comparisons yet. Import a validated evidence package to view it here.', 'empty')); return;}
+  if (!rows.length) {target.append(text('p', view === 'runs' ? (Object.keys(appliedFilters).length ? 'No runs match the current filters. Reset filters to see all registered cells.' : 'No registered runs or cells are available.') : 'No frozen comparisons yet. Import a validated evidence package to view it here.', 'empty')); return;}
   if (view === 'runs') target.append(table(['Model / arm', 'Version', 'Horizon / seed / block', 'State', 'Budget (whole arm)', ''], rows.map(row => [row.selectors.model + ' / ' + row.manifest.arm_id, row.selectors.version, `${row.selectors.horizon ?? 'Unspecified'} / ${row.manifest.seed} / ${row.manifest.cell.block_id}`, text('span', row.state, 'status ' + row.state.toLowerCase()), `${row.budget.committed_ms} committed / ${row.budget.limit_ms} slot-ms`, row.manifest.run_id ? action('Inspect', () => detail(row)) : 'Registered cell'])));
   else target.append(table(['Study', 'Aggregate version', ''], rows.map(row => [row.manifest.study_id, row.manifest.aggregate_hash, action('Compare & export', () => detail(row))])));
 }

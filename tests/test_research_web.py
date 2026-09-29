@@ -90,6 +90,21 @@ def test_csv_is_exact_frozen_artifact_and_corruption_fails_closed(tmp_path):
         assert status == 409 and json.loads(content)["error"]["code"] == "CORRUPT_ARTIFACT"
 
 
+def test_result_manifest_export_has_provenance_without_trajectory_payload(tmp_path):
+    with service(tmp_path) as (store, value, server):
+        result = {"spec_hash": digest(value), "protocol_hash": value["protocol_hash"],
+                  "forecast": {"samples": [[[1, 2]]]}, "metrics": {"error": 1}}
+        artifact = store.artifact(json.dumps(result).encode(), role="result", visibility="synthetic",
+                                  block_ids=["fixture-1"], study_id="synthetic")
+        status, headers, content = request(server, "/api/artifacts/" + artifact["artifact_id"] + "?manifest=1")
+        assert status == 200
+        manifest = json.loads(content)
+        assert manifest["artifact"] == artifact
+        assert manifest["bindings"]["spec_hash"] == digest(value)
+        assert "forecast" not in manifest and "samples" not in content.decode()
+        assert headers["Content-Disposition"].startswith("attachment")
+
+
 def test_preview_bounds_and_unauthorized_visibility_are_explicit(tmp_path):
     with service(tmp_path) as (store, value, server):
         artifact = store.artifact(json.dumps({"forecast": {"samples": [[[1, 2]]] * 65}}).encode(), role="result",
