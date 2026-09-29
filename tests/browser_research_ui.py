@@ -17,7 +17,7 @@ from experiments.pirc25.web import make_server
 from infrastructure.research_store import ResearchStore, digest, encode
 
 
-def fixture(root):
+def fixture(root, *, failure_states=False):
     store = ResearchStore(root / "runtime", "browser", initialize=True)
     spec = {"schema_version": "pirc25-contract-v1", "study_id": "browser-fixture",
         "experiment_id": "display-only", "comparison_family": "synthetic",
@@ -33,12 +33,19 @@ def fixture(root):
         "evidence_hash": digest("synthetic browser permission"), "purposes": ["preview", "export"],
         "visibilities": ["synthetic"], "block_ids": ["block-1"]}
     store.authorize(grant)
-    for cell in spec["cells"]:
+    for index, cell in enumerate(spec["cells"]):
+        if failure_states and index == 1:
+            continue
         run = store.register_run(spec["study_id"], cell)
         attempt = store.new_attempt(run)
         ledger = BudgetLedger(store)
         reservation = ledger.reserve(attempt, BudgetSpec(10))
         store.transition(attempt, "RUNNING")
+        if failure_states and index in (2, 3):
+            state = "FAILED" if index == 2 else "TIMEOUT"
+            ledger.settle(reservation["reservation_id"], 100, outcome=state)
+            store.transition(attempt, state, error_code=state)
+            continue
         result = {"spec_hash": digest(spec), "cell_hash": digest(cell), "protocol_hash": spec["protocol_hash"],
             "state_order": ["x", "y"], "units": ["m", "m"], "time_unit": "s", "qualification": "fixture",
             "metrics": {"error": cell["horizon"] + (1 if cell["arm_id"] == "baseline" else 0)},
@@ -56,6 +63,47 @@ def fixture(root):
     aggregate = json.loads((root / "evidence/aggregate.json").read_bytes())
     package = accept_evidence_package(store, root / "evidence", aggregate["aggregate_hash"])
     return store, spec, aggregate, package
+
+
+def check_failure_states(browser, root, expect):
+    store, spec, aggregate, package = fixture(root / "states", failure_states=True)
+    server = make_server(store, "browser")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        page = browser.new_page()
+        page.set_default_timeout(6000)
+        page.goto(f"http://127.0.0.1:{server.server_port}/#session={server.session_token}")
+        expect(page.locator("#results tbody tr")).to_have_count(8)
+        for state in ("MISSING", "FAILED", "TIMEOUT"):
+            page.locator("#filter-state").fill(state)
+            page.get_by_role("button", name="Apply filters", exact=True).click()
+            expect(page.locator("#results tbody tr")).to_have_count(1)
+            expect(page.locator("#results")).to_contain_text(state)
+            if state != "MISSING":
+                page.get_by_role("button", name="Inspect", exact=True).click()
+                expect(page.locator("#detail-content")).to_contain_text(state)
+        page.locator("#filter-state").fill("RUNNING")
+        page.get_by_role("button", name="Apply filters", exact=True).click()
+        expect(page.locator("#results")).to_contain_text("No runs match the current filters")
+        page.get_by_role("button", name="Reset filters", exact=True).click()
+        expect(page.locator("#results tbody tr")).to_have_count(8)
+        page.get_by_role("button", name="Comparisons & evidence", exact=True).click()
+        page.get_by_role("button", name="Compare & export", exact=True).click()
+        expect(page.locator("#comparison-table")).to_contain_text("No complete metric")
+        expect(page.locator("#detail-content")).to_contain_text("TIMEOUT")
+        expect(page.locator("#detail-content")).to_contain_text("insufficient-independent-blocks")
+        # Corrupt only this disposable synthetic test artifact, never user data.
+        (store.path / "artifacts" / package["aggregate_id"]).write_bytes(b"corrupt synthetic fixture")
+        page.get_by_role("button", name="Compare & export", exact=True).click()
+        expect(page.locator("#error")).to_be_visible()
+        expect(page.locator("#error")).to_contain_text("CORRUPT_ARTIFACT")
+        page.screenshot(path=str(root / "failure-states.png"), full_page=True)
+        page.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def main():
@@ -133,6 +181,7 @@ def main():
                 restricted_server.server_close()
                 restricted_thread.join(timeout=5)
             assert not errors, errors
+            check_failure_states(browser, root, expect)
             browser.close()
         receipt = {"status": "passed", "spec_hash": digest(spec), "aggregate_hash": aggregate["aggregate_hash"],
                    "scientific_qualification": "not-granted", "root": str(root)}
