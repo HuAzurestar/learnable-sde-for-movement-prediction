@@ -35,6 +35,8 @@ def main(argv=None):
     run.add_argument("study")
     run.add_argument("--seconds", type=float, default=60)
     run.add_argument("--cell")
+    run.add_argument("--parent-attempt")
+    run.add_argument("--reason")
     budget = commands.add_parser("budget")
     budget.add_argument("arm")
     recovery = commands.add_parser("recover-unknown")
@@ -73,7 +75,8 @@ def main(argv=None):
             if not cells:
                 raise ResearchError("MISSING_INPUT", "requested cell is not registered")
             result = [SharedRunner(store).run_cell(args.study, digest(cell),
-                      budget=BudgetSpec(args.seconds, category="smoke")) for cell in cells]
+                      budget=BudgetSpec(args.seconds, category="smoke"),
+                      parent_attempt_id=args.parent_attempt, reason=args.reason) for cell in cells]
         print(json.dumps(result, ensure_ascii=False, allow_nan=False))
         return 1 if isinstance(result, list) and any(r.get("exit_code") for r in result) else 0
     except (ResearchError, OSError, ValueError) as error:
