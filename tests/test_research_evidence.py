@@ -70,6 +70,59 @@ def test_export_preserves_registered_comparison_dimensions_for_missing_cells(tmp
         assert row["status"] == "MISSING"
 
 
+def test_frozen_cost_keeps_failed_retry_and_unknown_charge(tmp_path):
+    import json
+    from pathlib import Path
+    import subprocess
+    import sys
+    from application.research_budget import BudgetLedger, BudgetSpec
+    store, value, grant = setup(tmp_path)
+    run = store.register_run("synthetic", value["cells"][0])
+    ledger = BudgetLedger(store)
+    first = store.new_attempt(run)
+    reservation = ledger.reserve(first, BudgetSpec(1))
+    ledger.settle(reservation["reservation_id"], 250, outcome="FAILED")
+    store.transition(first, "FAILED", error_code="FIXTURE_FAILURE")
+    second = store.new_attempt(run, parent_attempt_id=first, reason="synthetic retry")
+    reservation = ledger.reserve(second, BudgetSpec(2))
+    ledger.settle(reservation["reservation_id"], None, outcome="INTERRUPTED")
+    store.transition(second, "INTERRUPTED", error_code="UNKNOWN_WORKER_COST")
+    bundle = export_evidence(store, "synthetic", grant)
+    cost = bundle["cells"][0]["cost"]
+    assert cost["charged_ms"] == 2250 and cost["measured_ms"] is None
+    assert cost["unknown_attempt_ids"] == [second]
+    assert len(cost["sources"]) == 2 and cost["unit"] == "slot-ms"
+    aggregator = Path(__file__).resolve().parents[2] / "TSDE-SDE/scripts/pirc25/aggregate.py"
+    if not aggregator.is_file():
+        pytest.skip("cross-repository cost check requires sibling TSDE checkout")
+    path = tmp_path / "cost-bundle.json"
+    path.write_bytes(encode(bundle))
+    result = subprocess.run([sys.executable, "-B", str(aggregator), str(path), "--expected-hash", bundle["bundle_hash"],
+                             "--output", str(tmp_path / "cost-package")], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    arm = json.loads((tmp_path / "cost-package/aggregate.json").read_bytes())["arms"][0]
+    assert arm["cost"]["charged_ms"] == 2250 and arm["cost"]["measured_ms"] is None
+    assert arm["metrics"] == {} and arm["expected_cells"] == 2
+
+
+def test_cost_export_is_immutable_across_later_settlement(tmp_path):
+    from application.research_budget import BudgetLedger, BudgetSpec
+    store, value, grant = setup(tmp_path)
+    run = store.register_run("synthetic", value["cells"][0])
+    attempt = store.new_attempt(run)
+    ledger = BudgetLedger(store)
+    reservation = ledger.reserve(attempt, BudgetSpec(10))
+    before = export_evidence(store, "synthetic", grant)
+    assert before["cells"][0]["cost"]["reserved_ms"] == 10000
+    ledger.settle(reservation["reservation_id"], 123, outcome="FAILED")
+    store.transition(attempt, "FAILED", error_code="FIXTURE_FAILURE")
+    after = export_evidence(store, "synthetic", grant)
+    assert after["cells"][0]["cost"]["charged_ms"] == 123
+    assert after["cells"][0]["cost"]["reserved_ms"] == 0
+    assert before["bundle_hash"] != after["bundle_hash"]
+    assert store.manifest("bundle-" + before["bundle_hash"]) == before
+
+
 def test_aggregate_import_binds_hash_and_registered_spec(tmp_path):
     store, value, grant = setup(tmp_path)
     aggregate = {"schema_version": "pirc25-aggregate-v1", "study_id": "synthetic", "spec_hash": digest(value),
