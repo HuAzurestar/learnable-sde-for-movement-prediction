@@ -134,6 +134,17 @@ def main():
             expect(page.locator("#results")).to_contain_text("slot-ms")
             page.get_by_role("button", name="Inspect", exact=True).click()
             expect(page.locator("#detail-content")).to_contain_text("measured-monotonic")
+            evidence_button = page.get_by_role("button", name="Open evidence", exact=False)
+            for _ in range(2):
+                with page.expect_response(lambda response: '/api/comparisons/' in response.url) as opened:
+                    evidence_button.click()
+                assert opened.value.status == 200
+                # Wait for the response handler, not merely the pre-existing
+                # first control; an immediate count could miss a late duplicate.
+                page.wait_for_function("document.querySelector('[data-evidence-open-count]')?.dataset.evidenceOpenCount === '" + str(_ + 1) + "'")
+                expect(page.locator("#comparison-horizon")).to_have_count(1)
+            page.locator("#comparison-horizon").select_option("2")
+            expect(page.locator("#comparison-table tbody tr")).to_have_count(2)
             page.get_by_role("button", name="Inspect result", exact=False).click()
             expect(page.locator("#preview-provenance")).to_contain_text("registered-synthetic-case")
             expect(page.locator("#preview-provenance")).to_contain_text("sample-0")
