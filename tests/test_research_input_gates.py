@@ -118,14 +118,16 @@ def test_r3_cannot_reset_imported_history_by_registering_clean_report(tmp_path):
         read(ledger, tmp_path)
 
 
-@pytest.mark.parametrize("renamed", [False, True])
+@pytest.mark.parametrize("renamed", ["none", "window", "dataset"])
 def test_r3_new_plan_after_prior_read_cannot_claim_blindness(tmp_path, renamed):
     store, _, protocol = final_eval(tmp_path, None)
     source = source_identity(protocol["blocks"][0])
     # A controlled read under another study, including a failed/partial read,
     # predates this plan; a new study/block/release name must not clear it.
-    if renamed:
+    if renamed == "window":
         source.update(source_block_id="old-window", release_id="old-release")
+    elif renamed == "dataset":
+        source.update(dataset_id="old-dataset", source_block_id="old-window", release_id="old-release")
     store.append("READ_STARTED", {**source, "study_id": "previous-study", "purpose": "select"})
     protocol, _, _ = freeze_evidence(store, protocol)
     ledger = EvaluationExposureLedger(store)

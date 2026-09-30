@@ -45,6 +45,80 @@ def prepared(tmp_path, *, formal=False, two_arms=False, package_visibility="synt
     return store, value, registry, grant
 
 
+def test_formal_execution_rejects_prior_same_content_under_another_dataset(tmp_path, monkeypatch):
+    from application.research_preregistration import PreregistrationGate
+
+    original = PreregistrationGate.import_history
+
+    def prior_controlled_read(gate, history, expected_hash):
+        source = history["source_evidence"]["records"][0]
+        gate.store.append("READ_STARTED", {"dataset_id": "previous-dataset",
+            "release_id": "previous-release", "source_block_id": "previous-block",
+            "sha256": source["sha256"], "study_id": "previous-study", "purpose": "evaluate"})
+        return original(gate, history, expected_hash)
+
+    monkeypatch.setattr(PreregistrationGate, "import_history", prior_controlled_read)
+    store, value, registry, _ = prepared(tmp_path, formal=True)
+    store.register(value, digest(value))
+    with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
+        SharedRunner(store, registry).run_cell("synthetic", digest(value["cells"][0]), budget=BudgetSpec(10))
+    assert not any(event["event_kind"] == "WORKER_STARTED" for event in store.events())
+
+
+def test_formal_result_cannot_omit_a_preregistered_primary_metric(tmp_path, monkeypatch):
+    from application.research_preregistration import PreregistrationGate
+
+    original = PreregistrationGate.register_preregistration
+
+    def require_calibration(gate, plan, _expected_hash):
+        plan["primary_metrics"].append("calibration")
+        return original(gate, plan, digest(plan))
+
+    monkeypatch.setattr(PreregistrationGate, "register_preregistration", require_calibration)
+    store, value, registry, _ = prepared(tmp_path, formal=True)
+    store.register(value, digest(value))
+    with pytest.raises(ResearchError, match="primary metric"):
+        SharedRunner(store, registry).run_cell("synthetic", digest(value["cells"][0]), budget=BudgetSpec(10))
+    assert not any(attempt["state"] == "SUCCEEDED" for attempt in store.attempts().values())
+
+
+def test_paper_side_rejects_omitted_primary_metric_even_if_runtime_validator_is_bypassed(tmp_path, monkeypatch):
+    from application.research_admission import AdmissionGate
+    from application.research_contracts import validate_result
+    from application.research_evidence import export_evidence
+    from application.research_preregistration import PreregistrationGate
+
+    aggregator = Path(__file__).resolve().parents[2] / "TSDE-SDE/scripts/pirc25/aggregate.py"
+    if not aggregator.is_file():
+        pytest.skip("cross-repository check requires explicit sibling TSDE checkout")
+    original = PreregistrationGate.register_preregistration
+
+    def require_calibration(gate, plan, _expected_hash):
+        plan["primary_metrics"].append("calibration")
+        return original(gate, plan, digest(plan))
+
+    def legacy_validator(_gate, receipt, spec, cell, plugin):
+        def validate(result):
+            validate_result(result, spec=spec, cell=cell, plugin=plugin)
+            result["admission_hash"] = receipt["admission_hash"]
+        return validate
+
+    monkeypatch.setattr(PreregistrationGate, "register_preregistration", require_calibration)
+    monkeypatch.setattr(AdmissionGate, "result_validator", legacy_validator)
+    store, value, registry, grant = prepared(tmp_path, formal=True, two_arms=True)
+    store.register(value, digest(value))
+    for cell in value["cells"]:
+        assert SharedRunner(store, registry).run_cell("synthetic", digest(cell), budget=BudgetSpec(10))["state"] == "SUCCEEDED"
+    bundle = export_evidence(store, "synthetic", grant)
+    source = tmp_path / "omitted-metric-bundle.json"
+    source.write_bytes(encode(bundle))
+    result = subprocess.run([sys.executable, "-B", str(aggregator), str(source),
+        "--expected-hash", bundle["bundle_hash"], "--formal", "--output", str(tmp_path / "omitted-metric-evidence")],
+        capture_output=True, text=True, timeout=30)
+    assert result.returncode != 0
+    assert "primary" in result.stderr
+
+
 def test_r1_runner_requires_registered_input_and_qualification_evidence(tmp_path):
     store = ResearchStore(tmp_path, "admission-counterexample", initialize=True)
     value = spec()
