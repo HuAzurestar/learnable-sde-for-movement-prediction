@@ -28,10 +28,12 @@ def source_identity(block):
 
 
 def same_source(left, right):
-    # Renaming a window/study/release cannot wash the same content or source.
+    # A renamed dataset cannot wash a controlled read of identical content.
+    # Within a dataset, retain the conservative legacy/source-block check.
+    if hash_reference(left.get("sha256")) and left["sha256"] == right.get("sha256"):
+        return True
     return (left.get("dataset_id") == right.get("dataset_id") and
             (not hash_reference(left.get("sha256")) or
-             left.get("sha256") == right.get("sha256") or
              left.get("source_block_id", left.get("block_id")) ==
              right.get("source_block_id", right.get("block_id"))))
 

@@ -118,6 +118,22 @@ def test_r3_cannot_reset_imported_history_by_registering_clean_report(tmp_path):
         read(ledger, tmp_path)
 
 
+def test_r3_imported_exposure_of_identical_content_under_another_dataset_blocks_blind_read(tmp_path):
+    store, _, protocol = final_eval(tmp_path, None)
+    source = {**source_identity(protocol["blocks"][0]), "dataset_id": "old-dataset",
+              "release_id": "old-release", "source_block_id": "old-window"}
+    report = {"records": [{**source, "status": "exposed"}]}
+    prior = {"schema_version": "pirc25-exposure-history-v1", "source": "synthetic prior report",
+             "source_evidence": report, "source_evidence_hash": digest(report)}
+    PreregistrationGate(store).import_history(prior, digest(prior))
+    protocol, _, _ = freeze_evidence(store, protocol)
+    ledger = EvaluationExposureLedger(store)
+    ledger.register_protocol(protocol, digest(protocol))
+    authorize(store, protocol)
+    with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
+        read(ledger, tmp_path)
+
+
 @pytest.mark.parametrize("renamed", ["none", "window", "dataset"])
 def test_r3_new_plan_after_prior_read_cannot_claim_blindness(tmp_path, renamed):
     store, _, protocol = final_eval(tmp_path, None)

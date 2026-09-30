@@ -224,6 +224,9 @@ class AdmissionGate:
     def result_validator(self, receipt, spec, cell, plugin):
         def validate(result):
             validate_result(result, spec=spec, cell=cell, plugin=plugin)
+            if (receipt["mode"] == "formal" and
+                    set(result["metrics"]) != set(receipt["documents"]["preregistration"]["primary_metrics"])):
+                raise ResearchError("UNQUALIFIED", "formal result primary metrics differ from frozen plan")
             if result.get("qualification") != receipt["qualification"]:
                 raise ResearchError("UNQUALIFIED", "worker cannot change admitted qualification")
             if result.get("admission_hash", receipt["admission_hash"]) != receipt["admission_hash"]:
