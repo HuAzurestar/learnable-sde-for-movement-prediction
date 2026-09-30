@@ -286,6 +286,9 @@ class ResearchStore:
                 identifier(arm.get(key))
             if arm.get("budget_seconds") != 86400:
                 raise ResearchError("CONTRACT_MISMATCH", "arm budget must preserve 24-hour cap")
+        families = [(arm["model_family_id"], arm["method_family_id"], arm["objective_id"]) for arm in arms]
+        if len(set(families)) != len(families):
+            raise ResearchError("IDENTITY_CONFLICT", "one arm family cannot receive multiple budget identities")
         if not spec.get("cells") or len({digest(c) for c in spec["cells"]}) != len(spec["cells"]):
             raise ResearchError("CONTRACT_MISMATCH", "missing or duplicate cells")
         if any(c.get("arm_id") not in {a["arm_id"] for a in arms} for c in spec["cells"]):

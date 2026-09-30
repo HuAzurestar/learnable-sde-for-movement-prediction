@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import csv
+import hashlib
+import io
 import json
 
-from infrastructure.research_store import ResearchError, ResearchStore, digest
+from infrastructure.research_store import ResearchError, ResearchStore, digest, encode
 from application.research_dimensions import comparison_dimensions
 from application.research_cost import frozen_cost
 
@@ -39,11 +42,21 @@ def authorize_study(store, study_id, authorization, purpose):
         raise ResearchError("UNAUTHORIZED_DATA", "study disclosure is not authorized")
 
 
+def require_export_visibility(store, spec, cells, authorization):
+    visibility = evidence_visibility(spec, cells)
+    if visibility not in authorization["visibilities"]:
+        store.append("DISCLOSURE_DENIED", {"study_id": spec["study_id"], "purpose": "export",
+                   "authorization_hash": digest(authorization), "required_visibility": visibility})
+        raise ResearchError("UNAUTHORIZED_DATA", "export grant cannot disclose this evidence visibility")
+    return visibility
+
+
 def export_evidence(store: ResearchStore, study_id: str, authorization: dict):
     authorize_study(store, study_id, authorization, "export")
     spec = store.manifest("study-" + study_id)["spec"]
     if not {c["block_id"] for c in spec["cells"]} <= set(authorization["block_ids"]):
         raise ResearchError("UNAUTHORIZED_DATA", "export does not cover the complete study matrix")
+    require_export_visibility(store, spec, [], authorization)
     with store.lock():
         attempts = store._attempts()
         cost_events = store._events()
@@ -80,6 +93,7 @@ def export_evidence(store: ResearchStore, study_id: str, authorization: dict):
                         or admission["attempt_id"] != latest["attempt_id"] or admission["run_id"] != latest["run_id"]
                         or admission["qualification"] != result["qualification"]):
                     raise ResearchError("UNQUALIFIED", "result admission identity differs from authoritative attempt")
+                require_export_visibility(store, spec, [{"admission": admission}], authorization)
                 # Qualification attachments are additional disclosures, not
                 # automatically public because execution was authorized.
                 documents = admission.get("documents", {})
@@ -101,12 +115,13 @@ def export_evidence(store: ResearchStore, study_id: str, authorization: dict):
             elif result["qualification"] == "qualified":
                 raise ResearchError("UNQUALIFIED", "qualified result lacks execution admission evidence")
         cells.append(row)
+    visibility = require_export_visibility(store, spec, cells, authorization)
     payload = {"schema_version": "pirc25-evidence-bundle-v1", "study_id": study_id,
                "spec_hash": digest(spec), "protocol_hash": spec["protocol_hash"], "data_hash": spec["data_hash"],
                "code_hash": spec["code_hash"], "feature_hash": spec["feature_hash"], "selection_hash": spec["selection_hash"],
                "comparison_family": spec["comparison_family"], "independent_unit": "block_id",
                "comparison_plan": spec.get("comparison_plan"),
-               "visibility": evidence_visibility(spec, cells),
+               "visibility": visibility,
                "expected_cells": [{"cell_hash": digest(c), "arm_id": c["arm_id"], "block_id": c["block_id"], "seed": c["seed"],
                                    "comparison_dimensions": comparison_dimensions(c)} for c in spec["cells"]],
                "cells": cells, "disclosure_scope": "authorized-local-export"}
@@ -133,9 +148,47 @@ def accept_aggregate(store, aggregate, study_id):
                           block_ids=[c["block_id"] for c in spec["cells"]], study_id=study_id)
 
 
+def expected_metrics_csv(aggregate):
+    """Validate the frozen v1 table serialization without recalculating scores."""
+    stream = io.StringIO(newline="")
+    writer = csv.writer(stream, lineterminator="\n")
+    writer.writerow(["aggregate_hash", "arm_id", "metric", "value", "unit", "independent_n", "expected_cells", "successful_cells", "status", "stratum_id", "comparison_dimensions", "charged_ms", "reserved_ms", "measured_ms", "cost_unit", "cost_scope", "status_rates"])
+    for arm in aggregate["arms"]:
+        costs = [arm["cost"][key] for key in ("charged_ms", "reserved_ms", "measured_ms", "unit", "scope")]
+        rates = encode(arm.get("status_rates")).decode()
+        dimensions = encode(arm["comparison_dimensions"]).decode()
+        if not arm["metrics"]:
+            writer.writerow([aggregate["aggregate_hash"], arm["arm_id"], "", "", "", arm["independent_n"],
+                             arm["expected_cells"], arm["successful_cells"], arm["status"], arm["stratum_id"],
+                             dimensions, *costs, rates])
+        for metric, value in sorted(arm["metrics"].items()):
+            writer.writerow([aggregate["aggregate_hash"], arm["arm_id"], metric, value, arm["metric_units"][metric],
+                             arm["independent_n"], arm["expected_cells"], arm["successful_cells"], arm["status"],
+                             arm["stratum_id"], dimensions, *costs, rates])
+    return stream.getvalue().encode()
+
+
+def expected_paper_index(aggregate, table):
+    claims = []
+    for arm in aggregate["arms"]:
+        for metric, number in sorted(arm["metrics"].items()):
+            claims.append({"claim_id": digest([arm["arm_id"], arm["stratum_id"], metric]),
+                "metric": metric, "value": number, "arm_id": arm["arm_id"], "stratum_id": arm["stratum_id"],
+                "comparison_dimensions": arm["comparison_dimensions"], "evidence_status": arm["status"],
+                "independent_n": arm["independent_n"], "cost": arm["cost"],
+                "unit": arm["metric_units"][metric], "aggregate_hash": aggregate["aggregate_hash"],
+                "attempt_ids": [cell["attempt_id"] for cell in aggregate["cell_dispositions"]
+                                if cell["arm_id"] == arm["arm_id"] and cell["status"] == "SUCCEEDED"
+                                and cell["block_id"] in arm["complete_block_ids"]
+                                and encode(comparison_dimensions(cell)) == encode(arm["comparison_dimensions"])]})
+    return {"schema_version": "pirc25-paper-evidence-v1", "study_id": aggregate["study_id"],
+            "aggregate_hash": aggregate["aggregate_hash"], "table_sha256": hashlib.sha256(table).hexdigest(),
+            "code_hash": aggregate["code_hash"], "evidence_status": "active", "relation": None,
+            "disclosure_scope": aggregate["disclosure_scope"], "claims": claims}
+
+
 def accept_evidence_package(store, directory, expected_hash):
     """Import the same frozen JSON/CSV/evidence files that TSDE produced."""
-    import hashlib
     from pathlib import Path
 
     root = Path(directory).resolve()
@@ -157,6 +210,15 @@ def accept_evidence_package(store, directory, expected_hash):
     index = json.loads(contents["PaperEvidenceIndex.json"])
     if index.get("aggregate_hash") != expected_hash or index.get("table_sha256") != manifest["files"]["metrics.csv"]:
         raise ResearchError("CONTRACT_MISMATCH", "paper evidence/table version differs")
+    try:
+        if contents["metrics.csv"] != expected_metrics_csv(aggregate):
+            raise ResearchError("CONTRACT_MISMATCH", "frozen CSV differs from aggregate values")
+        if contents["PaperEvidenceIndex.json"] != encode(expected_paper_index(aggregate, contents["metrics.csv"])):
+            raise ResearchError("CONTRACT_MISMATCH", "paper evidence index differs from aggregate values")
+    except (KeyError, TypeError, ValueError) as exc:
+        if isinstance(exc, ResearchError):
+            raise
+        raise ResearchError("CONTRACT_MISMATCH", "incomplete frozen evidence package") from exc
     artifact = accept_aggregate(store, aggregate, aggregate["study_id"])
     attachments = {}
     for name, role in (("metrics.csv", "table"), ("PaperEvidenceIndex.json", "evidence-index")):

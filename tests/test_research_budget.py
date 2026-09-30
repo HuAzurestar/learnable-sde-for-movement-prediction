@@ -219,6 +219,16 @@ def test_changing_study_or_arm_label_cannot_refresh_same_family_budget(tmp_path)
     assert ledger.balance("affine")["committed_ms"] == 500
 
 
+def test_first_study_cannot_register_two_budget_ids_for_one_arm_family(tmp_path):
+    store = ResearchStore(tmp_path, "duplicate-family", initialize=True)
+    value = spec()
+    value["arms"].append({**value["arms"][0], "arm_id": "affine-copy"})
+    value["cells"].append({**value["cells"][0], "arm_id": "affine-copy"})
+    with pytest.raises(ResearchError, match="family"):
+        store.register(value, digest(value))
+    assert not any(event["event_kind"] == "MANIFEST" for event in store.events())
+
+
 def test_bad_tail_is_quarantined_without_replenishing_budget(tmp_path):
     store, attempts = registered(tmp_path)
     BudgetLedger(store).reserve(attempts[0], BudgetSpec(1))

@@ -2,7 +2,8 @@
 
 import pytest
 
-from application.research_evidence import export_evidence, accept_aggregate, accept_evidence_package
+from application.research_evidence import (export_evidence, accept_aggregate, accept_evidence_package,
+                                           expected_metrics_csv, expected_paper_index)
 from infrastructure.research_store import ResearchStore, ResearchError, digest, encode
 from tests.test_research_store import spec
 
@@ -11,6 +12,8 @@ def setup(tmp_path):
     store = ResearchStore(tmp_path, "evidence", initialize=True)
     value = spec()
     value["cells"] += [{"arm_id": "affine", "seed": 2, "block_id": "fixture-1"}]
+    for cell in value["cells"]:
+        cell["visibility"] = "synthetic"
     store.register(value, digest(value))
     grant = {"authorization_id": "export", "study_id": "synthetic", "expires_at": "2099-01-01T00:00:00+00:00",
              "evidence_hash": digest("fixture permission"), "purposes": ["export"],
@@ -46,6 +49,43 @@ def test_export_cannot_use_preview_only_or_partial_block_grants(tmp_path):
     store.authorize(partial)
     with pytest.raises(ResearchError, match="complete study matrix"):
         export_evidence(store, "synthetic", partial)
+
+
+def test_export_rejects_restricted_registered_cells_before_reading_results(tmp_path):
+    store = ResearchStore(tmp_path, "visibility", initialize=True)
+    value = spec()
+    value["cells"][0]["visibility"] = "restricted"
+    store.register(value, digest(value))
+    grant = {"authorization_id": "synthetic-only", "study_id": "synthetic",
+             "expires_at": "2099-01-01T00:00:00+00:00", "evidence_hash": digest("visibility test"),
+             "purposes": ["export"], "visibilities": ["synthetic"], "block_ids": ["fixture-1"]}
+    store.authorize(grant)
+    with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
+        export_evidence(store, "synthetic", grant)
+    assert not any(event["payload"].get("object_id", "").startswith("bundle-") for event in store.events())
+    assert any(event["event_kind"] == "DISCLOSURE_DENIED" for event in store.events())
+
+
+def test_export_rejects_restricted_admission_attachment(tmp_path):
+    store, value, grant = setup(tmp_path)
+    cell = value["cells"][0]
+    run = store.register_run("synthetic", cell)
+    attempt = store.new_attempt(run)
+    store.transition(attempt, "RUNNING")
+    admission = {"spec_hash": digest(value), "cell_hash": digest(cell), "attempt_id": attempt,
+                 "run_id": run, "qualification": "fixture",
+                 "documents": {"package": {"visibility": "restricted"}}}
+    admission["admission_hash"] = digest(admission)
+    store.publish("admission-" + admission["admission_hash"], admission)
+    result = {"spec_hash": digest(value), "cell_hash": digest(cell), "protocol_hash": value["protocol_hash"],
+              "metrics": {"error": 1}, "metric_units": {"error": "m"}, "qualification": "fixture",
+              "state_order": ["x", "y", "vx", "vy"], "units": ["m", "m", "m/s", "m/s"],
+              "admission_hash": admission["admission_hash"]}
+    artifact = store.artifact(encode(result), role="result", visibility="synthetic",
+                              block_ids=[cell["block_id"]], study_id="synthetic")
+    store.transition(attempt, "SUCCEEDED", artifact_id=artifact["artifact_id"])
+    with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
+        export_evidence(store, "synthetic", grant)
 
 
 def test_export_preserves_registered_comparison_dimensions_for_missing_cells(tmp_path):
@@ -138,11 +178,12 @@ def test_frozen_package_import_validates_all_attached_hashes(tmp_path):
     bundle = export_evidence(store, "synthetic", grant)
     aggregate = {"schema_version": "pirc25-aggregate-v1", "study_id": "synthetic", "spec_hash": digest(value),
                  "protocol_hash": value["protocol_hash"], "source_bundle_hash": bundle["bundle_hash"],
-                 "expected_cell_count": 2, "cell_dispositions": bundle["cells"], "arms": []}
+                 "expected_cell_count": 2, "cell_dispositions": bundle["cells"], "arms": [],
+                 "code_hash": value["code_hash"], "disclosure_scope": bundle["disclosure_scope"]}
     aggregate["aggregate_hash"] = digest(aggregate)
-    table = b"aggregate_hash,metric,value\n"
-    index = {"aggregate_hash": aggregate["aggregate_hash"], "table_sha256": hashlib.sha256(table).hexdigest()}
-    files = {"aggregate.json": encode(aggregate), "metrics.csv": table, "PaperEvidenceIndex.json": encode(index)}
+    table = expected_metrics_csv(aggregate)
+    files = {"aggregate.json": encode(aggregate), "metrics.csv": table,
+             "PaperEvidenceIndex.json": encode(expected_paper_index(aggregate, table))}
     manifest = {"schema_version": "pirc25-evidence-package-v1", "aggregate_hash": aggregate["aggregate_hash"],
                 "files": {name: hashlib.sha256(content).hexdigest() for name, content in files.items()}}
     folder = tmp_path / "package"
@@ -154,4 +195,34 @@ def test_frozen_package_import_validates_all_attached_hashes(tmp_path):
     assert (store.path / "artifacts" / imported["table"]).read_bytes() == table
     (folder / "metrics.csv").write_bytes(b"changed")
     with pytest.raises(ResearchError, match="CORRUPT_ARTIFACT"):
+        accept_evidence_package(store, folder, aggregate["aggregate_hash"])
+
+
+@pytest.mark.parametrize("tamper", ["csv", "index"])
+def test_rehashed_package_cannot_change_frozen_table_or_claims(tmp_path, tamper):
+    import hashlib
+
+    store, value, grant = setup(tmp_path)
+    bundle = export_evidence(store, "synthetic", grant)
+    aggregate = {"schema_version": "pirc25-aggregate-v1", "study_id": "synthetic", "spec_hash": digest(value),
+                 "protocol_hash": value["protocol_hash"], "source_bundle_hash": bundle["bundle_hash"],
+                 "expected_cell_count": 2, "cell_dispositions": bundle["cells"], "arms": [],
+                 "code_hash": value["code_hash"], "disclosure_scope": bundle["disclosure_scope"]}
+    aggregate["aggregate_hash"] = digest(aggregate)
+    table = expected_metrics_csv(aggregate)
+    index = expected_paper_index(aggregate, table)
+    if tamper == "csv":
+        table = b"aggregate_hash,metric,value\nforged,accuracy,1\n"
+        index["table_sha256"] = hashlib.sha256(table).hexdigest()
+    else:
+        index["claims"] = [{"claim_id": "forged", "value": 1}]
+    files = {"aggregate.json": encode(aggregate), "metrics.csv": table,
+             "PaperEvidenceIndex.json": encode(index)}
+    manifest = {"schema_version": "pirc25-evidence-package-v1", "aggregate_hash": aggregate["aggregate_hash"],
+                "files": {name: hashlib.sha256(content).hexdigest() for name, content in files.items()}}
+    folder = tmp_path / "rehashed-package"
+    folder.mkdir()
+    for name, content in {**files, "manifest.json": encode(manifest)}.items():
+        (folder / name).write_bytes(content)
+    with pytest.raises(ResearchError, match="CONTRACT_MISMATCH"):
         accept_evidence_package(store, folder, aggregate["aggregate_hash"])
