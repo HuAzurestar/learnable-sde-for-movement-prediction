@@ -66,15 +66,23 @@ def test_export_rejects_restricted_registered_cells_before_reading_results(tmp_p
     assert any(event["event_kind"] == "DISCLOSURE_DENIED" for event in store.events())
 
 
-def test_export_rejects_restricted_admission_attachment(tmp_path):
+@pytest.mark.parametrize("source", ["package", "artifact"])
+def test_export_rejects_restricted_admission_attachment(tmp_path, source):
     store, value, grant = setup(tmp_path)
     cell = value["cells"][0]
     run = store.register_run("synthetic", cell)
     attempt = store.new_attempt(run)
     store.transition(attempt, "RUNNING")
+    if source == "package":
+        documents = {"package": {"visibility": "restricted"}}
+    else:
+        content = {"check": "passed"}
+        artifact = store.artifact(encode(content), role="qualification", visibility="restricted",
+                                  block_ids=[cell["block_id"]], study_id="synthetic")
+        documents = {"qualification_evidence": [{"artifact": {**artifact, "visibility": "synthetic"},
+                                                   "content": content}]}
     admission = {"spec_hash": digest(value), "cell_hash": digest(cell), "attempt_id": attempt,
-                 "run_id": run, "qualification": "fixture",
-                 "documents": {"package": {"visibility": "restricted"}}}
+                 "run_id": run, "qualification": "fixture", "documents": documents}
     admission["admission_hash"] = digest(admission)
     store.publish("admission-" + admission["admission_hash"], admission)
     result = {"spec_hash": digest(value), "cell_hash": digest(cell), "protocol_hash": value["protocol_hash"],
@@ -86,6 +94,35 @@ def test_export_rejects_restricted_admission_attachment(tmp_path):
     store.transition(attempt, "SUCCEEDED", artifact_id=artifact["artifact_id"])
     with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
         export_evidence(store, "synthetic", grant)
+
+
+def test_restricted_result_stays_restricted_through_export_and_import(tmp_path):
+    store, value, grant = setup(tmp_path)
+    broad = {**grant, "authorization_id": "broad", "visibilities": ["synthetic", "restricted"]}
+    store.authorize(broad)
+    cell = value["cells"][0]
+    run = store.register_run("synthetic", cell)
+    attempt = store.new_attempt(run)
+    store.transition(attempt, "RUNNING")
+    result = {"spec_hash": digest(value), "cell_hash": digest(cell), "protocol_hash": value["protocol_hash"],
+              "metrics": {"error": 1}, "metric_units": {"error": "m"}, "qualification": "fixture",
+              "state_order": ["x", "y", "vx", "vy"], "units": ["m", "m", "m/s", "m/s"]}
+    source = store.artifact(encode(result), role="result", visibility="restricted",
+                            block_ids=[cell["block_id"]], study_id="synthetic")
+    store.transition(attempt, "SUCCEEDED", artifact_id=source["artifact_id"])
+
+    bundle = export_evidence(store, "synthetic", broad)
+    assert bundle["visibility"] == "restricted"
+    aggregate = {"schema_version": "pirc25-aggregate-v1", "study_id": "synthetic", "spec_hash": digest(value),
+                 "protocol_hash": value["protocol_hash"], "source_bundle_hash": bundle["bundle_hash"],
+                 "expected_cell_count": len(value["cells"]), "cell_dispositions": bundle["cells"], "arms": []}
+    artifact = accept_aggregate(store, {**aggregate, "aggregate_hash": digest(aggregate)}, "synthetic")
+    assert artifact["visibility"] == "restricted"
+
+    preview = {**grant, "authorization_id": "synthetic-preview", "purposes": ["preview"]}
+    store.authorize(preview)
+    with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
+        store.read_artifact(artifact["artifact_id"], purpose="preview", authorization=preview)
 
 
 def test_export_preserves_registered_comparison_dimensions_for_missing_cells(tmp_path):

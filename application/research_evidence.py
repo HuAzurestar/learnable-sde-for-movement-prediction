@@ -13,18 +13,24 @@ from application.research_dimensions import comparison_dimensions
 from application.research_cost import frozen_cost
 
 
-def evidence_visibility(spec, cells):
-    """Attachments cannot be declassified by a synthetic parent cell."""
+def evidence_visibility(store, spec, cells):
+    """Source artifact metadata cannot be declassified by a synthetic cell."""
     if any(cell.get("visibility") != "synthetic" for cell in spec["cells"]):
         return "restricted"
     for cell in cells:
+        if (cell.get("artifact_id") and
+                store.manifest("artifact-" + cell["artifact_id"])["visibility"] != "synthetic"):
+            return "restricted"
         documents = cell.get("admission", {}).get("documents", {})
         for key in ("package", "frozen_model"):
             if key in documents and documents[key].get("visibility", "restricted") != "synthetic":
                 return "restricted"
         for key in ("qualification_evidence", "model_qualification_evidence"):
-            if any(item["artifact"].get("visibility") != "synthetic" for item in documents.get(key, [])):
-                return "restricted"
+            for item in documents.get(key, []):
+                artifact = item["artifact"]
+                if (artifact.get("visibility") != "synthetic" or
+                        store.manifest("artifact-" + artifact["artifact_id"])["visibility"] != "synthetic"):
+                    return "restricted"
     return "synthetic"
 
 
@@ -43,7 +49,7 @@ def authorize_study(store, study_id, authorization, purpose):
 
 
 def require_export_visibility(store, spec, cells, authorization):
-    visibility = evidence_visibility(spec, cells)
+    visibility = evidence_visibility(store, spec, cells)
     if visibility not in authorization["visibilities"]:
         store.append("DISCLOSURE_DENIED", {"study_id": spec["study_id"], "purpose": "export",
                    "authorization_hash": digest(authorization), "required_visibility": visibility})
@@ -143,7 +149,7 @@ def accept_aggregate(store, aggregate, study_id):
             or aggregate.get("cell_dispositions") != bundle["cells"]):
         raise ResearchError("CONTRACT_MISMATCH", "aggregate is not bound to the frozen complete matrix")
     from infrastructure.research_store import encode
-    visibility = evidence_visibility(spec, bundle["cells"])
+    visibility = evidence_visibility(store, spec, bundle["cells"])
     return store.artifact(encode(aggregate), role="aggregate", visibility=visibility,
                           block_ids=[c["block_id"] for c in spec["cells"]], study_id=study_id)
 
