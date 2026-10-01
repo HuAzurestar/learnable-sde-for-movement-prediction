@@ -117,6 +117,11 @@ tests/            unit, characterization, and integration tests
 
 ## Development
 
+The [shared engineering runtime](docs/pirc-38-shared-engineering.md) adds
+durable research identities, supervised budgets, declared recovery, frozen
+paper evidence and a local read-only results UI. Its `experiments.pirc25` CLI
+requires an explicit runtime root outside Git.
+
 ```bash
 python -m pytest -q
 python -m experiments.smoke_test

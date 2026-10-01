@@ -47,3 +47,6 @@ include = [
   "transfer*",
 ]
 exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+"experiments.pirc25" = ["ui/*.html", "ui/*.css", "ui/*.js"]
