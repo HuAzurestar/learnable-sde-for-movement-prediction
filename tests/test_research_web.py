@@ -10,7 +10,7 @@ import pytest
 
 from application.research_query import ResearchQuery
 from experiments.pirc25.web import make_server
-from infrastructure.research_store import ResearchStore, ResearchError, digest
+from infrastructure.research_store import ResearchStore, ResearchError, digest, encode
 from tests.test_research_store import spec
 
 
@@ -138,6 +138,49 @@ def test_preview_bounds_and_unauthorized_visibility_are_explicit(tmp_path):
         assert status == 409 and json.loads(content)["error"]["code"] == "TOO_LARGE"
         secret = store.artifact(b"{}", role="result", visibility="restricted", block_ids=["fixture-1"], study_id="synthetic")
         assert request(server, "/api/artifacts/" + secret["artifact_id"])[0] == 403
+
+
+def test_comparison_manifests_require_all_artifacts_in_preview_scope(tmp_path):
+    with service(tmp_path) as (store, value, server):
+        run = store.register_run("synthetic", value["cells"][0])
+        packages = {}
+        for hidden_key in (None, "aggregate_id", "table", "evidence-index", "block", "study"):
+            name = hidden_key or "visible"
+            package_hash = digest(name)
+            attachments = {}
+            for key, role in (("aggregate_id", "aggregate"), ("table", "table"),
+                              ("evidence-index", "evidence-index")):
+                hidden = key == hidden_key or (hidden_key in {"block", "study"} and key == "aggregate_id")
+                artifact = store.artifact(encode({"package": name, "role": role}), role=role,
+                                          visibility="restricted" if hidden and hidden_key in {"aggregate_id", "table", "evidence-index"} else "synthetic",
+                                          block_ids=["other-block"] if hidden_key == "block" and hidden else ["fixture-1"],
+                                          study_id="other-study" if hidden_key == "study" and hidden else "synthetic")
+                attachments[key] = artifact["artifact_id"]
+            package = {"study_id": "synthetic", "aggregate_hash": package_hash, **attachments}
+            store.publish("comparison-" + package_hash, package)
+            packages[name] = package
+
+        query = ResearchQuery(store, "ui")
+        assert [row["manifest"] for row in query.list("comparison")["items"]] == [packages["visible"]]
+        assert query.run(run)["paper_evidence"] == [packages["visible"]]
+        assert query.comparison(packages["visible"]["aggregate_hash"])["package"] == packages["visible"]
+        for name, package in packages.items():
+            if name != "visible":
+                with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
+                    query.comparison(package["aggregate_hash"])
+
+        status, _, content = request(server, "/api/comparisons")
+        assert status == 200
+        assert [row["manifest"] for row in json.loads(content)["items"]] == [packages["visible"]]
+        status, _, content = request(server, "/api/runs/" + run)
+        assert status == 200 and json.loads(content)["paper_evidence"] == [packages["visible"]]
+
+        broad = {**store.manifest("authorization-ui"), "authorization_id": "ui-broad",
+                 "visibilities": ["synthetic", "restricted"]}
+        store.authorize(broad)
+        visible = [row["manifest"] for row in ResearchQuery(store, "ui-broad").list("comparison")["items"]]
+        assert {package["aggregate_hash"] for package in visible} == {
+            packages[name]["aggregate_hash"] for name in ("visible", "aggregate_id", "table", "evidence-index")}
 
 
 def test_query_page_limits_and_filter_bound_cursor(tmp_path):

@@ -36,11 +36,23 @@ class ResearchQuery:
         while True:
             page = index.list(kind=kind, after=after, limit=200)
             items.extend(item for item in page["items"] if (
-                item["manifest"].get("study_id", item["manifest"].get("spec", {}).get("study_id")) == grant["study_id"]))
+                item["manifest"].get("study_id", item["manifest"].get("spec", {}).get("study_id")) == grant["study_id"]
+                and (kind != "comparison" or self._comparison_visible(item["manifest"], grant))))
             if not page["next_cursor"]:
                 break
             after = page["next_cursor"]
         return items
+
+    def _comparison_visible(self, package, grant):
+        # A package manifest itself contains hashes and artifact IDs. Do not expose it
+        # unless every referenced artifact is within the preview grant's scope.
+        for key in ("aggregate_id", "table", "evidence-index"):
+            metadata = self.store.manifest("artifact-" + identifier(package[key]))
+            if (metadata["study_id"] != grant["study_id"]
+                    or metadata["visibility"] not in grant["visibilities"]
+                    or not set(metadata["block_ids"]) <= set(grant["block_ids"])):
+                return False
+        return True
 
     def _run_metadata(self, row, spec, events):
         manifest = row["manifest"]
@@ -164,7 +176,7 @@ class ResearchQuery:
     def comparison(self, aggregate_hash):
         grant = self._grant()
         package = self.store.manifest("comparison-" + identifier(aggregate_hash))
-        if package["study_id"] != grant["study_id"]:
+        if package["study_id"] != grant["study_id"] or not self._comparison_visible(package, grant):
             raise ResearchError("UNAUTHORIZED_DATA", "comparison outside session scope")
         content, _ = self.artifact(package["aggregate_id"])
         return {"aggregate": json.loads(content), "package": package}
