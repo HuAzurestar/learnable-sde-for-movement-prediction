@@ -99,7 +99,8 @@ class CapabilityRegistry:
         plugin = self._plugins.get((plugin_id, version))
         if plugin is None or required_capability not in plugin.capabilities:
             raise ResearchError("CONTRACT_MISMATCH", "requested capability is unavailable")
-        return replace(plugin, registry_entry=registration.entry)
+        return replace(plugin, registry_entry=registration.entry,
+            component_registries=dict(plugin.component_registries) if plugin.component_registries is not None else None)
 
 
 def validate_result(result: dict, *, spec: dict, cell: dict, plugin: ExecutionPlugin):

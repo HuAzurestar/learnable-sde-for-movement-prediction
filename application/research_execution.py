@@ -18,7 +18,7 @@ COMPOSITION_FIELDS = frozenset({"components", "component_plan_hash"})
 def execution_binding(entry, config, inputs, *, matrix_cells, components=None, component_registries=None):
     from .research_composition import combined_plan
     plan = plan_resources(entry, config, inputs, matrix_cells=matrix_cells)
-    plan = combined_plan(entry, plan, component_registries, components)
+    plan = combined_plan(entry, plan, component_registries, components, config=config, inputs=inputs)
     result = {"schema_version": "pirc25-execution-binding-v1", "component_id": entry.component_id,
         "component_version": entry.version, "registry_entry_hash": plan["registry_entry_hash"],
         "config": json.loads(encode(config)), "inputs": json.loads(encode(inputs)), "resource_plan_hash": plan["resource_plan_hash"],
@@ -62,7 +62,8 @@ def execution_plan(spec, cell, plugin):
         raise ResearchError("CONTRACT_MISMATCH", "resource plan needs the original registered matrix")
     plan = plan_resources(entry, binding["config"], binding["inputs"], matrix_cells=len(spec["cells"]))
     from .research_composition import combined_plan
-    plan = combined_plan(entry, plan, plugin.component_registries, binding.get("components"), seed=cell.get("seed"))
+    plan = combined_plan(entry, plan, plugin.component_registries, binding.get("components"), seed=cell.get("seed"),
+        config=binding["config"], inputs=binding["inputs"])
     if entry.composition is not None and binding["component_plan_hash"] != plan["composition"]["component_plan_hash"]:
         raise ResearchError("CONTRACT_MISMATCH", "internal component plan differs from registered composition")
     if binding.get("resource_plan_hash") != plan["resource_plan_hash"]:

@@ -20,18 +20,18 @@ def input_profile(dimensions):
 
 
 def phase_model(document, inputs, context):
-    from experiments.nex326.phase_space import AffineVelocityModel
-    return AffineVelocityModel
+    from .affine import phase_space_api
+    return phase_space_api().AffineVelocityModel
 
 
 def phase_trainer(document, inputs, context):
-    from experiments.nex326.phase_space import fit_affine_velocity_model
-    return fit_affine_velocity_model
+    from .affine import phase_space_api
+    return phase_space_api().fit_affine_velocity_model
 
 
 def phase_predictor(document, inputs, context):
-    from experiments.nex326.phase_space import rollout_phase_space
-    return rollout_phase_space
+    from .affine import phase_space_api
+    return phase_space_api().rollout_phase_space
 
 
 def _fixed_schema(values):
@@ -50,8 +50,8 @@ def _fixed_schema(values):
 
 
 def phase_configuration(seed):
-    from experiments.nex326.phase_space import load_phase_space_spec
-    return {"seed": seed, "dtype": "float64", "device": "cpu", "benchmark": load_phase_space_spec()}
+    from .affine import phase_space_api
+    return {"seed": seed, "dtype": "float64", "device": "cpu", "benchmark": phase_space_api().load_phase_space_spec()}
 
 
 def _phase_entry(role, builder, capabilities):

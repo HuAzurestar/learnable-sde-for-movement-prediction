@@ -4,7 +4,7 @@ Factory declarations are not a Python sandbox or scientific qualification.
 The command/source, data grants and method qualification still apply.
 """
 
-from .research_registry import GLOBAL_LIMITS, _bounded_json, validate_composition
+from .research_registry import GLOBAL_LIMITS, RegisteredComponent, _bounded_json, validate_entry, validate_composition
 from infrastructure.research_store import ResearchError, digest, encode
 import json
 
@@ -14,12 +14,18 @@ PROFILE_FIELDS = ("state_dim", "noise_dim", "diffusion_support", "dtype", "devic
 
 
 def component_plan(entry, registries, components, *, matrix_cells, seed=None):
+    from .registry import ComponentRegistry
+    validate_entry(entry)
+    entry = RegisteredComponent(encode(entry.manifest()), None).entry
     validate_composition(entry.composition)
     _bounded_json(components, nodes=65536, depth=32, byte_limit=4 * 1024 * 1024)
-    if type(registries) is not dict or set(registries) != ROLES or type(components) is not dict or set(components) != ROLES:
+    if (type(registries) is not dict or set(registries) != ROLES or
+            any(not isinstance(registry, ComponentRegistry) for registry in registries.values()) or
+            type(components) is not dict or set(components) != ROLES):
         raise ResearchError("CONTRACT_MISMATCH", "all declared component registries and bindings required")
     # Detach once before inspecting the whole combination; no factory executes.
     components = json.loads(encode(components))
+    registries = dict(registries)
     entries, plans, profile, shared_config = {}, {}, None, None
     for role in sorted(ROLES):
         binding, rule = components[role], entry.composition["roles"][role]
@@ -38,13 +44,13 @@ def component_plan(entry, registries, components, *, matrix_cells, seed=None):
                 or type(selected["diffusion_support"]) is not list
                 or any(type(name) is not str or name not in entry.state_order for name in selected["diffusion_support"])
                 or len(set(selected["diffusion_support"])) != len(selected["diffusion_support"])
-                or selected["dtype"] not in {"float32", "float64"}
-                or selected["device"] != ("cpu" if entry.resource_class == "cpu" else "cuda")
+                or type(selected["dtype"]) is not str or selected["dtype"] not in {"float32", "float64"}
+                or type(selected["device"]) is not str or selected["device"] != ("cpu" if entry.resource_class == "cpu" else "cuda")
                 or profile is not None and profile != selected):
             raise ResearchError("CONTRACT_MISMATCH", "component state/noise/dtype/device profiles disagree")
         profile = selected
         config = binding["config"]
-        if entry.composition["shared_configuration"] and shared_config is not None and shared_config != config:
+        if entry.composition["shared_configuration"] and entries and shared_config != config:
             raise ResearchError("CONTRACT_MISMATCH", "component shared configurations disagree")
         shared_config = config
         if rule["seed_path"] is not None:
@@ -71,12 +77,20 @@ def component_plan(entry, registries, components, *, matrix_cells, seed=None):
     return result
 
 
-def combined_plan(entry, plan, registries, components, *, seed=None):
+def combined_plan(entry, plan, registries, components, *, seed=None, config=None, inputs=None):
     if entry.composition is None:
         if registries is not None or components is not None:
             raise ResearchError("CONTRACT_MISMATCH", "undeclared component composition")
         return plan
     composition = component_plan(entry, registries, components, matrix_cells=plan["matrix_cells"], seed=seed)
+    # Declared top-level adapter profile fields constrain the full composition,
+    # not only the independently validated children. Empty adapter recipes are
+    # allowed: their state/units/class still bind through the registry entry.
+    _bounded_json({"config": config, "inputs": inputs}, nodes=65536, depth=32)
+    for document in (config, inputs):
+        if type(document) is dict and any(name in document and document[name] != composition["profile"][name]
+                for name in PROFILE_FIELDS):
+            raise ResearchError("CONTRACT_MISMATCH", "adapter and component state/noise/dtype/device profiles disagree")
     for key in ("tensor_elements", "tensor_bytes"):
         if plan[key] + composition[key] > plan["limits"][key]:
             raise ResearchError("RESOURCE_PLAN_REJECTED", "combined adapter/components exceed allocation quota")

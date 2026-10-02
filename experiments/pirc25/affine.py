@@ -11,6 +11,12 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_VERSION = "shared-affine-synthetic-v1"
 
 
+def phase_space_api():
+    """Keep the reviewed four-state dependency behind its public adapter."""
+    from experiments.nex326 import phase_space
+    return phase_space
+
+
 def code_hash():
     files = [ROOT / name for name in ("config.py", "numerics.py", "registry.py")]
     for directory in ("application", "data", "domain", "estimation", "evaluation", "experiments", "inference", "infrastructure", "models"):
