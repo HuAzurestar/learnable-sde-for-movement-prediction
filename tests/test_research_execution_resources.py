@@ -18,6 +18,7 @@ from tests.research_admission_fixtures import admit_fixture, synthetic_plugin
 from tests.test_research_store import spec
 from application.research_contracts import CapabilityRegistry
 from infrastructure.research_store import ResearchStore
+from infrastructure.research_store import encode
 
 
 def resource_fixture(tmp_path, *, result_bytes=4096):
@@ -36,6 +37,11 @@ def resource_fixture(tmp_path, *, result_bytes=4096):
     entry.resource_contract["counts"].update(paths={"config": ["paths"]}, steps={"config": ["steps"]},
         observations={"input": ["observations"]})
     entry.resource_contract["tensors"] = [{"name": "declared_sample_upper_bound", "axes": ["paths", "steps", "state_dim"], "item_bytes": 8}]
+    if result_bytes == "exact-worker-output":
+        # Digests always occupy 64 bytes; adding the eventual execution binding
+        # changes their content, not this deterministic fixture output length.
+        result_bytes = len(encode(json.loads(fixture_command("unused", {**value,
+            "admission": {"mode": "fixture"}}, value["cells"][0])[-1])))
     entry.resource_contract["limits"].update(paths=4, steps=4, observations=4, matrix_cells=2,
         tensor_elements=16, tensor_bytes=128, result_bytes=result_bytes)
     registry = CapabilityRegistry()
@@ -139,3 +145,15 @@ def test_direct_admission_cannot_bypass_runner_version_or_resource_checks(tmp_pa
     with pytest.raises(ResearchError, match="RESOURCE_PLAN_REJECTED"):
         AdmissionGate(store).prepare(value, cell, plugin, attempt)
     assert not any(event["event_kind"] in {"READ_STARTED", "WORKER_STARTED"} for event in store.events())
+
+
+def test_supervisor_added_provenance_cannot_exceed_final_publication_quota(tmp_path):
+    store, value, registry, _ = resource_fixture(tmp_path, result_bytes="exact-worker-output")
+    cell = value["cells"][0]
+    store.register(value, digest(value))
+    with pytest.raises(ResearchError, match="RESOURCE_PLAN_REJECTED"):
+        observed = SharedRunner(store, registry).run_cell("synthetic", digest(cell), budget=BudgetSpec(10))
+        metadata = store.manifest("artifact-" + observed["artifact_id"])
+        pytest.fail("final publication exceeds admitted result quota: published=" + str(metadata["size_bytes"]) +
+            ", limit=" + str(registry.resolve(cell["plugin_id"], cell["capability"], version="1.0.0").registry_entry.resource_contract["limits"]["result_bytes"]))
+    assert not any(attempt["state"] == "SUCCEEDED" for attempt in store.attempts().values())
