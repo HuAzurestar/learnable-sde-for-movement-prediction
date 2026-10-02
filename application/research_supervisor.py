@@ -180,7 +180,16 @@ class ResearchSupervisor:
             if tree is not None:
                 tree.close()
             if process is not None:
-                process.stdin.close()
+                try:
+                    process.stdin.close()
+                except OSError as exc:
+                    # Buffered GO may flush into a pipe already invalidated by
+                    # the native deadline kill. This is not proof of live work
+                    # or permission to replace the stop/settlement outcome.
+                    self.store.append("WORKER_CONTROL_CLOSE_FAILED", {
+                        "attempt_id": attempt_id, "reservation_id": reservation["reservation_id"],
+                        "error_code": "PIPE_CLOSE_FAILED", "tree_stop_confirmed": stop_confirmed,
+                        "errno": exc.errno if type(exc.errno) is int else None})
             elapsed = math.ceil((self.monotonic() - start) * 1000)
             if outcome == "SUCCEEDED" and (past_deadline() or elapsed > reservation["reserved_ms"]):
                 outcome, artifact_id, error_code = "TIMEOUT", None, "TIMEOUT"

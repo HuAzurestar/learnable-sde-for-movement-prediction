@@ -155,8 +155,10 @@ def test_wrapper_self_containment_uses_native_pseudo_handle_and_fails_closed(mon
         assert calls == [("assign", 1234, ctypes.c_void_p(-1).value), ("close", 1234)]
 
 
-@pytest.mark.parametrize("stop_confirmed", [True, False])
-def test_stale_control_pipe_close_cannot_mask_deadline_settlement(tmp_path, monkeypatch, stop_confirmed):
+@pytest.mark.parametrize("stop_confirmed,slow_worker,diagnostic_unavailable",
+    [(True, True, False), (False, False, False), (False, True, False), (True, True, True)])
+def test_stale_control_pipe_close_cannot_mask_deadline_settlement(tmp_path, monkeypatch,
+                                                               stop_confirmed, slow_worker, diagnostic_unavailable):
     import errno
     import application.research_supervisor as supervision
     from infrastructure.process_tree import ProcessTree
@@ -180,21 +182,43 @@ def test_stale_control_pipe_close_cannot_mask_deadline_settlement(tmp_path, monk
         process.stdin = StaleStdin(process.stdin)
         return process
     monkeypatch.setattr(supervision.subprocess, "Popen", popen)
+    if diagnostic_unavailable:
+        original_append = store.append
+        def append(kind, *args, **kwargs):
+            if kind == "WORKER_CONTROL_CLOSE_FAILED":
+                raise OSError(errno.ENOSPC, "synthetic unavailable optional diagnostic")
+            return original_append(kind, *args, **kwargs)
+        monkeypatch.setattr(store, "append", append)
     if not stop_confirmed:
         monkeypatch.setattr(ProcessTree, "wait_stopped", lambda self, timeout=1: False)
     supervisor = ResearchSupervisor(store)
-    command = lambda output: [sys.executable, "-c", "import time; time.sleep(20)"]
+    command = (lambda output: [sys.executable, "-c", "import time; time.sleep(20)"]) if slow_worker else (
+        lambda output: [sys.executable, "-c", "import pathlib,sys; pathlib.Path(sys.argv[1]).write_text('{}')", str(output)])
+    budget = BudgetSpec(0.2 if slow_worker else 4)
     if stop_confirmed:
-        result = supervisor.run(attempts[0], command, BudgetSpec(0.2))
+        result = supervisor.run(attempts[0], command, budget)
         assert result["state"] == "TIMEOUT" and result["exit_code"] != 0
         settlements = [event for event in store.events() if event["event_kind"] == "SETTLE"]
         assert len(settlements) == 1 and settlements[0]["payload"]["outcome"] == "TIMEOUT"
         assert result["elapsed_ms"] > 0
         assert store.attempts()[attempts[0]]["state"] == "TIMEOUT"
     else:
-        with pytest.raises(ResearchError, match="WORKER_ACTIVE"):
-            supervisor.run(attempts[0], command, BudgetSpec(0.2))
+        if slow_worker:
+            result = supervisor.run(attempts[0], command, budget)
+            assert result["state"] == "INTERRUPTED" and result["exit_code"] != 0
+            assert result["elapsed_ms"] is None and result["artifact_id"] is None
+        else:
+            with pytest.raises(ResearchError, match="WORKER_ACTIVE"):
+                supervisor.run(attempts[0], command, budget)
         assert not any(event["event_kind"] == "SETTLE" for event in store.events())
         assert store.attempts()[attempts[0]]["error_code"] == "WORKER_STOP_UNCONFIRMED"
-        assert supervisor.budget.balance("affine")["committed_ms"] == 200
+        assert supervisor.budget.balance("affine")["committed_ms"] == int(budget.job_seconds * 1000)
     assert supervisor.budget.balance("affine")["closed"]
+    close_errors = [event["payload"] for event in store.events()
+                    if event["event_kind"] == "WORKER_CONTROL_CLOSE_FAILED"]
+    if diagnostic_unavailable:
+        assert close_errors == []
+        assert result["cleanup"] == {"control_pipe_close_error": "PIPE_CLOSE_FAILED", "diagnostic_recorded": False}
+    else:
+        assert len(close_errors) == 1 and close_errors[0]["error_code"] == "PIPE_CLOSE_FAILED"
+        assert close_errors[0]["tree_stop_confirmed"] is stop_confirmed
