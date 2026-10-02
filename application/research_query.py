@@ -165,6 +165,12 @@ class ResearchQuery:
 
     def artifact(self, artifact_id, *, export=False):
         grant = self._grant("export" if export else "preview")
+        return self._artifact(artifact_id, grant, export=export)
+
+    def _artifact(self, artifact_id, grant, *, export=False):
+        # One comparison is one study disclosure, not three repeated whole-chain
+        # study checks. Every actual read below still revalidates the immutable
+        # grant (including expiry) and journals its own exposure/read events.
         metadata = self.store.manifest("artifact-" + identifier(artifact_id))
         svg = metadata["media_type"] == "image/svg+xml" and metadata["role"] == "comparison-figure"
         if metadata["media_type"] not in {"application/json", "text/csv"} and not svg:
@@ -188,13 +194,13 @@ class ResearchQuery:
         package = self.store.manifest("comparison-" + identifier(aggregate_hash))
         if package["study_id"] != grant["study_id"] or not self._comparison_visible(package, grant):
             raise ResearchError("UNAUTHORIZED_DATA", "comparison outside session scope")
-        content, _ = self.artifact(package["aggregate_id"])
+        content, _ = self._artifact(package["aggregate_id"], grant)
         result = {"aggregate": json.loads(content), "package": package}
         if "computation-receipt" in package:
-            receipt, _ = self.artifact(package["computation-receipt"])
+            receipt, _ = self._artifact(package["computation-receipt"], grant)
             result["computation_receipt"] = json.loads(receipt)
         if "figure-index" in package:
-            index, _ = self.artifact(package["figure-index"])
+            index, _ = self._artifact(package["figure-index"], grant)
             result["figure_index"] = json.loads(index)
         return result
 
