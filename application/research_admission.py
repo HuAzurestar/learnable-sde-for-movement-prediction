@@ -27,17 +27,15 @@ def package_binding(package):
 
 
 def command_binding(builder):
-    try:
-        source = inspect.getsource(builder)
-    except (OSError, TypeError) as exc:
-        raise ResearchError("CONTRACT_MISMATCH", "plugin builder needs inspectable versioned source") from exc
-    return digest(source)
+    from .research_registry import implementation_hash
+    return implementation_hash(builder)
 
 
 def plugin_binding(plugin):
     return digest({"plugin_id": plugin.plugin_id, "capabilities": sorted(plugin.capabilities),
                    "state_order": list(plugin.state_order), "units": list(plugin.units),
-                   "resume_level": plugin.resume_level, "command_hash": command_binding(plugin.command_builder)})
+                   "resume_level": plugin.resume_level, "command_hash": command_binding(plugin.command_builder),
+                   "registry_entry_hash": digest(plugin.registry_entry.manifest())})
 
 
 class AdmissionGate:
@@ -121,6 +119,8 @@ class AdmissionGate:
 
         if spec["code_hash"] != code_hash():
             raise ResearchError("CONTRACT_MISMATCH", "execution code differs from registered code hash")
+        from .research_execution import execution_plan
+        plan = execution_plan(spec, cell, plugin)
         attempt = self.store.attempts()[attempt_id]
         run = self.store.manifest("run-" + attempt["run_id"])
         if run["spec_hash"] != digest(spec) or run["cell_hash"] != digest(cell):
@@ -129,7 +129,12 @@ class AdmissionGate:
                    "run_id": attempt["run_id"], "spec_hash": digest(spec), "cell_hash": digest(cell),
                    "spec": spec, "cell": cell, "plugin_hash": plugin_binding(plugin),
                    "execution_kind": "resume" if recovery_builder is not None else "run",
-                   "command_hash": command_binding(recovery_builder or plugin.command_builder)}
+                   "command_hash": command_binding(recovery_builder or plugin.command_builder),
+                   "registry_entry": plugin.registry_entry.manifest(), "resource_plan": plan}
+        entry_hash = plan["registry_entry_hash"]
+        self.store.publish("registry-entry-" + entry_hash, receipt["registry_entry"])
+        self.store.publish("registry-version-" + digest({"id": plugin.plugin_id, "version": plugin.registry_entry.version}),
+            {"component_id": plugin.plugin_id, "component_version": plugin.registry_entry.version, "registry_entry_hash": entry_hash})
         if builtin_fixture:
             expected = fixture_spec(spec["study_id"], cell["dimensions"], tuple(c["seed"] for c in spec["cells"]))
             if spec != expected or cell.get("visibility") != "synthetic":
@@ -238,6 +243,12 @@ class AdmissionGate:
 
     def result_validator(self, receipt, spec, cell, plugin):
         def validate(result):
+            from .research_execution import execution_plan
+            from .research_registry import validate_value
+            plan = execution_plan(spec, cell, plugin)
+            if receipt.get("resource_plan") != plan or receipt.get("registry_entry") != plugin.registry_entry.manifest():
+                raise ResearchError("CONTRACT_MISMATCH", "result resource/registry admission changed")
+            validate_value(plugin.registry_entry.output_schema, result)
             validate_result(result, spec=spec, cell=cell, plugin=plugin)
             if (receipt["mode"] == "formal" and
                     set(result["metrics"]) != set(receipt["documents"]["preregistration"]["primary_metrics"])):
@@ -258,6 +269,7 @@ class AdmissionGate:
     def run(self, attempt_id, spec, cell, plugin, command_builder, budget, *, builtin_fixture=False, recovery_builder=None):
         from .research_supervisor import ResearchSupervisor
         admitted = {}
+        resource_plan = {}
         def command(output):
             try:
                 mode = "fixture" if builtin_fixture else spec.get("admission", {}).get("mode")
@@ -266,6 +278,7 @@ class AdmissionGate:
                     raise ResearchError("CONTRACT_MISMATCH", "execution stage budget exceeds its hard cap")
                 admitted.update(self.prepare(spec, cell, plugin, attempt_id, builtin_fixture=builtin_fixture,
                                              recovery_builder=recovery_builder))
+                resource_plan.update(admitted["resource_plan"])
             except (KeyError, TypeError, ValueError) as exc:
                 if isinstance(exc, ResearchError):
                     raise
@@ -273,4 +286,5 @@ class AdmissionGate:
             return command_builder(output)
         def validate(result):
             return self.result_validator(admitted, spec, cell, plugin)(result)
-        return ResearchSupervisor(self.store).run(attempt_id, command, budget, result_validator=validate)
+        return ResearchSupervisor(self.store).run(attempt_id, command, budget, result_validator=validate,
+            resource_plan=resource_plan)

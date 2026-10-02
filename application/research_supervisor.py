@@ -22,7 +22,7 @@ class ResearchSupervisor:
         self.budget = BudgetLedger(store)
         self.monotonic = monotonic
 
-    def run(self, attempt_id: str, command_builder, budget: BudgetSpec, *, result_validator=None):
+    def run(self, attempt_id: str, command_builder, budget: BudgetSpec, *, result_validator=None, resource_plan=None):
         reservation = self.budget.reserve(attempt_id, budget)
         if reservation["settled"]:
             raise ResearchError("IDENTITY_CONFLICT", "settled attempt cannot execute again")
@@ -44,6 +44,10 @@ class ResearchSupervisor:
             result_path = work / "result.json"
             heartbeat = work / "heartbeat.json"
             command = list(command_builder(result_path))
+            from .research_registry import GLOBAL_LIMITS
+            maximum_result_bytes = GLOBAL_LIMITS["result_bytes"] if resource_plan is None else resource_plan.get("maximum_result_bytes")
+            if type(maximum_result_bytes) is not int or not 0 < maximum_result_bytes <= GLOBAL_LIMITS["result_bytes"]:
+                raise ResearchError("RESOURCE_PLAN_REJECTED", "worker result byte quota is invalid")
             if not command or any(not isinstance(arg, str) for arg in command):
                 raise ResearchError("CONTRACT_MISMATCH", "worker command must be a string argument list")
         except BaseException as exc:
@@ -138,7 +142,10 @@ class ResearchSupervisor:
                     elif completed_code == 0 and result_path.is_file():
                         # Registered adapters must supply a finite JSON result; no pickle.
                         import json
-                        content = result_path.read_bytes()
+                        with result_path.open("rb") as stream:
+                            content = stream.read(maximum_result_bytes + 1)
+                        if len(content) > maximum_result_bytes:
+                            raise ResearchError("RESOURCE_PLAN_REJECTED", "worker result exceeds admitted byte quota")
                         result = json.loads(content)
                         from infrastructure.research_store import encode
                         encode(result)

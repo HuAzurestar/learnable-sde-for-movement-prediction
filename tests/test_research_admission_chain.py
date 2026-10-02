@@ -13,7 +13,7 @@ from application.research_contracts import CapabilityRegistry, ExecutionPlugin
 from experiments.pirc25.runner import SharedRunner
 from infrastructure.research_store import ResearchError, ResearchStore, digest, encode
 from tests.test_research_store import spec
-from tests.research_admission_fixtures import admit_fixture, attach_foreign_model
+from tests.research_admission_fixtures import admit_fixture, attach_foreign_model, synthetic_plugin, bind_fixture_execution
 
 
 def fixture_command(output, value, cell):
@@ -37,7 +37,7 @@ def prepared(tmp_path, *, formal=False, two_arms=False, package_visibility="synt
     if two_arms:
         value["arms"].append({**value["arms"][0], "arm_id": "candidate", "model_family_id": "candidate"})
         value["cells"].append({**value["cells"][0], "arm_id": "candidate"})
-    plugin = ExecutionPlugin("admitted-fixture", frozenset({"generic-rollout"}),
+    plugin = synthetic_plugin("admitted-fixture", frozenset({"generic-rollout"}),
         ("x", "y", "vx", "vy"), ("m", "m", "m/s", "m/s"), "restart-only", fixture_command)
     registry = CapabilityRegistry()
     registry.register(plugin)
@@ -159,7 +159,6 @@ def test_r1_runner_requires_registered_input_and_qualification_evidence(tmp_path
     value = spec()
     cell = value["cells"][0]
     cell.update(plugin_id="self-qualified", capability="generic-rollout", visibility="synthetic")
-    store.register(value, digest(value))
     called = []
 
     def command(output, registered_spec, registered_cell):
@@ -175,8 +174,11 @@ def test_r1_runner_requires_registered_input_and_qualification_evidence(tmp_path
                 str(output), encode(result).decode()]
 
     registry = CapabilityRegistry()
-    registry.register(ExecutionPlugin("self-qualified", frozenset({"generic-rollout"}),
-        ("x", "y", "vx", "vy"), ("m", "m", "m/s", "m/s"), "restart-only", command))
+    plugin = synthetic_plugin("self-qualified", frozenset({"generic-rollout"}),
+        ("x", "y", "vx", "vy"), ("m", "m", "m/s", "m/s"), "restart-only", command)
+    registry.register(plugin)
+    bind_fixture_execution(value, plugin)
+    store.register(value, digest(value))
     with pytest.raises(ResearchError):
         SharedRunner(store, registry).run_cell("synthetic", digest(cell), budget=BudgetSpec(10))
     assert not called, "unadmitted plugin was invoked before input gate"
@@ -272,7 +274,8 @@ def test_r1_recovery_builder_must_match_accepted_package(tmp_path):
     def substituted_builder(*args):
         raise AssertionError("must not run")
     with pytest.raises(ResearchError, match="package differs"):
-        AdmissionGate(store).prepare(value, cell, registry.resolve(cell["plugin_id"], cell["capability"]),
+        AdmissionGate(store).prepare(value, cell, registry.resolve(cell["plugin_id"], cell["capability"],
+            version=cell["execution"]["component_version"]),
                                      attempt, recovery_builder=substituted_builder)
     assert not any(e["event_kind"] == "WORKER_STARTED" for e in store.events())
 

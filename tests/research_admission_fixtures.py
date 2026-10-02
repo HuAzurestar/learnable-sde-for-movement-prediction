@@ -2,6 +2,10 @@
 
 import hashlib
 
+from application.research_contracts import ExecutionPlugin
+from application.research_execution import execution_binding
+from application.research_registry import GLOBAL_LIMITS, RegistryEntry, implementation_hash
+
 from application.research_admission import data_binding, package_binding, plugin_binding, command_binding
 from application.research_data import EvaluationExposureLedger
 from application.research_preregistration import PreregistrationGate, protocol_binding, source_identity
@@ -10,7 +14,31 @@ from experiments.pirc25.upstream import audit_inputs
 from infrastructure.research_store import digest, encode
 
 
-def admit_fixture(store, value, plugin, root, *, formal=False, package_visibility="synthetic"):
+def synthetic_plugin(plugin_id, capabilities, state_order, units, resume_level, builder, *, version="1.0.0"):
+    """Explicit tiny scalar/empty-forecast test recipe; not a research default."""
+    entry = RegistryEntry(component_id=plugin_id, component_kind="execution-adapter", version=version,
+        code_hash=implementation_hash(builder), config_schema={"type": "object", "additionalProperties": False},
+        input_schema={"type": "object", "additionalProperties": False},
+        output_schema={"type": "object", "properties": {}, "additionalProperties": True},
+        state_order=state_order, units=units, capabilities=capabilities, resource_class="cpu", resume_level=resume_level,
+        resource_contract={"schema_version": "pirc25-resource-contract-v1", "counts": {
+            **{key: {"constant": 1} for key in ("paths", "steps", "mixtures", "components", "observations")},
+            "state_dim": {"constant": len(state_order)}},
+            "tensors": [{"name": "fixture_scalars", "axes": ["state_dim"], "item_bytes": 8}],
+            "limits": {**dict(GLOBAL_LIMITS), "result_bytes": 64 * 1024}})
+    return ExecutionPlugin(plugin_id, capabilities, state_order, units, resume_level, builder, entry)
+
+
+def bind_fixture_execution(value, plugin, config=None, inputs=None):
+    for cell in value["cells"]:
+        if cell.get("plugin_id") == plugin.plugin_id:
+            cell["resource_class"] = plugin.registry_entry.resource_class
+            cell["execution"] = execution_binding(plugin.registry_entry, config or {}, inputs or {}, matrix_cells=len(value["cells"]))
+
+
+def admit_fixture(store, value, plugin, root, *, formal=False, package_visibility="synthetic",
+                  execution_config=None, execution_inputs=None):
+    bind_fixture_execution(value, plugin, execution_config, execution_inputs)
     content = b"explicit synthetic plugin input"
     (root / "plugin-input.bin").write_bytes(content)
     blocks = [{"block_id": block, "dataset_id": "synthetic", "release_id": "v1",

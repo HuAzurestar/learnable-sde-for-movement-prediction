@@ -7,6 +7,7 @@ from application.research_contracts import CapabilityRegistry, ExecutionPlugin
 from application.research_recovery import RecoveryPlugin, RecoveryRegistry, SharedRecovery
 from infrastructure.research_store import ResearchStore, digest, encode
 from tests.test_research_store import spec
+from tests.research_admission_fixtures import synthetic_plugin
 
 
 def test_fixture_method_exact_state_recovery_uses_existing_supervisor(tmp_path):
@@ -27,13 +28,13 @@ def test_fixture_method_exact_state_recovery_uses_existing_supervisor(tmp_path):
                 str(output), encode(result).decode()]
 
     execution = CapabilityRegistry()
-    execution.register(ExecutionPlugin("counter-fixture", frozenset({"generic-rollout"}),
+    execution.register(synthetic_plugin("counter-fixture", frozenset({"generic-rollout"}),
         ("x", "y", "vx", "vy"), ("m", "m", "m/s", "m/s"), "exact", command))
     from tests.research_admission_fixtures import admit_fixture
-    admit_fixture(store, value, execution.resolve("counter-fixture", "generic-rollout"), tmp_path)
+    admit_fixture(store, value, execution.resolve("counter-fixture", "generic-rollout", version="1.0.0"), tmp_path)
     store.register(value, digest(value))
     recovery_registry = RecoveryRegistry()
-    recovery_registry.register(RecoveryPlugin("counter-fixture", "exact", command))
+    recovery_registry.register(RecoveryPlugin("counter-fixture", "exact", command, "1.0.0"))
     recovery = SharedRecovery(store, execution, recovery_registry)
     run = store.register_run("synthetic", cell)
     parent = store.new_attempt(run)

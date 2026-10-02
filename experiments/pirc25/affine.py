@@ -23,7 +23,7 @@ def fixture_spec(study_id="affine-fixture", dimensions=4, seeds=(19,)):
     if dimensions not in (1, 4):
         raise ValueError("supported fixture dimensions are 1 and 4")
     arm = "affine-" + str(dimensions)
-    return {"schema_version": "pirc25-contract-v1", "study_id": study_id,
+    value = {"schema_version": "pirc25-contract-v1", "study_id": study_id,
             "experiment_id": "shared-fixture-v1", "comparison_family": "synthetic-affine",
             "protocol_hash": digest({"fixture": FIXTURE_VERSION, "fit": "train-only", "dimensions": dimensions}),
             "code_hash": code_hash(), "data_hash": digest(FIXTURE_VERSION),
@@ -33,6 +33,14 @@ def fixture_spec(study_id="affine-fixture", dimensions=4, seeds=(19,)):
             "cells": [{"arm_id": arm, "seed": seed, "block_id": "synthetic-block-1",
                        "plugin_id": arm, "capability": "exact-transition" if dimensions == 1 else "generic-rollout",
                        "visibility": "synthetic", "dimensions": dimensions} for seed in seeds]}
+    from .plugins import affine_plugin, affine_configuration
+    from application.research_execution import execution_binding
+    plugin = affine_plugin(dimensions)
+    config, inputs = affine_configuration(dimensions)
+    for cell in value["cells"]:
+        cell["resource_class"] = plugin.registry_entry.resource_class
+        cell["execution"] = execution_binding(plugin.registry_entry, config, inputs, matrix_cells=len(value["cells"]))
+    return value
 
 
 def single_axis(seed):

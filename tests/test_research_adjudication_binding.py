@@ -14,7 +14,7 @@ from application.research_evidence import export_evidence
 from application.research_preregistration import PreregistrationGate
 from experiments.pirc25.runner import SharedRunner
 from infrastructure.research_store import ResearchError, ResearchStore, digest, encode
-from tests.research_admission_fixtures import admit_fixture
+from tests.research_admission_fixtures import admit_fixture, synthetic_plugin
 from tests.test_research_admission_chain import fixture_command
 from tests.test_research_store import spec
 
@@ -52,7 +52,7 @@ def prepare(root, monkeypatch):
         return original(gate, plan, digest(plan))
 
     monkeypatch.setattr(PreregistrationGate, "register_preregistration", freeze)
-    plugin = ExecutionPlugin("adjudication-fixture", frozenset({"generic-rollout"}),
+    plugin = synthetic_plugin("adjudication-fixture", frozenset({"generic-rollout"}),
         ("x", "y", "vx", "vy"), ("m", "m", "m/s", "m/s"), "restart-only", command)
     registry = CapabilityRegistry()
     registry.register(plugin)

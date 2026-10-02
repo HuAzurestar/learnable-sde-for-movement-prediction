@@ -74,11 +74,14 @@ def test_old_misclassified_result_and_metadata_are_denied_after_reopen(tmp_path,
 def test_checkpoint_inherits_registered_source_visibility_before_admission(tmp_path):
     store, value, registry, grant = prepared(tmp_path, package_visibility="restricted")
     cell = value["cells"][0]
-    plugin = replace(registry.resolve(cell["plugin_id"], cell["capability"]), resume_level="exact")
+    plugin = registry.resolve(cell["plugin_id"], cell["capability"], version=cell["execution"]["component_version"])
+    from tests.research_admission_fixtures import synthetic_plugin, bind_fixture_execution
+    plugin = synthetic_plugin(plugin.plugin_id, plugin.capabilities, plugin.state_order, plugin.units, "exact", fixture_command)
+    bind_fixture_execution(value, plugin)
     execution = CapabilityRegistry()
     execution.register(plugin)
     adapters = RecoveryRegistry()
-    adapters.register(RecoveryPlugin(plugin.plugin_id, "exact", fixture_command))
+    adapters.register(RecoveryPlugin(plugin.plugin_id, "exact", fixture_command, plugin.registry_entry.version))
     store.register(value, digest(value))
     attempt = store.new_attempt(store.register_run("synthetic", cell))
     checkpoint = SharedRecovery(store, execution, adapters).checkpoint(attempt,

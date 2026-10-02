@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import replace
 import re
 
 from infrastructure.research_store import ResearchError, digest
+from .research_registry import RegistryEntry, VersionedRegistry, implementation_hash, validate_entry
 
 CAPABILITIES = {"exact-transition", "generic-rollout", "switching-transition", "coupled-level", "rare-event"}
-RESUME_LEVELS = {"exact", "chunk", "restart-only"}
+RESUME_LEVELS = {"exact", "numerical-tolerance", "chunk", "restart-only"}
 STATE = ["x", "y", "vx", "vy"]
 UNITS = ["m", "m", "m/s", "m/s"]
 
@@ -59,24 +61,36 @@ class ExecutionPlugin:
     units: tuple[str, ...]
     resume_level: str
     command_builder: object
+    registry_entry: RegistryEntry | None = None
 
 
 class CapabilityRegistry:
     def __init__(self):
         self._plugins = {}
+        self._registry = VersionedRegistry()
 
     def register(self, plugin: ExecutionPlugin):
-        if (plugin.plugin_id in self._plugins or not plugin.capabilities
+        validate_entry(plugin.registry_entry)
+        entry = plugin.registry_entry
+        if (not plugin.capabilities
                 or not plugin.capabilities <= CAPABILITIES or plugin.resume_level not in RESUME_LEVELS
-                or len(plugin.units) != len(plugin.state_order) or not callable(plugin.command_builder)):
+                or len(plugin.units) != len(plugin.state_order) or not callable(plugin.command_builder)
+                or entry.component_id != plugin.plugin_id or entry.component_kind != "execution-adapter"
+                or entry.capabilities != plugin.capabilities or entry.resume_level != plugin.resume_level
+                or entry.state_order != plugin.state_order or entry.units != plugin.units):
             raise ResearchError("CONTRACT_MISMATCH", "invalid or duplicate execution plugin")
-        self._plugins[plugin.plugin_id] = plugin
+        reference = self._registry.register(entry, plugin.command_builder)
+        self._plugins[(plugin.plugin_id, entry.version)] = replace(plugin,
+            registry_entry=self._registry.resolve(plugin.plugin_id, entry.version).entry)
+        return reference
 
-    def resolve(self, plugin_id: str, required_capability: str) -> ExecutionPlugin:
-        plugin = self._plugins.get(plugin_id)
+    def resolve(self, plugin_id: str, required_capability: str, *, version=None, entry_hash=None) -> ExecutionPlugin:
+        registration = self._registry.resolve(plugin_id, version,
+            required_capabilities=(required_capability,), entry_hash=entry_hash)
+        plugin = self._plugins.get((plugin_id, version))
         if plugin is None or required_capability not in plugin.capabilities:
             raise ResearchError("CONTRACT_MISMATCH", "requested capability is unavailable")
-        return plugin
+        return replace(plugin, registry_entry=registration.entry)
 
 
 def validate_result(result: dict, *, spec: dict, cell: dict, plugin: ExecutionPlugin):
