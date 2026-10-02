@@ -99,6 +99,27 @@ def test_failed_ack_publication_is_not_accepted(tmp_path, monkeypatch):
     assert exchange.accepted is False
 
 
+def test_expired_owner_cannot_begin_ack_publication(tmp_path):
+    exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", time.monotonic() - 1, 4096)
+    exchange.request_id = "a" * 32
+    with pytest.raises(control.ControlError):
+        exchange.acknowledge("a" * 64)
+    assert not exchange.accepted and not (tmp_path / "checkpoint-ack.json").exists()
+
+
+def test_ack_fsync_overrun_cannot_publish_acceptance(tmp_path, monkeypatch):
+    exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", time.monotonic() + 0.15, 4096)
+    exchange.request()
+    original = control.os.fsync
+    def late_flush(fd):
+        time.sleep(0.2)
+        return original(fd)
+    monkeypatch.setattr(control.os, "fsync", late_flush)
+    with pytest.raises(control.ControlError):
+        exchange.acknowledge("a" * 64)
+    assert not exchange.accepted and not (tmp_path / "checkpoint-ack.json").exists()
+
+
 def test_unsupporting_actual_worker_cannot_inherit_other_checkpoint_control(tmp_path, monkeypatch):
     import sys
     from application.research_budget import BudgetSpec

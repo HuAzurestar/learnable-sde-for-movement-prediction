@@ -9,6 +9,7 @@ import inspect
 import json
 from pathlib import Path
 import sys
+import time
 
 import pytest
 
@@ -143,3 +144,40 @@ def test_actual_worker_saves_before_deadline_and_reopened_resume_matches_continu
     assert actual["metrics"] == expected_output["metrics"]
     assert BudgetLedger(reopened).balance("affine")["committed_ms"] > previous_cost
     assert reopened.attempts()[resumed["attempt_id"]]["parent_attempt_id"] == interrupted["attempt_id"]
+
+
+@pytest.mark.parametrize("level", ["exact", "chunk"])
+@pytest.mark.parametrize("delay_at", ["reference-read", "saved-event"])
+def test_delayed_owner_cannot_confirm_checkpoint_after_hard_deadline(tmp_path, monkeypatch, level, delay_at):
+    from infrastructure import research_control as control
+    store, value, registry, adapters, _ = prepared(tmp_path / "resumed", level, "resumed")
+    delayed = []
+    original_manifest, original_append = store.manifest, store.append
+    def manifest(object_id):
+        result = original_manifest(object_id)
+        if delay_at == "reference-read" and result.get("role") == "checkpoint" and not delayed:
+            delayed.append(True)
+            time.sleep(0.8)
+        return result
+    def append(kind, *args, **kwargs):
+        if delay_at == "saved-event" and kind == "CHECKPOINT_SAVED" and not delayed:
+            delayed.append(True)
+            time.sleep(0.8)
+        return original_append(kind, *args, **kwargs)
+    monkeypatch.setattr(store, "manifest", manifest)
+    monkeypatch.setattr(store, "append", append)
+    original_ack = control.CheckpointExchange.acknowledge
+    acknowledgements = []
+    def acknowledge(exchange, artifact_id):
+        acknowledgements.append((time.monotonic(), exchange.deadline))
+        return original_ack(exchange, artifact_id)
+    monkeypatch.setattr(control.CheckpointExchange, "acknowledge", acknowledge)
+    result = SharedRunner(store, registry, recovery_registry=adapters).run_cell(
+        "resumed", digest(value["cells"][0]), budget=BudgetSpec(3))
+    assert delayed, "actual owner checkpoint handling was not reached"
+    assert result["state"] == "TIMEOUT" and result["exit_code"] != 0
+    assert "checkpoint" not in result, "owner returned a checkpoint receipt after the hard deadline"
+    assert not acknowledgements, "owner sent checkpoint acceptance after the hard deadline"
+    assert not (store.path / "artifacts" / (".attempt-" + result["attempt_id"]) / "checkpoint-ack.json").exists()
+    balance = BudgetLedger(store).balance("affine")
+    assert balance["closed"] and balance["committed_ms"] >= 3000
