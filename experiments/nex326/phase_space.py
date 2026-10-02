@@ -736,14 +736,37 @@ def rollout_phase_space(
     ):
         raise PhaseSpaceError("rollout requires the registered spatial condition field")
     initial = phase_space_state(segment)[cutoff]
-    step_count = len(segment.time) - cutoff - 1
+    return rollout_phase_space_from_state(model, initial_state=initial, time_grid=segment.time[cutoff:],
+        n_samples=n_samples, rng=rng, condition_field=condition_field)
+
+
+def rollout_phase_space_from_state(
+    model: AffineVelocityModel | TerrainAlignedVelocityModel | TerrainAlignedResidualModel,
+    *,
+    initial_state: np.ndarray,
+    time_grid: np.ndarray,
+    n_samples: int,
+    rng: np.random.Generator,
+    condition_field: ConditionField | None = None,
+) -> np.ndarray:
+    """The same rollout kernel with only known origin state and future times."""
+    initial = np.asarray(initial_state, dtype=float)
+    times = np.asarray(time_grid, dtype=float)
+    if (initial.shape != (4,) or not np.isfinite(initial).all() or times.ndim != 1
+            or len(times) < 2 or not np.isfinite(times).all() or np.any(np.diff(times) <= 0)):
+        raise PhaseSpaceError("phase-space origin/time grid is invalid")
+    if type(n_samples) is not int or n_samples < 2:
+        raise PhaseSpaceError("phase-space rollout requires at least two samples")
+    if model.condition_names and (condition_field is None or condition_field.names != model.condition_names):
+        raise PhaseSpaceError("rollout requires the registered spatial condition field")
+    step_count = len(times) - 1
     paths = np.empty((n_samples, step_count + 1, 4), dtype=float)
     paths[:, 0, :] = initial
-    for offset, index in enumerate(range(cutoff, len(segment.time) - 1), start=1):
-        elapsed = float(segment.time[index + 1] - segment.time[index])
+    for offset, index in enumerate(range(len(times) - 1), start=1):
+        elapsed = float(times[index + 1] - times[index])
         current = paths[:, offset - 1, :]
         conditions = (
-            condition_field.evaluate(current[:, :2], float(segment.time[index]))
+            condition_field.evaluate(current[:, :2], float(times[index]))
             if condition_field is not None
             else None
         )
@@ -900,15 +923,17 @@ def run_phase_space_benchmark(
             if condition_resolver is not None
             else None
         )
-        rollout = rollout_phase_space if composition is None else composition["predictor"]
-        paths = rollout(
-            model,
-            segment,
-            cutoff=cutoff,
-            n_samples=n_samples,
-            rng=rng,
-            condition_field=condition_field,
-        )
+        if composition is None:
+            paths = rollout_phase_space(model, segment, cutoff=cutoff, n_samples=n_samples,
+                rng=rng, condition_field=condition_field)
+        else:
+            # Evaluation owns future observations. The registered predictor
+            # receives only the causal origin and known future time grid.
+            initial = np.concatenate((segment.state[cutoff],
+                (segment.state[cutoff] - segment.state[cutoff - 1]) /
+                (segment.time[cutoff] - segment.time[cutoff - 1])))
+            paths = composition["predictor"](model, initial_state=initial, time_grid=segment.time[cutoff:],
+                n_samples=n_samples, rng=rng, condition_field=condition_field)
         predictions.append(
             PhaseSpacePrediction(
                 segment_id=segment.segment_id,

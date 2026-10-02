@@ -88,7 +88,8 @@ def combined_plan(entry, plan, registries, components, *, seed=None, config=None
     # allowed: their state/units/class still bind through the registry entry.
     _bounded_json({"config": config, "inputs": inputs}, nodes=65536, depth=32)
     for document in (config, inputs):
-        if type(document) is dict and any(name in document and document[name] != composition["profile"][name]
+        if type(document) is dict and any(name in document and (type(document[name]) is not type(composition["profile"][name])
+                or document[name] != composition["profile"][name])
                 for name in PROFILE_FIELDS):
             raise ResearchError("CONTRACT_MISMATCH", "adapter and component state/noise/dtype/device profiles disagree")
     for key in ("tensor_elements", "tensor_bytes"):
