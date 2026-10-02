@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
+import stat
 import subprocess
 
 from infrastructure.research_store import ResearchError, digest, encode
@@ -20,14 +22,34 @@ def paper_identity(root):
     paths = sorted(directory.glob("*.py"))
     if not paths or len(paths) > 64:
         raise ResearchError("CONTRACT_MISMATCH", "bounded paper implementation is required")
-    files = {}
+    parent = root / "scripts" / "__init__.py"
+    # Python executes a present parent initializer before scripts.pirc25. Its
+    # absence is also a frozen namespace-package decision, not an omission.
+    files = {"scripts/__init__.py": None}
+    if parent.exists() or parent.is_symlink():
+        paths.append(parent)
     for path in paths:
-        if path.is_symlink() or not path.resolve().is_relative_to(root) or path.stat().st_size > MAX_INPUT_BYTES:
+        if path.is_symlink() or not path.resolve().is_relative_to(root):
             raise ResearchError("UNAUTHORIZED_DATA", "paper source is outside the declared root/quota")
-        files[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_text(encoding="utf-8").encode()).hexdigest()
+        try:
+            information = path.stat()
+            if not stat.S_ISREG(information.st_mode) or information.st_size > MAX_INPUT_BYTES:
+                raise ResearchError("UNAUTHORIZED_DATA", "paper source is outside the declared root/quota")
+            with path.open("rb") as stream:
+                information = os.fstat(stream.fileno())
+                if not stat.S_ISREG(information.st_mode) or information.st_size > MAX_INPUT_BYTES:
+                    raise ResearchError("UNAUTHORIZED_DATA", "paper source is outside the declared root/quota")
+                content = stream.read(MAX_INPUT_BYTES + 1)
+            if len(content) > MAX_INPUT_BYTES:
+                raise ResearchError("UNAUTHORIZED_DATA", "paper source is outside the declared root/quota")
+            # Retain the previous universal-newline identity on Windows/Linux.
+            normalized = content.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise ResearchError("CONTRACT_MISMATCH", "paper source is not readable UTF-8") from exc
+        files[path.relative_to(root).as_posix()] = hashlib.sha256(normalized).hexdigest()
     head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], check=True,
                           capture_output=True, text=True, timeout=10).stdout.strip()
-    dirty = bool(subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--", "scripts/pirc25"],
+    dirty = bool(subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--", "scripts/pirc25", "scripts/__init__.py"],
                                check=True, capture_output=True, text=True, timeout=10).stdout.strip())
     return {"schema_version": "pirc25-paper-code-v1", "git_sha": head,
             "source_tree_hash": digest(files), "files": files, "source_tree_dirty": dirty}
