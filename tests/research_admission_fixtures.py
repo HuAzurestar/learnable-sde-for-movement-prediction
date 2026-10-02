@@ -72,7 +72,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
     return grant
 
 
-def attach_foreign_model(store, value, *, consumer=True, export=True):
+def attach_foreign_model(store, value, *, consumer=True, export=True, visibility="synthetic"):
     """Synthetic prior-study qualification imported for a propagation consumer."""
     package = store.manifest("package-" + value["admission"]["package_hash"])
     prereg = store.manifest("preregistration-" + package["preregistration_hash"])
@@ -81,7 +81,7 @@ def attach_foreign_model(store, value, *, consumer=True, export=True):
     plan_hash = PreregistrationGate(store).register_preregistration(source_plan, digest(source_plan))
     source_protocol["preregistration_hash"] = plan_hash
     EvaluationExposureLedger(store).register_protocol(source_protocol, digest(source_protocol))
-    model = {**package, "kind": "FrozenDynamicsPackage", "study_id": "model-study",
+    model = {**package, "kind": "FrozenDynamicsPackage", "study_id": "model-study", "visibility": visibility,
              "preregistration_hash": plan_hash, "protocol_hash": digest(source_protocol),
              "data_hash": data_binding(source_protocol), "input_hash": data_binding(source_protocol)}
     model.pop("qualification_hash")
@@ -89,7 +89,7 @@ def attach_foreign_model(store, value, *, consumer=True, export=True):
     def qualify(candidate, plan_reference):
         check = {"check_id": "contract", "outcome": "passed", "package_binding": package_binding(candidate),
                  "code_hash": candidate["code_hash"], "preregistration_hash": plan_reference}
-        artifact = store.artifact(encode(check), role="qualification", visibility="synthetic",
+        artifact = store.artifact(encode(check), role="qualification", visibility=candidate["visibility"],
                                   block_ids=["fixture-1"], study_id=candidate["study_id"])
         report = {"schema_version": "pirc25-qualification-v1", "status": "passed",
                   "package_binding": package_binding(candidate), "code_hash": candidate["code_hash"],
@@ -103,10 +103,11 @@ def attach_foreign_model(store, value, *, consumer=True, export=True):
     package.update(requires_frozen_model=True, model_hash=model_hash)
     value["admission"]["package_hash"] = qualify(package, package["preregistration_hash"])
     grant = {"authorization_id": "model-consumer", "study_id": "model-study",
+        "protocol_hash": digest(source_protocol),
         "expires_at": "2099-01-01T00:00:00+00:00", "evidence_hash": digest("synthetic model-owner permission"),
         "consumer_study_ids": [value["study_id"]] if consumer else [],
         "purposes": ["evaluate", "export"] if export else ["evaluate"],
-        "visibilities": ["synthetic"], "block_ids": ["fixture-1"]}
+        "visibilities": sorted({"synthetic", visibility}), "block_ids": ["fixture-1"]}
     store.authorize(grant)
     value["admission"]["model_authorization_id"] = grant["authorization_id"]
     value["admission"]["model_protocol_id"] = "model-inputs"

@@ -27,6 +27,9 @@ class ResearchQuery:
             raise ResearchError("UNAUTHORIZED_DATA", "session grant must cover the study matrix")
         if not {c.get("visibility", "restricted") for c in spec["cells"]} <= set(grant["visibilities"]):
             raise ResearchError("UNAUTHORIZED_DATA", "session cannot disclose this study visibility")
+        from infrastructure.research_visibility import study_visibility
+        if study_visibility(self.store.manifest, spec) not in grant["visibilities"]:
+            raise ResearchError("UNAUTHORIZED_DATA", "session cannot disclose the study source lineage")
         return grant
 
     def _objects(self, kind, grant):

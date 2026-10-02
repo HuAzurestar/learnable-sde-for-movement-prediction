@@ -445,6 +445,19 @@ class ResearchStore:
                        and purpose in authorization.get("purposes", [])
                        and metadata["visibility"] in authorization.get("visibilities", [])
                        and set(metadata["block_ids"]) <= set(authorization.get("block_ids", [])))
+            if allowed and metadata["role"] != "qualification":
+                # Legacy supervisors could mark derived results/checkpoints as
+                # synthetic despite restricted source packages. Recompute from
+                # immutable study authority; never rewrite old manifests.
+                try:
+                    study = self._manifest("study-" + metadata["study_id"])
+                except ResearchError as exc:
+                    if exc.code != "MISSING_INPUT":
+                        raise
+                    study = None  # Standalone owner-controlled artifacts.
+                if study is not None:
+                    from infrastructure.research_visibility import study_visibility
+                    allowed = study_visibility(self._manifest, study["spec"]) in authorization.get("visibilities", [])
             request = {"artifact_id": artifact_id, "purpose": purpose,
                        "authorization_hash": digest(authorization), "allowed": allowed}
             self._append("EXPOSURE_ALLOWED" if allowed else "EXPOSURE_DENIED", request)

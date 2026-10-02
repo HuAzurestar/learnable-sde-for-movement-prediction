@@ -90,7 +90,7 @@ def test_checkpoint_inherits_registered_source_visibility_before_admission(tmp_p
 
 @pytest.mark.parametrize("mode", ["fixture", "pilot", "formal"])
 @pytest.mark.parametrize("mutation", ["missing-grant", "missing-consumer", "expired", "wrong-study",
-    "wrong-protocol", "wrong-purpose", "missing-protocol-binding"])
+    "wrong-protocol", "missing-protocol", "wrong-purpose", "missing-protocol-binding"])
 def test_foreign_model_permission_is_required_in_every_mode(tmp_path, mode, mutation):
     store, value, registry, _ = prepared(tmp_path, formal=True, two_arms=True)
     attach_foreign_model(store, value, consumer=mutation != "missing-consumer")
@@ -99,6 +99,8 @@ def test_foreign_model_permission_is_required_in_every_mode(tmp_path, mode, muta
         value["admission"].pop("model_authorization_id")
     elif mutation == "wrong-protocol":
         value["admission"]["model_protocol_id"] = "inputs"
+    elif mutation == "missing-protocol":
+        value["admission"].pop("model_protocol_id")
     elif mutation not in {"missing-consumer"}:
         grant = store.manifest("authorization-model-consumer")
         grant["authorization_id"] = "modified-model-grant"
@@ -130,3 +132,20 @@ def test_authorized_foreign_model_is_bound_in_every_mode(tmp_path, mode):
     documents = store.manifest("admission-" + admissions[0])["documents"]
     assert documents["frozen_model"]["study_id"] == "model-study"
     assert documents["model_authorization"]["study_id"] == "model-study"
+
+
+@pytest.mark.parametrize("mode", ["fixture", "pilot", "formal"])
+def test_restricted_model_visibility_survives_synthetic_consumer_package(tmp_path, mode):
+    store, value, registry, grant = prepared(tmp_path, formal=True, two_arms=True)
+    attach_foreign_model(store, value, visibility="restricted")
+    value["admission"]["mode"] = mode
+    store.register(value, digest(value))
+    result = SharedRunner(store, registry).run_cell("synthetic", digest(value["cells"][0]), budget=BudgetSpec(10))
+    assert result["state"] == "SUCCEEDED"
+    assert store.manifest("artifact-" + result["artifact_id"])["visibility"] == "restricted"
+    for purpose in ("preview", "export"):
+        with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
+            store.read_artifact(result["artifact_id"], purpose=purpose, authorization=grant)
+    broad = {**grant, "authorization_id": "consumer-restricted", "visibilities": ["synthetic", "restricted"]}
+    store.authorize(broad)
+    assert store.read_artifact(result["artifact_id"], purpose="preview", authorization=broad)

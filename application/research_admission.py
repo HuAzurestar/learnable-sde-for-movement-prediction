@@ -86,6 +86,35 @@ class AdmissionGate:
             evidence.append({"artifact": metadata, "content": value})
         return report, evidence
 
+    def _model_documents(self, model, settings, spec, grant):
+        """Model consumption permission is mandatory independently of run mode."""
+        model_grant = grant
+        if model.get("study_id") != spec["study_id"]:
+            model_grant = self.store.manifest("authorization-" + settings["model_authorization_id"])
+            if spec["study_id"] not in model_grant.get("consumer_study_ids", []):
+                raise ResearchError("UNAUTHORIZED_DATA", "frozen model grant does not authorize this consumer study")
+        if (model_grant.get("study_id") != model.get("study_id")
+                or model_grant.get("protocol_hash") != model.get("protocol_hash")
+                or "evaluate" not in model_grant.get("purposes", [])
+                or datetime.fromisoformat(model_grant["expires_at"]) <= datetime.now(timezone.utc)
+                or model.get("visibility", "restricted") not in model_grant["visibilities"]):
+            raise ResearchError("UNAUTHORIZED_DATA", "model source grant scope, purpose or expiry differs")
+        if not isinstance(model.get("payload"), dict) or digest(model["payload"]) != model["output_hash"]:
+            raise ResearchError("UNQUALIFIED", "frozen model payload binding differs")
+        model_prereg = self._document("preregistration", model.get("preregistration_hash"))
+        model_protocol = self.store.manifest("protocol-" + settings["model_protocol_id"])
+        if (model_protocol.get("schema_version") != "pirc25-data-protocol-v1"
+                or model_protocol["study_id"] != model["study_id"]
+                or digest(model_protocol) != model["protocol_hash"]
+                or data_binding(model_protocol) != model["data_hash"]
+                or model_protocol.get("preregistration_hash") != model["preregistration_hash"]
+                or protocol_binding(model_protocol) not in model_prereg["protocol_bindings"]):
+            raise ResearchError("UNQUALIFIED", "frozen model source protocol binding differs")
+        model_report, model_evidence = self._qualification(model, model_prereg, model_grant)
+        return {"frozen_model": model, "model_preregistration": model_prereg,
+                "model_qualification": model_report, "model_qualification_evidence": model_evidence,
+                "model_authorization": model_grant, "model_protocol": model_protocol}
+
     def prepare(self, spec, cell, plugin, attempt_id, *, builtin_fixture=False, recovery_builder=None):
         from experiments.pirc25.affine import ROOT, code_hash, fixture_spec
         from experiments.pirc25.upstream import audit_inputs
@@ -154,6 +183,8 @@ class AdmissionGate:
                     or package.get("upstream_hash") != upstream["manifest_hash"]):
                 raise ResearchError("CONTRACT_MISMATCH", "frozen upstream binding changed")
             documents = {"protocol": protocol, "authorization": grant, "package": package, "upstream": upstream}
+            if model is not None:
+                documents.update(self._model_documents(model, settings, spec, grant))
             gate_evidence = {}
             if mode == "formal" or block["split_role"] in {"test", "final-eval"}:
                 with self.store.lock():
@@ -171,29 +202,6 @@ class AdmissionGate:
                     raise ResearchError("UNQUALIFIED", "formal execution requires the bound blind preregistration")
                 report, evidence = self._qualification(package, prereg, grant)
                 documents.update(qualification=report, qualification_evidence=evidence)
-                if model is not None:
-                    model_grant = grant
-                    if model.get("study_id") != spec["study_id"]:
-                        model_grant = self.store.manifest("authorization-" + settings["model_authorization_id"])
-                        if spec["study_id"] not in model_grant.get("consumer_study_ids", []):
-                            raise ResearchError("UNAUTHORIZED_DATA", "frozen model grant does not authorize this consumer study")
-                    if not isinstance(model.get("payload"), dict) or digest(model["payload"]) != model["output_hash"]:
-                        raise ResearchError("UNQUALIFIED", "frozen model payload binding differs")
-                    if model.get("visibility", "restricted") not in model_grant["visibilities"]:
-                        raise ResearchError("UNAUTHORIZED_DATA", "model source grant cannot disclose this package")
-                    model_prereg = self._document("preregistration", model.get("preregistration_hash"))
-                    model_protocol = self.store.manifest("protocol-" + settings["model_protocol_id"])
-                    if (model_protocol.get("schema_version") != "pirc25-data-protocol-v1"
-                            or model_protocol["study_id"] != model["study_id"]
-                            or digest(model_protocol) != model["protocol_hash"]
-                            or data_binding(model_protocol) != model["data_hash"]
-                            or model_protocol.get("preregistration_hash") != model["preregistration_hash"]
-                            or protocol_binding(model_protocol) not in model_prereg["protocol_bindings"]):
-                        raise ResearchError("UNQUALIFIED", "frozen model source protocol binding differs")
-                    model_report, model_evidence = self._qualification(model, model_prereg, model_grant)
-                    documents.update(frozen_model=model, model_preregistration=model_prereg,
-                                     model_qualification=model_report, model_qualification_evidence=model_evidence,
-                                     model_authorization=model_grant, model_protocol=model_protocol)
             purpose = settings.get("purpose")
             root = grant.get("data_root")
             if not isinstance(root, str) or not Path(root).is_absolute():

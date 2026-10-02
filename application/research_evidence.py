@@ -15,23 +15,14 @@ from application.research_cost import frozen_cost
 
 def evidence_visibility(store, spec, cells):
     """Source artifact metadata cannot be declassified by a synthetic cell."""
-    if any(cell.get("visibility") != "synthetic" for cell in spec["cells"]):
-        return "restricted"
+    from infrastructure.research_visibility import study_visibility, admission_visibility, combine_visibility
+    labels = [study_visibility(store.manifest, spec)]
     for cell in cells:
-        if (cell.get("artifact_id") and
-                store.manifest("artifact-" + cell["artifact_id"])["visibility"] != "synthetic"):
-            return "restricted"
-        documents = cell.get("admission", {}).get("documents", {})
-        for key in ("package", "frozen_model"):
-            if key in documents and documents[key].get("visibility", "restricted") != "synthetic":
-                return "restricted"
-        for key in ("qualification_evidence", "model_qualification_evidence"):
-            for item in documents.get(key, []):
-                artifact = item["artifact"]
-                if (artifact.get("visibility") != "synthetic" or
-                        store.manifest("artifact-" + artifact["artifact_id"])["visibility"] != "synthetic"):
-                    return "restricted"
-    return "synthetic"
+        if cell.get("artifact_id"):
+            labels.append(store.manifest("artifact-" + cell["artifact_id"])["visibility"])
+        if cell.get("admission"):
+            labels.append(admission_visibility(store.manifest, cell["admission"]))
+    return combine_visibility(labels)
 
 
 def authorize_study(store, study_id, authorization, purpose):

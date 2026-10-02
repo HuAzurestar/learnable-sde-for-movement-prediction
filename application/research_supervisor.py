@@ -110,7 +110,13 @@ class ResearchSupervisor:
                         # Supervisor-owned admission bindings added by the
                         # validator must be part of the published artifact.
                         content = encode(result)
-                        artifact = self.store.artifact(content, role="result", visibility=run["cell"].get("visibility", "restricted"),
+                        from infrastructure.research_visibility import study_visibility, admission_visibility, combine_visibility
+                        spec = self.store.manifest("study-" + run["study_id"])["spec"]
+                        visibility = study_visibility(self.store.manifest, spec)
+                        if result.get("admission_hash"):
+                            receipt = self.store.manifest("admission-" + result["admission_hash"])
+                            visibility = combine_visibility([visibility, admission_visibility(self.store.manifest, receipt)])
+                        artifact = self.store.artifact(content, role="result", visibility=visibility,
                             block_ids=[run["cell"]["block_id"]], study_id=run["study_id"])
                         outcome, artifact_id, error_code = "SUCCEEDED", artifact["artifact_id"], None
         except BaseException:

@@ -75,7 +75,8 @@ class SharedRecovery:
                  "resume_level": plugin.resume_level, "bindings": bindings(spec, cell),
                  "payload_hash": digest(state), "state": state}
         from infrastructure.research_store import encode
-        artifact = self.store.artifact(encode(value), role="checkpoint", visibility=cell.get("visibility", "restricted"),
+        from infrastructure.research_visibility import study_visibility
+        artifact = self.store.artifact(encode(value), role="checkpoint", visibility=study_visibility(self.store.manifest, spec),
                                       block_ids=[cell["block_id"]], study_id=run["study_id"])
         self.store.append("CHECKPOINT", {"attempt_id": attempt_id, "artifact_id": artifact["artifact_id"],
                                         "resume_level": plugin.resume_level, "bindings_hash": digest(value["bindings"])})
