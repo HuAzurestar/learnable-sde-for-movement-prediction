@@ -121,6 +121,10 @@ class ExperimentApplication:
             component_plan = plan_components(config, component_bindings, matrix_cells=matrix_cells)
             component_bindings = deepcopy(component_bindings)
             config = Config.from_dict(deepcopy(asdict(config)))
+            # Revalidate the detached combination, not only each constructor.
+            # Individually valid replacements cannot disagree with Config or
+            # retain the original aggregate provenance after a caller race.
+            component_plan = plan_components(config, component_bindings, matrix_cells=matrix_cells)
         config.validate()
         runtime = RunContext.create(
             config.seed,
