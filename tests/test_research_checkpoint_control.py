@@ -45,6 +45,75 @@ def test_invalid_environment_json_is_a_typed_protocol_error(monkeypatch):
         control.WorkerControl.from_environment()
 
 
+def test_huge_deadline_rejects_as_typed_control_error(tmp_path):
+    value = descriptor(tmp_path)
+    value["deadline"] = 2**2000
+    with pytest.raises(control.ControlError):
+        control.WorkerControl(value)
+
+
+def test_worker_descriptor_does_not_alias_owner_input(tmp_path):
+    value = descriptor(tmp_path)
+    worker = control.WorkerControl(value)
+    original = worker.descriptor["attempt_id"]
+    value["attempt_id"] = "different-attempt"
+    assert worker.descriptor["attempt_id"] == original
+
+
+def test_worker_rejects_nonhex_request_identity(tmp_path):
+    value = descriptor(tmp_path)
+    frame = {key: value[key] for key in ("schema_version", "attempt_id", "token", "deadline")}
+    frame["request_id"] = "z" * 32
+    control.write_frame(tmp_path / "checkpoint-request.json", frame, 16384)
+    with pytest.raises(control.ControlError):
+        control.WorkerControl(value).poll()
+
+
+@pytest.mark.parametrize("artifact_id", [[], "", "not-an-artifact"])
+def test_worker_rejects_invalid_ack_artifact_identity(tmp_path, artifact_id):
+    exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", time.monotonic() + 3, 4096)
+    exchange.request()
+    worker = control.WorkerControl(json.loads(exchange.environment()[control.ENVIRONMENT]))
+    worker.poll()
+    control.write_frame(tmp_path / "checkpoint-ack.json", {"schema_version": control.SCHEMA,
+        "request_id": exchange.request_id, "artifact_id": artifact_id}, 16384)
+    with pytest.raises(control.ControlError):
+        worker.save({}, {})
+
+
+def test_owner_cannot_acknowledge_without_request(tmp_path):
+    exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", time.monotonic() + 3, 4096)
+    with pytest.raises(control.ControlError):
+        exchange.acknowledge("a" * 64)
+    assert not exchange.accepted and not (tmp_path / "checkpoint-ack.json").exists()
+
+
+def test_failed_ack_publication_is_not_accepted(tmp_path, monkeypatch):
+    exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", time.monotonic() + 3, 4096)
+    exchange.request()
+    def unavailable(*args):
+        raise OSError("synthetic unavailable acknowledgement")
+    monkeypatch.setattr(control, "write_frame", unavailable)
+    with pytest.raises(OSError):
+        exchange.acknowledge("a" * 64)
+    assert exchange.accepted is False
+
+
+def test_unsupporting_actual_worker_cannot_inherit_other_checkpoint_control(tmp_path, monkeypatch):
+    import sys
+    from application.research_budget import BudgetSpec
+    from application.research_supervisor import ResearchSupervisor
+    from tests.test_research_budget import registered
+    monkeypatch.setenv(control.ENVIRONMENT, "stale-parent-channel")
+    store, attempts = registered(tmp_path)
+    result = ResearchSupervisor(store).run(attempts[0], lambda output: [sys.executable, "-c",
+        "import json,os,pathlib,sys; pathlib.Path(sys.argv[1]).write_text(json.dumps({'present':sys.argv[2] in os.environ}))",
+        str(output), control.ENVIRONMENT], BudgetSpec(5))
+    assert result["state"] == "SUCCEEDED"
+    output = json.loads((store.path / "artifacts" / result["artifact_id"]).read_bytes())
+    assert output["present"] is False, "new worker inherited another attempt's control descriptor"
+
+
 @pytest.mark.parametrize("fault", ["foreign-attempt", "wrong-token", "unrequested", "wrong-request", "over-byte-limit"])
 def test_owner_rejects_response_before_any_handler(tmp_path, fault):
     exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", time.monotonic() + 3, 4096)
