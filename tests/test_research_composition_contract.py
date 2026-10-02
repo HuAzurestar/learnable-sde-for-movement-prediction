@@ -182,3 +182,11 @@ def test_policy_is_snapshotted_before_child_planning(monkeypatch):
     monkeypatch.setattr(model, "plan_bound", mutate)
     with pytest.raises(ResearchError, match="CONTRACT_MISMATCH"):
         plan(plugin, bindings)
+
+
+@pytest.mark.parametrize("field,value", [("noise_dim", 2.0), ("state_dim", 4.0)])
+def test_adapter_profile_types_cannot_pass_by_numeric_equality(field, value):
+    plugin, bindings = fixture()
+    with pytest.raises(ResearchError, match="CONTRACT_MISMATCH"):
+        execution_binding(plugin.registry_entry, {}, {field: value}, matrix_cells=1,
+            components=bindings, component_registries=plugin.component_registries)
