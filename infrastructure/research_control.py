@@ -41,7 +41,7 @@ def canonical(value, limit):
             code = ord(character)
             if 0xD800 <= code <= 0xDFFF:
                 raise ControlError("checkpoint frame must be finite UTF-8 JSON")
-            if character in '\\"\\\\\b\f\n\r\t':
+            if character in ('"', '\\', '\b', '\f', '\n', '\r', '\t'):
                 charge(2)
             elif code < 0x20:
                 charge(6)
@@ -158,9 +158,12 @@ class CheckpointExchange:
         return value
 
     def acknowledge(self, artifact_id):
-        self.accepted = True
+        if (self.request_id is None or type(artifact_id) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", artifact_id) is None):
+            raise ControlError("checkpoint acknowledgement needs issued request and valid artifact")
         write_frame(self.directory / "checkpoint-ack.json", {"schema_version": SCHEMA,
             "request_id": self.request_id, "artifact_id": artifact_id}, 16384)
+        self.accepted = True
 
 
 class WorkerControl:
@@ -171,7 +174,9 @@ class WorkerControl:
                 or type(descriptor["attempt_id"]) is not str
                 or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", descriptor["attempt_id"]) is None
                 or type(descriptor["token"]) is not str or re.fullmatch(r"[0-9a-f]{64}", descriptor["token"]) is None
-                or type(descriptor["deadline"]) not in {float, int} or not math.isfinite(descriptor["deadline"])
+                or type(descriptor["deadline"]) not in {float, int}
+                or (type(descriptor["deadline"]) is int and descriptor["deadline"].bit_length() > 256)
+                or not math.isfinite(descriptor["deadline"])
                 or type(descriptor["byte_limit"]) is not int or not 0 < descriptor["byte_limit"] <= 64 * 1024 * 1024):
             raise ControlError("checkpoint control descriptor is invalid")
         self.descriptor = json.loads(canonical(descriptor, 16384))
@@ -199,7 +204,7 @@ class WorkerControl:
             return None
         if (type(value) is not dict or set(value) != {"schema_version", "attempt_id", "token", "request_id", "deadline"}
                 or any(value[key] != self.descriptor[key] for key in ("schema_version", "attempt_id", "token", "deadline"))
-                or type(value["request_id"]) is not str or len(value["request_id"]) != 32):
+                or type(value["request_id"]) is not str or re.fullmatch(r"[0-9a-f]{32}", value["request_id"]) is None):
             raise ControlError("checkpoint request identity differs")
         self.request = value
         return value
@@ -214,7 +219,8 @@ class WorkerControl:
             ack = read_frame(self.directory / "checkpoint-ack.json", 16384)
             if ack is not None:
                 if (type(ack) is not dict or set(ack) != {"schema_version", "request_id", "artifact_id"}
-                        or ack["schema_version"] != SCHEMA or ack["request_id"] != self.request["request_id"]):
+                        or ack["schema_version"] != SCHEMA or ack["request_id"] != self.request["request_id"]
+                        or type(ack["artifact_id"]) is not str or re.fullmatch(r"[0-9a-f]{64}", ack["artifact_id"]) is None):
                     raise ControlError("checkpoint acknowledgement identity differs")
                 return ack["artifact_id"]
             time.sleep(0.01)

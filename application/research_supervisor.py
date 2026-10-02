@@ -57,7 +57,7 @@ class ResearchSupervisor:
             raise
         start = self.monotonic()
         deadline = start + budget.job_seconds
-        from infrastructure.research_control import CheckpointExchange, ControlError
+        from infrastructure.research_control import CheckpointExchange, ControlError, ENVIRONMENT
         channel = CheckpointExchange(work, attempt_id, deadline, maximum_result_bytes) if checkpoint_handler is not None else None
         saved_checkpoint = None
         wrapper = Path(__file__).resolve().parents[1] / "infrastructure/research_worker.py"
@@ -122,13 +122,19 @@ class ResearchSupervisor:
         self.store.transition(attempt_id, "RUNNING")
         try:
             with (work / "worker.log").open("xb") as log:
+                worker_environment = dict(os.environ)
+                # An unsupported/new attempt must never inherit a parent or
+                # previous session's checkpoint directory/token/identity.
+                worker_environment.pop(ENVIRONMENT, None)
+                worker_environment.update(OMP_NUM_THREADS="1", MKL_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1")
+                if channel is not None:
+                    worker_environment.update(channel.environment())
                 process = subprocess.Popen(
                     [sys.executable, str(wrapper), str(heartbeat), str(deadline), *command],
                     stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT,
                     start_new_session=os.name != "nt",
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-                    env={**os.environ, "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1",
-                        **(channel.environment() if channel is not None else {})},
+                    env=worker_environment,
                 )
                 tree = ProcessTree(process)
                 deadline_monitor = threading.Timer(max(0, deadline - self.monotonic()), hard_stop)
