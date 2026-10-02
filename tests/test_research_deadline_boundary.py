@@ -155,14 +155,9 @@ def test_wrapper_self_containment_uses_native_pseudo_handle_and_fails_closed(mon
         assert calls == [("assign", 1234, ctypes.c_void_p(-1).value), ("close", 1234)]
 
 
-@pytest.mark.parametrize("stop_confirmed,slow_worker,diagnostic_unavailable",
-    [(True, True, False), (False, False, False), (False, True, False), (True, True, True)])
-def test_stale_control_pipe_close_cannot_mask_deadline_settlement(tmp_path, monkeypatch,
-                                                               stop_confirmed, slow_worker, diagnostic_unavailable):
+def _inject_stale_control_pipe(monkeypatch):
     import errno
     import application.research_supervisor as supervision
-    from infrastructure.process_tree import ProcessTree
-    store, attempts = registered(tmp_path)
     original_popen = supervision.subprocess.Popen
     class StaleStdin:
         def __init__(self, stream):
@@ -182,6 +177,16 @@ def test_stale_control_pipe_close_cannot_mask_deadline_settlement(tmp_path, monk
         process.stdin = StaleStdin(process.stdin)
         return process
     monkeypatch.setattr(supervision.subprocess, "Popen", popen)
+
+
+@pytest.mark.parametrize("stop_confirmed,slow_worker,diagnostic_unavailable",
+    [(True, True, False), (False, False, False), (False, True, False), (True, True, True)])
+def test_stale_control_pipe_close_cannot_mask_deadline_settlement(tmp_path, monkeypatch,
+                                                               stop_confirmed, slow_worker, diagnostic_unavailable):
+    import errno
+    from infrastructure.process_tree import ProcessTree
+    store, attempts = registered(tmp_path)
+    _inject_stale_control_pipe(monkeypatch)
     if diagnostic_unavailable:
         original_append = store.append
         def append(kind, *args, **kwargs):
@@ -222,3 +227,42 @@ def test_stale_control_pipe_close_cannot_mask_deadline_settlement(tmp_path, monk
     else:
         assert len(close_errors) == 1 and close_errors[0]["error_code"] == "PIPE_CLOSE_FAILED"
         assert close_errors[0]["tree_stop_confirmed"] is stop_confirmed
+
+
+@pytest.mark.parametrize("failure", ["settlement-io", "settlement-corruption", "diagnostic-corruption"])
+def test_optional_cleanup_never_swallows_authority_failures_or_restores_costs(tmp_path, monkeypatch, failure):
+    import errno
+    store, attempts = registered(tmp_path)
+    _inject_stale_control_pipe(monkeypatch)
+    supervisor = ResearchSupervisor(store)
+    if failure == "diagnostic-corruption":
+        original_append = store.append
+        def append(kind, *args, **kwargs):
+            if kind == "WORKER_CONTROL_CLOSE_FAILED":
+                raise ResearchError("CORRUPT_EVENT_LOG", "synthetic authority rejection")
+            return original_append(kind, *args, **kwargs)
+        monkeypatch.setattr(store, "append", append)
+    else:
+        def settle(*args, **kwargs):
+            if failure == "settlement-io":
+                raise OSError(errno.ENOSPC, "synthetic authority write failure")
+            raise ResearchError("CORRUPT_EVENT_LOG", "synthetic authority rejection")
+        monkeypatch.setattr(supervisor.budget, "settle", settle)
+    error_type = OSError if failure == "settlement-io" else ResearchError
+    with pytest.raises(error_type, match="synthetic authority"):
+        supervisor.run(attempts[0], lambda output: [sys.executable, "-c", "import time; time.sleep(20)"],
+                       BudgetSpec(0.2))
+    events = store.events()
+    assert not any(event["event_kind"] == "SETTLE" for event in events)
+    assert store.attempts()[attempts[0]]["state"] == "RUNNING"
+    assert supervisor.budget.balance("affine")["committed_ms"] == 200
+    reservation = next(event["payload"] for event in events if event["event_kind"] == "RESERVE")
+    stop = next(event for event in events if event["event_kind"] == "WORKER_TREE_STOPPED")
+    # Once the injected authority outage is removed, explicit actual stop
+    # evidence reconciles the full reservation, never a zero-cost restart.
+    monkeypatch.undo()
+    reconciled = supervisor.budget.recover_unknown(reservation["reservation_id"], stop_evidence_hash=stop["hash"])
+    assert reconciled["settled"] and reconciled["charged_ms"] == 200
+    assert store.attempts()[attempts[0]]["state"] == "INTERRUPTED"
+    assert supervisor.budget.balance("affine")["committed_ms"] == 200
+    assert supervisor.budget.balance("affine")["closed"]

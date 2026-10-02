@@ -58,6 +58,7 @@ class ResearchSupervisor:
         expired = threading.Event()
         monitor_errors = []
         outcome, artifact_id, error_code = "FAILED", None, "WORKER_FAILED"
+        control_close_error, control_close_recorded = False, False
         def stop_tree():
             try:
                 if tree is not None:
@@ -186,10 +187,19 @@ class ResearchSupervisor:
                     # Buffered GO may flush into a pipe already invalidated by
                     # the native deadline kill. This is not proof of live work
                     # or permission to replace the stop/settlement outcome.
-                    self.store.append("WORKER_CONTROL_CLOSE_FAILED", {
-                        "attempt_id": attempt_id, "reservation_id": reservation["reservation_id"],
-                        "error_code": "PIPE_CLOSE_FAILED", "tree_stop_confirmed": stop_confirmed,
-                        "errno": exc.errno if type(exc.errno) is int else None})
+                    control_close_error = True
+                    try:
+                        self.store.append("WORKER_CONTROL_CLOSE_FAILED", {
+                            "attempt_id": attempt_id, "reservation_id": reservation["reservation_id"],
+                            "error_code": "PIPE_CLOSE_FAILED", "tree_stop_confirmed": stop_confirmed,
+                            "errno": exc.errno if type(exc.errno) is int else None})
+                    except OSError:
+                        # Only this optional diagnostic is best-effort. The
+                        # authoritative settlement/transition below must still
+                        # propagate corruption or I/O failure, retaining costs.
+                        pass
+                    else:
+                        control_close_recorded = True
             elapsed = math.ceil((self.monotonic() - start) * 1000)
             if outcome == "SUCCEEDED" and (past_deadline() or elapsed > reservation["reserved_ms"]):
                 outcome, artifact_id, error_code = "TIMEOUT", None, "TIMEOUT"
@@ -205,5 +215,9 @@ class ResearchSupervisor:
                 self.store.append("ARM_CLOSED", {"arm_id": run["arm_id"], "reason": error_code})
                 elapsed = None
             self.store.transition(attempt_id, outcome, error_code=error_code, artifact_id=artifact_id)
-        return {"attempt_id": attempt_id, "state": outcome, "artifact_id": artifact_id,
-                "exit_code": 0 if outcome == "SUCCEEDED" else 1, "elapsed_ms": elapsed}
+        result = {"attempt_id": attempt_id, "state": outcome, "artifact_id": artifact_id,
+                  "exit_code": 0 if outcome == "SUCCEEDED" else 1, "elapsed_ms": elapsed}
+        if control_close_error:
+            result["cleanup"] = {"control_pipe_close_error": "PIPE_CLOSE_FAILED",
+                                 "diagnostic_recorded": control_close_recorded}
+        return result
