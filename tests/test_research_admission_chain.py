@@ -327,6 +327,11 @@ def test_formal_chain_roundtrip_and_resealed_tampering_rejected_by_tsde(tmp_path
     if horizons:
         value["cells"] = [{**cell, "horizon": horizon, "region": "whole"}
                           for horizon in horizons for cell in value["cells"]]
+        # This is still unfrozen fixture preparation. Keep the test's complete
+        # four-cell scientific matrix and explicitly plan it before register.
+        cell = value["cells"][0]
+        bind_fixture_execution(value, registry.resolve(cell["plugin_id"], cell["capability"],
+            version=cell["execution"]["component_version"]))
     store.register(value, digest(value))
     for cell in value["cells"]:
         assert SharedRunner(store, registry).run_cell("synthetic", digest(cell), budget=BudgetSpec(10))["state"] == "SUCCEEDED"

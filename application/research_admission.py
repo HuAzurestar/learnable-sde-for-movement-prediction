@@ -7,7 +7,6 @@ inputs. Hashes prove bindings, not the honesty of off-platform attestations.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import inspect
 import json
 from pathlib import Path
 

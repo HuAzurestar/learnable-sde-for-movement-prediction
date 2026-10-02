@@ -156,6 +156,8 @@ class ResearchSupervisor:
                         # Supervisor-owned admission bindings added by the
                         # validator must be part of the published artifact.
                         content = encode(result)
+                        if len(content) > maximum_result_bytes:
+                            raise ResearchError("RESOURCE_PLAN_REJECTED", "final result including owner provenance exceeds admitted byte quota")
                         from infrastructure.research_visibility import study_visibility, admission_visibility, combine_visibility
                         spec = self.store.manifest("study-" + run["study_id"])["spec"]
                         visibility = study_visibility(self.store.manifest, spec)

@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import re
 
 from infrastructure.research_store import ResearchError, digest
-from .research_registry import RegistryEntry, VersionedRegistry, implementation_hash, validate_entry
+from .research_registry import RegistryEntry, VersionedRegistry, validate_entry
 
 CAPABILITIES = {"exact-transition", "generic-rollout", "switching-transition", "coupled-level", "rare-event"}
 RESUME_LEVELS = {"exact", "numerical-tolerance", "chunk", "restart-only"}

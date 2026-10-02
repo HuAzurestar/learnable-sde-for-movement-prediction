@@ -17,7 +17,7 @@ def verified_reuse(store, attempt, spec, cell, plugin):
                    "artifact_id": attempt.get("artifact_id")}
         store._append("REUSE_CHECK_STARTED", request)
         try:
-            plan = execution_plan(spec, cell, plugin)
+            execution_plan(spec, cell, plugin)
             current = store._attempts().get(attempt["attempt_id"])
             run = store._manifest("run-" + attempt["run_id"])
             if (current != attempt or attempt["state"] != "SUCCEEDED"

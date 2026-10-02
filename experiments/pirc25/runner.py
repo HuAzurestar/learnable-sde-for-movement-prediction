@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import sys
-
 from application.research_budget import BudgetSpec
-from application.research_contracts import CapabilityRegistry, ExecutionPlugin
+from application.research_contracts import CapabilityRegistry
 from application.research_admission import AdmissionGate
-from application.research_execution import resolve_execution, execution_plan
+from application.research_execution import resolve_execution
 from infrastructure.research_store import ResearchStore, ResearchError, digest
 
 
