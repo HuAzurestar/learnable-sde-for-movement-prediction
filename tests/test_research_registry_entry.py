@@ -23,6 +23,16 @@ def other_builder(config):
     return {"value": config["paths"] + 1}
 
 
+def default_builder(config, offset=1):
+    return {"value": config["paths"] + offset}
+
+
+def captured_builder(offset):
+    def captured(config):
+        return {"value": config["paths"] + offset}
+    return captured
+
+
 def entry(command=builder, version="1.0.0"):
     core = api()
     count_schema = {"type": "integer", "minimum": 1, "maximum": 1_000_000}
@@ -143,3 +153,49 @@ def test_bad_resource_declarations_are_rejected_before_planning(mutation):
         value.resource_contract["limits"]["tensor_bytes"] = 2 ** 63
     with pytest.raises(ResearchError, match="CONTRACT_MISMATCH|RESOURCE_PLAN_REJECTED"):
         core.plan_resources(value, {"paths": 4, "steps": 3}, {"observations": 10}, matrix_cells=1)
+
+
+def test_default_and_capture_changes_cannot_reuse_the_same_registered_identity(monkeypatch):
+    core = api()
+    registry = core.VersionedRegistry()
+    value = entry(default_builder)
+    registry.register(value, default_builder)
+    monkeypatch.setattr(default_builder, "__defaults__", (2,))
+    with pytest.raises(ResearchError, match="IDENTITY_CONFLICT"):
+        registry.resolve(value.component_id, value.version)
+    first, second = captured_builder(1), captured_builder(2)
+    registry = core.VersionedRegistry()
+    registry.register(entry(first), first)
+    with pytest.raises(ResearchError, match="IDENTITY_CONFLICT"):
+        registry.register(entry(second), second)
+
+
+def test_plan_does_not_share_mutable_resource_policy_with_the_caller():
+    core, value = api(), entry()
+    plan = core.plan_resources(value, {"paths": 4, "steps": 3}, {"observations": 10}, matrix_cells=1)
+    before = deepcopy(plan)
+    value.resource_contract["limits"]["paths"] = 1
+    assert plan == before
+    assert plan["resource_plan_hash"] == digest({key: item for key, item in plan.items() if key != "resource_plan_hash"})
+
+
+@pytest.mark.parametrize("schema", [{"type": []}, {"type": "object", "properties": []},
+    {"type": "array", "items": {"type": {}}}, {"type": "object", "required": [False]},
+    {"type": "number", "minimum": True}])
+def test_malformed_schema_types_have_typed_rejections(schema):
+    with pytest.raises(ResearchError, match="CONTRACT_MISMATCH"):
+        api().validate_schema(schema)
+
+
+@pytest.mark.parametrize("field", ["component_kind", "resource_class", "resume_level"])
+def test_malformed_metadata_types_have_typed_rejections(field):
+    core = api()
+    with pytest.raises(ResearchError, match="CONTRACT_MISMATCH"):
+        core.VersionedRegistry().register(replace(entry(), **{field: []}), builder)
+
+
+def test_integer_schema_supports_real_128_bit_rng_state_but_rejects_unbounded_input():
+    core = api()
+    core.validate_value({"type": "integer", "minimum": 0}, 2 ** 127 + 19)
+    with pytest.raises(ResearchError, match="CONTRACT_MISMATCH"):
+        core.validate_value({"type": "integer", "minimum": 0}, 2 ** 4096)
