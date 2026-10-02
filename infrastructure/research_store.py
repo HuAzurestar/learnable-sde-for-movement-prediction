@@ -219,6 +219,10 @@ class ResearchStore:
         if not reason.strip():
             raise ResearchError("CONTRACT_MISMATCH", "recovery requires a reason")
         with self.lock():
+            if self._read_snapshot() is not None:
+                # Forensic recovery may replace the verified prefix. Keep the
+                # outer OS lock, but never append against the old read snapshot.
+                self._read_scope.snapshot = (os.getpid(), None)
             paths = sorted((self.path / "events").glob("*.json"))
             prefix = []
             previous = "0" * 64
