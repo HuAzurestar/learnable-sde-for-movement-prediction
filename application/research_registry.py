@@ -325,13 +325,17 @@ class RegistryEntry:
     resource_class: str
     resume_level: str
     resource_contract: dict
+    composition: dict | None = None
 
     def manifest(self):
-        return {"schema_version": "pirc25-registry-entry-v1", "component_id": self.component_id,
+        result = {"schema_version": "pirc25-registry-entry-v1", "component_id": self.component_id,
             "component_kind": self.component_kind, "version": self.version, "code_hash": self.code_hash,
             "config_schema": self.config_schema, "input_schema": self.input_schema, "output_schema": self.output_schema,
             "state_order": list(self.state_order), "units": list(self.units), "capabilities": sorted(self.capabilities),
             "resource_class": self.resource_class, "resume_level": self.resume_level, "resource_contract": self.resource_contract}
+        if self.composition is not None:
+            result["composition"] = self.composition
+        return result
 
 
 def validate_entry(entry):
@@ -355,11 +359,40 @@ def validate_entry(entry):
     for schema in (entry.config_schema, entry.input_schema, entry.output_schema):
         validate_schema(schema)
     validate_resource_contract(entry.resource_contract)
+    if entry.composition is not None:
+        if entry.component_kind != "execution-adapter":
+            reject("only an execution adapter declares a component composition")
+        validate_composition(entry.composition)
     if entry.resource_contract["counts"]["state_dim"] != {"constant": len(entry.state_order)}:
         reject("declared tensor state dimension differs from registered state order")
     _bounded_json(entry.manifest())
     if len(encode(entry.manifest())) > 65536:
         reject("registry metadata exceeds 64 KiB quota")
+
+
+def validate_composition(value):
+    """Small explicit role/capability vocabulary, with no code callbacks."""
+    _bounded_json(value)
+    roles = {"model", "trainer", "predictor"}
+    if (type(value) is not dict or set(value) != {"schema_version", "roles", "shared_configuration"}
+            or value.get("schema_version") != "pirc25-composition-contract-v1"
+            or type(value["shared_configuration"]) is not bool
+            or type(value["roles"]) is not dict or set(value["roles"]) != roles):
+        reject("complete explicit model/trainer/predictor composition required")
+    for role, rule in value["roles"].items():
+        if type(rule) is not dict or set(rule) != {"required_capabilities", "required_model_capabilities", "seed_path"}:
+            reject("component role requirement is invalid")
+        for name in ("required_capabilities", "required_model_capabilities"):
+            capabilities = rule[name]
+            if (type(capabilities) is not list or len(capabilities) > 64 or
+                    any(type(capability) is not str for capability in capabilities) or len(set(capabilities)) != len(capabilities)):
+                reject("role capability requirements must be bounded unique strings")
+            for capability in capabilities:
+                identifier(capability)
+        path = rule["seed_path"]
+        if path is not None and (type(path) is not list or not 0 < len(path) <= 8 or
+                any(type(key) is not str or not key or len(key) > 128 for key in path)):
+            reject("component seed path is invalid")
 
 
 def validate_resource_contract(contract):

@@ -61,6 +61,7 @@ class ExecutionPlugin:
     resume_level: str
     command_builder: object
     registry_entry: RegistryEntry | None = None
+    component_registries: dict | None = None
 
 
 class CapabilityRegistry:
@@ -71,6 +72,14 @@ class CapabilityRegistry:
     def register(self, plugin: ExecutionPlugin):
         validate_entry(plugin.registry_entry)
         entry = plugin.registry_entry
+        if entry.composition is not None:
+            from .registry import ComponentRegistry
+            if (type(plugin.component_registries) is not dict or
+                    set(plugin.component_registries) != {"model", "trainer", "predictor"} or
+                    any(not isinstance(registry, ComponentRegistry) for registry in plugin.component_registries.values())):
+                raise ResearchError("CONTRACT_MISMATCH", "declared composition needs real component registries")
+        elif plugin.component_registries is not None:
+            raise ResearchError("CONTRACT_MISMATCH", "component registries need a declared composition")
         if (not plugin.capabilities
                 or not plugin.capabilities <= CAPABILITIES or plugin.resume_level not in RESUME_LEVELS
                 or len(plugin.units) != len(plugin.state_order) or not callable(plugin.command_builder)
@@ -80,7 +89,8 @@ class CapabilityRegistry:
             raise ResearchError("CONTRACT_MISMATCH", "invalid or duplicate execution plugin")
         reference = self._registry.register(entry, plugin.command_builder)
         self._plugins[(plugin.plugin_id, entry.version)] = replace(plugin,
-            registry_entry=self._registry.resolve(plugin.plugin_id, entry.version).entry)
+            registry_entry=self._registry.resolve(plugin.plugin_id, entry.version).entry,
+            component_registries=dict(plugin.component_registries) if plugin.component_registries is not None else None)
         return reference
 
     def resolve(self, plugin_id: str, required_capability: str, *, version=None, entry_hash=None) -> ExecutionPlugin:

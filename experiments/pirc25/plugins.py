@@ -30,7 +30,9 @@ def affine_plugin(dimensions):
     def fixed_schema(values):
         return {"type": "object", "properties": {key: {"type": "string" if type(value) is str else "integer", "enum": [value]}
             for key, value in values.items()}, "required": sorted(values), "additionalProperties": False}
-    entry = RegistryEntry(component_id="affine-" + str(dimensions), component_kind="execution-adapter", version="1.0.0",
+    from .components import component_registries, composition_contract
+    registries = component_registries(dimensions)
+    entry = RegistryEntry(component_id="affine-" + str(dimensions), component_kind="execution-adapter", version="2.0.0",
         code_hash=implementation_hash(affine_command), config_schema=fixed_schema(config), input_schema=fixed_schema(inputs),
         output_schema={"type": "object", "required": ["schema_version", "status"], "properties": {
             "schema_version": {"type": "string", "enum": ["pirc25-result-v1"]},
@@ -43,5 +45,6 @@ def affine_plugin(dimensions):
                 {"name": "observations", "axes": ["observations", "state_dim"], "item_bytes": 8},
                 {"name": "model_covariances", "axes": ["mixtures", "state_dim", "state_dim"], "item_bytes": 8},
                 {"name": "fit_workspace", "axes": ["components", "observations", "state_dim", "state_dim"], "item_bytes": 8}],
-            "limits": {**dict(GLOBAL_LIMITS), "matrix_cells": 10000, "result_bytes": 4 * 1024 * 1024}})
-    return ExecutionPlugin(entry.component_id, capabilities, states, units, "restart-only", affine_command, entry)
+            "limits": {**dict(GLOBAL_LIMITS), "matrix_cells": 10000, "result_bytes": 4 * 1024 * 1024}},
+        composition=composition_contract(dimensions))
+    return ExecutionPlugin(entry.component_id, capabilities, states, units, "restart-only", affine_command, entry, registries)

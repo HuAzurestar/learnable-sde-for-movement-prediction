@@ -27,6 +27,9 @@ class ComponentRegistry(Generic[ConfigT, ComponentT]):
         """
         return self._versions.register(entry, builder)
 
+    def resolve_version(self, component_id, version, **compatibility):
+        return self._versions.resolve(component_id, version, **compatibility)
+
     def plan_bound(self, binding, *, matrix_cells, **compatibility):
         if (type(binding) is not dict or set(binding) != BINDING_FIELDS or
                 binding.get("schema_version") != "pirc25-execution-binding-v1"):

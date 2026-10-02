@@ -134,6 +134,11 @@ class AdmissionGate:
         self.store.publish("registry-entry-" + entry_hash, receipt["registry_entry"])
         self.store.publish("registry-version-" + digest({"id": plugin.plugin_id, "version": plugin.registry_entry.version}),
             {"component_id": plugin.plugin_id, "component_version": plugin.registry_entry.version, "registry_entry_hash": entry_hash})
+        for component in plan.get("composition", {}).get("entries", {}).values():
+            component_hash = digest(component)
+            self.store.publish("registry-entry-" + component_hash, component)
+            self.store.publish("registry-version-" + digest({"id": component["component_id"], "version": component["version"]}),
+                {"component_id": component["component_id"], "component_version": component["version"], "registry_entry_hash": component_hash})
         if builtin_fixture:
             expected = fixture_spec(spec["study_id"], cell["dimensions"], tuple(c["seed"] for c in spec["cells"]))
             if spec != expected or cell.get("visibility") != "synthetic":
@@ -249,6 +254,8 @@ class AdmissionGate:
                 raise ResearchError("CONTRACT_MISMATCH", "result resource/registry admission changed")
             validate_value(plugin.registry_entry.output_schema, result)
             validate_result(result, spec=spec, cell=cell, plugin=plugin)
+            if "composition" in plan and result.get("component_plan_hash") != plan["composition"]["component_plan_hash"]:
+                raise ResearchError("CONTRACT_MISMATCH", "worker result internal component provenance differs")
             if (receipt["mode"] == "formal" and
                     set(result["metrics"]) != set(receipt["documents"]["preregistration"]["primary_metrics"])):
                 raise ResearchError("UNQUALIFIED", "formal result primary metrics differ from frozen plan")

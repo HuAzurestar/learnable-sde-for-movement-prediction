@@ -37,24 +37,26 @@ def fixture_spec(study_id="affine-fixture", dimensions=4, seeds=(19,)):
     from application.research_execution import execution_binding
     plugin = affine_plugin(dimensions)
     config, inputs = affine_configuration(dimensions)
+    from .components import fixture_component_bindings
     for cell in value["cells"]:
         cell["resource_class"] = plugin.registry_entry.resource_class
-        cell["execution"] = execution_binding(plugin.registry_entry, config, inputs, matrix_cells=len(value["cells"]))
+        components = fixture_component_bindings(dimensions, cell["seed"], matrix_cells=len(value["cells"]),
+            registries=plugin.component_registries)
+        cell["execution"] = execution_binding(plugin.registry_entry, config, inputs, matrix_cells=len(value["cells"]),
+            components=components, component_registries=plugin.component_registries)
     return value
 
 
-def single_axis(seed):
+def single_axis(seed, *, component_bindings=None, matrix_cells=1):
     import torch
     from application.experiment import ExperimentApplication
     from application.synthetic import make_synthetic_em_data
-    from config import Components, Config
+    from .components import single_axis_config
     from domain import ForecastRequest, ModelContext, ObservationSet
 
-    config = Config(seed=seed, components=Components(model="I1", estimator="EM", inference="exact"),
-                    model={"I1": {"n_modes": 2, "kappa": 0.0, "dt_ref": 1.0}},
-                    protocol={"em": {"max_iter": 2}})
+    config = single_axis_config(seed)
     data, _ = make_synthetic_em_data(n_segments=4, length=10, dt=1.0, seed=seed)
-    app = ExperimentApplication.from_config(config)
+    app = ExperimentApplication.from_config(config, component_bindings=component_bindings, matrix_cells=matrix_cells)
     trained = app.train(data)
     request = ForecastRequest(torch.tensor([1.0, 0.25], dtype=torch.float64),
                               torch.tensor([1.0, 2.0], dtype=torch.float64), 8, ModelContext(regime=0))
@@ -85,10 +87,16 @@ def synthetic_cohort():
     return cohort
 
 
-def four_state(seed):
+def four_state(seed, *, component_bindings=None, matrix_cells=1, registries=None):
     from experiments.nex326.phase_space import load_phase_space_spec, run_phase_space_benchmark
 
-    report = run_phase_space_benchmark(synthetic_cohort(), load_phase_space_spec(), n_samples=8, seed=seed)
+    composition = None
+    benchmark = load_phase_space_spec()
+    if component_bindings is not None:
+        composition = {role: registry.create_bound(component_bindings[role], matrix_cells=matrix_cells)
+            for role, registry in registries.items()}
+        benchmark = component_bindings["model"]["config"]["benchmark"]
+    report = run_phase_space_benchmark(synthetic_cohort(), benchmark, n_samples=8, seed=seed, composition=composition)
     return {"metrics": report["metrics"], "forecast": {"per_segment": report["per_segment"]},
             "fit": report["model"], "source_schema": report["schema_version"]}
 
@@ -97,12 +105,19 @@ def execute(spec, cell):
     if spec["code_hash"] != code_hash() or spec["data_hash"] != digest(FIXTURE_VERSION):
         raise ValueError("fixture code/data hash changed")
     dimensions = cell["dimensions"]
-    output = single_axis(cell["seed"]) if dimensions == 1 else four_state(cell["seed"])
+    from .plugins import affine_plugin
+    from application.research_execution import execution_plan
+    plugin = affine_plugin(dimensions)
+    plan = execution_plan(spec, cell, plugin)
+    components = cell["execution"]["components"]
+    output = single_axis(cell["seed"], component_bindings=components, matrix_cells=len(spec["cells"])) if dimensions == 1 else four_state(
+        cell["seed"], component_bindings=components, matrix_cells=len(spec["cells"]), registries=plugin.component_registries)
     return {"schema_version": "pirc25-result-v1", "status": "SUCCEEDED",
             "spec_hash": digest(spec), "cell_hash": digest(cell), "protocol_hash": spec["protocol_hash"],
             "state_order": ["x", "vx"] if dimensions == 1 else ["x", "y", "vx", "vy"],
             "units": ["m", "m/s"] if dimensions == 1 else ["m", "m", "m/s", "m/s"],
             "time_unit": "s", "resume_level": "restart-only", "qualification": "fixture",
+            "component_plan_hash": plan["composition"]["component_plan_hash"],
             "metric_units": {key: ("legacy-state-norm" if dimensions == 1 else {
                 "position_energy_score_d2": "m", "position_hdr90_coverage": "1", "position_cep50_error": "m",
                 "velocity_endpoint_rmse": "m/s", "evaluation_segment_count": "count", "kinematic_identity_max_error": "m"
