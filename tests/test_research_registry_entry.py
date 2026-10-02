@@ -33,6 +33,24 @@ def captured_builder(offset):
     return captured
 
 
+GLOBAL_OFFSET = 1
+
+
+def global_builder(config):
+    return {"value": config["paths"] + GLOBAL_OFFSET}
+
+
+class ClassBuilder:
+    offset = 1
+
+    def __new__(cls, config):
+        return {"value": config["paths"] + cls.offset}
+
+
+class InheritedBuilder(ClassBuilder):
+    pass
+
+
 def entry(command=builder, version="1.0.0"):
     core = api()
     count_schema = {"type": "integer", "minimum": 1, "maximum": 1_000_000}
@@ -199,3 +217,48 @@ def test_integer_schema_supports_real_128_bit_rng_state_but_rejects_unbounded_in
     core.validate_value({"type": "integer", "minimum": 0}, 2 ** 127 + 19)
     with pytest.raises(ResearchError, match="CONTRACT_MISMATCH"):
         core.validate_value({"type": "integer", "minimum": 0}, 2 ** 4096)
+
+
+@pytest.mark.parametrize("command", [ClassBuilder, InheritedBuilder, global_builder])
+def test_live_class_inheritance_and_global_configuration_are_identity_content(command, monkeypatch):
+    core, registry = api(), api().VersionedRegistry()
+    value = entry(command)
+    registry.register(value, command)
+    if command is global_builder:
+        monkeypatch.setitem(globals(), "GLOBAL_OFFSET", 2)
+    else:
+        monkeypatch.setattr(ClassBuilder, "offset", 2)
+    with pytest.raises(ResearchError, match="IDENTITY_CONFLICT"):
+        registry.resolve(value.component_id, value.version)
+
+
+@pytest.mark.parametrize("profile", [{"state_order": 1}, {"units": True}, {"required_capabilities": 1}])
+def test_malformed_resolution_profile_is_typed(profile):
+    core, registry = api(), api().VersionedRegistry()
+    value = entry()
+    registry.register(value, builder)
+    with pytest.raises(ResearchError, match="CONTRACT_MISMATCH"):
+        registry.resolve(value.component_id, value.version, **profile)
+
+
+@pytest.mark.parametrize("value", ["\ud800", {"\ud800": 1}])
+def test_non_utf8_json_is_rejected_before_identity_encoding(value):
+    schema = {"type": "string"} if type(value) is str else {"type": "object", "additionalProperties": True}
+    with pytest.raises(ResearchError, match="CONTRACT_MISMATCH"):
+        api().validate_value(schema, value)
+
+
+def test_structurally_small_json_still_has_a_total_byte_quota():
+    with pytest.raises(ResearchError, match="CONTRACT_MISMATCH"):
+        api()._bounded_json(["x" * 4096] * 100, nodes=1000, string_length=4096, byte_limit=65536)
+
+
+def test_array_resource_sources_use_actual_lengths_without_allocating_tensors():
+    core, original = api(), entry()
+    value = replace(original, input_schema={"type": "object", "properties": {
+        "observations": {"type": "array", "items": {"type": "number"}}}, "required": ["observations"]})
+    value.resource_contract["counts"]["observations"] = {"input_length": ["observations"]}
+    plan = core.plan_resources(value, {"paths": 4, "steps": 3}, {"observations": [1.0, 2.0, 3.0]}, matrix_cells=1)
+    assert plan["counts"]["observations"] == 3
+    with pytest.raises(ResearchError, match="RESOURCE_PLAN_REJECTED"):
+        core.plan_resources(value, {"paths": 4, "steps": 3}, {"observations": [1.0] * 1001}, matrix_cells=1)
