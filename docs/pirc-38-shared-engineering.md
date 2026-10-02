@@ -366,6 +366,14 @@ These interfaces do not establish final acceptance. General plugin resource
 planning, acknowledged soft checkpoints, continuous-versus-resumed recovery and
 final paired-SHA review/merge evidence remain separate required audit items.
 
+Development UI renderer checks execute the actual JavaScript with Node.js
+(`node` on PATH); browser checks use the separately installed Playwright/Edge
+environment. A missing tool is a verification-environment failure, not a product
+pass. Partial preregistration remains diagnostic and renders unavailable fields,
+never a chosen default. Index rebuilding verifies one locked event chain and each
+manifest hash without a whole-chain reread per manifest; it remains a disposable
+projection, not an authority or permission source.
+
 ### Comparison dimensions
 
 Evidence export preserves each registered cell and its `comparison_dimensions`.

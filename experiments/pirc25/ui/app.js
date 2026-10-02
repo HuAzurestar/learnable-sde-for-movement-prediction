@@ -108,9 +108,10 @@ function adjudicationLines(aggregate, receipt) {
   const decision = aggregate.adjudication;
   if (!decision) return ['Formal adjudication unavailable in this frozen version; descriptive intervals are not a verdict.'];
   const policy = decision.adjudication_spec;
+  const declared = value => value ?? 'Unavailable';
   const lines = [`Frozen adjudication ${decision.compare_hash} · ${decision.status} · ${decision.qualification}`,
     'Full fixed comparison family; horizon display filtering does not recompute or subset the decision.'];
-  if (policy) lines.push(`Primary ${policy.primary_metric.name} (${policy.primary_metric.unit}) · ${policy.primary_metric.direction} · threshold ${policy.practical_threshold} · multiplicity ${policy.multiplicity} · seed pairing ${policy.seed_pairing}`);
+  if (policy) lines.push(`Primary ${declared(policy.primary_metric?.name)} (${declared(policy.primary_metric?.unit)}) · ${declared(policy.primary_metric?.direction)} · threshold ${declared(policy.practical_threshold)} · multiplicity ${declared(policy.multiplicity)} · seed pairing ${declared(policy.seed_pairing)}`);
   (decision.diagnostics || []).forEach(message => lines.push('Diagnostic: ' + message));
   decision.records.forEach(record => {
     lines.push(`${record.comparison_id}: ${record.verdict} · effect ${record.effect ?? 'Unavailable'} ${record.unit} · interval ${JSON.stringify(record.interval)} · confidence ${record.interval_confidence ?? 'Unavailable'}`);
@@ -127,12 +128,13 @@ function adjudicationView(aggregate, receipt) {
   section.append(text('p',`${decision.status} · ${decision.qualification} · ${decision.compare_hash}`));
   section.append(text('p','Full fixed comparison family. Changing the horizon display does not recompute intervals, weights, thresholds or multiplicity. NO_GAIN is not equivalence. Fixture verdicts are engineering tests, not scientific qualification.'));
   const policy = decision.adjudication_spec;
+  const declared = value => value ?? 'Unavailable';
   if (policy) section.append(table(['Frozen policy field','Value'],[
     ['Primary metric',JSON.stringify(policy.primary_metric)],['Practical threshold',policy.practical_threshold],
-    ['Interval',JSON.stringify(policy.interval)],['Multiplicity / fixed family',`${policy.multiplicity} / ${decision.family_size}`],
-    ['Independent unit / seed policy',`${policy.independent_unit} / ${policy.seed_aggregation} / ${policy.seed_pairing}`],
-    ['Minimum seeds / paired blocks',`${policy.minimum_seeds} / ${policy.minimum_paired_blocks}`],
-    ['Weighted strata',JSON.stringify(policy.contrasts)],['Failure / stopping rules',`${policy.missing_policy} / ${policy.attempt_policy} / ${policy.stopping_rule}`]
+    ['Interval',JSON.stringify(policy.interval)],['Multiplicity / fixed family',`${declared(policy.multiplicity)} / ${declared(decision.family_size)}`],
+    ['Independent unit / seed policy',`${declared(policy.independent_unit)} / ${declared(policy.seed_aggregation)} / ${declared(policy.seed_pairing)}`],
+    ['Minimum seeds / paired blocks',`${declared(policy.minimum_seeds)} / ${declared(policy.minimum_paired_blocks)}`],
+    ['Weighted strata',JSON.stringify(policy.contrasts)],['Failure / stopping rules',`${declared(policy.missing_policy)} / ${declared(policy.attempt_policy)} / ${declared(policy.stopping_rule)}`]
   ]));
   section.append(table(['Comparison','Verdict','Oriented benefit','Unit','Conditional interval','Confidence','Independent paired blocks','All-cell dispositions / denominator'], decision.records.map(record => [
     record.comparison_id,record.verdict,record.effect ?? 'Unavailable',record.unit,record.interval ? record.interval.join(' to ') : 'Unavailable',record.interval_confidence ?? 'Unavailable',record.independent_n,

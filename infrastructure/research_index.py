@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from .research_store import ResearchError, ResearchStore, encode
+from .research_store import ResearchError, ResearchStore, encode, digest, identifier
 
 
 class ResearchIndex:
@@ -72,7 +72,14 @@ class ResearchIndex:
                     for event in events:
                         if event["event_kind"] == "MANIFEST":
                             payload = event["payload"]
-                            value = self.store._manifest(payload["object_id"])
+                            # The complete chain was verified once under this
+                            # same writer lock. Validate each manifest against
+                            # that authoritative event, not a SQLite value or
+                            # another whole-chain scan for every object.
+                            object_id = identifier(payload["object_id"])
+                            value = self.store._json(self.store.path / "manifests" / (object_id + ".json"))
+                            if digest(value) != payload["sha256"]:
+                                raise ResearchError("CORRUPT_ARTIFACT", "manifest hash mismatch")
                             connection.execute("INSERT INTO objects VALUES (?, ?, ?, ?)", (
                                 payload["object_id"], payload["object_id"].split("-", 1)[0],
                                 encode(value).decode(), payload["sha256"],
