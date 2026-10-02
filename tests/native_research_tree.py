@@ -25,10 +25,14 @@ def source_hash(path):
     return hashlib.sha256(path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
 
 
-def exercise(containment, root, name, *, early_exit=False, deadline_seconds=5, watchdog=False):
+def exercise(containment, root, name, *, early_exit=False, deadline_seconds=5, watchdog=False,
+             blocked_heartbeat=False):
     directory = root / name
     directory.mkdir()
     marker, ready = directory / "escaped", directory / "started"
+    if blocked_heartbeat:
+        # No reader exists: the wrapper's real heartbeat open/write blocks.
+        os.mkfifo(directory / "heartbeat.json")
     child = ("import pathlib,sys,time; marker=pathlib.Path(sys.argv[1]); "
              "marker.with_name('started').touch(); "
              "time.sleep(max(0,float(sys.argv[2])-time.monotonic()) if len(sys.argv)>2 else 1.4); "
@@ -72,7 +76,10 @@ def exercise(containment, root, name, *, early_exit=False, deadline_seconds=5, w
         else:
             if early_exit:
                 assert process.wait(timeout=5) == 0
-            assert tree.active(), "native probe missed a live descendant"
+            if early_exit and os.name == "nt":
+                assert tree.wait_stopped(), "wrapper exit left descendants outside its nested job"
+            else:
+                assert tree.active(), "native probe missed a live descendant"
             tree.terminate()
             assert tree.wait_stopped(), "native kill did not confirm whole-tree stop"
             process.wait(timeout=5)
@@ -116,6 +123,9 @@ def main():
         checks = [exercise(containment, root, "live-parent-tree"),
                   exercise(containment, root, "stopped-leader-tree", early_exit=True),
                   exercise(containment, root, "wrapper-independent-watchdog", watchdog=True)]
+        if sys.platform.startswith("linux"):
+            checks.append(exercise(containment, root, "blocked-heartbeat-watchdog",
+                                   watchdog=True, blocked_heartbeat=True))
     if files != {name: source_hash(ROOT / name) for name in files}:
         raise ValueError("native implementation moved during verification")
     print(json.dumps({"status": "passed", "scope": "native containment and stdlib wrapper only",

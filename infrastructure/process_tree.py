@@ -50,7 +50,20 @@ def process_may_be_alive(pid):
 
 
 class ProcessTree:
+    @classmethod
+    def contain_current_process(cls):
+        """Windows wrapper owns a nested job before spawning descendants.
+
+        Its native deadline stop does not launch another external process.
+        The kill-on-close handle dies with the wrapper, including on exit 0.
+        """
+        if os.name != "nt":
+            raise OSError("current-process job containment requires Windows")
+        return cls(None)
+
     def __init__(self, process):
+        if process is None and os.name != "nt":
+            raise OSError("current-process job containment requires Windows")
         self.process = process
         self.job = None
         self._termination_sent = False
@@ -88,11 +101,13 @@ class ProcessTree:
             limits = Extended()
             limits.BasicLimitInformation.LimitFlags = 0x2000
             if (not self.job or not self.kernel.SetInformationJobObject(self.job, 9, ctypes.byref(limits), ctypes.sizeof(limits))
-                    or not self.kernel.AssignProcessToJobObject(self.job, wintypes.HANDLE(int(process._handle)))):
+                    or not self.kernel.AssignProcessToJobObject(self.job,
+                        wintypes.HANDLE(int(process._handle) if process is not None else -1))):
                 error = ctypes.get_last_error()
                 self.close()
-                process.kill()
-                process.wait()
+                if process is not None:
+                    process.kill()
+                    process.wait()
                 raise OSError(error, "cannot contain worker process tree")
 
     def terminate(self):
@@ -161,7 +176,8 @@ class ProcessTree:
         """Bounded observation after kill, never an extra computation grace."""
         until = time.monotonic() + timeout
         while True:
-            self.process.poll()
+            if self.process is not None:
+                self.process.poll()
             if not self.active():
                 return True
             if time.monotonic() >= until:

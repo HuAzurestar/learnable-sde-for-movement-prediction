@@ -117,3 +117,39 @@ def test_numeric_process_group_kill_is_not_reissued_after_stop(monkeypatch):
     tree.terminate()
     tree.terminate()
     assert calls == [(12345, 9)], "a reaped numeric group ID must not be signaled again"
+
+
+@pytest.mark.parametrize("assign_succeeds", [True, False])
+def test_wrapper_self_containment_uses_native_pseudo_handle_and_fails_closed(monkeypatch, assign_succeeds):
+    import ctypes
+    from types import SimpleNamespace
+    import infrastructure.process_tree as containment
+    calls = []
+    def assign(job, process):
+        calls.append(("assign", job, process.value))
+        return int(assign_succeeds)
+    def terminate(job, code):
+        calls.append(("terminate", job, code))
+        return 1
+    def close(job):
+        calls.append(("close", job))
+        return 1
+    kernel = SimpleNamespace(CreateJobObjectW=lambda *args: 1234,
+        SetInformationJobObject=lambda *args: 1, AssignProcessToJobObject=assign,
+        TerminateJobObject=terminate, CloseHandle=close,
+        QueryInformationJobObject=lambda *args: 1)
+    # Entire backend is synthetic: no real job, handle or foreign process.
+    monkeypatch.setattr(containment, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kwargs: kernel, raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+    if assign_succeeds:
+        tree = containment.ProcessTree.contain_current_process()
+        tree.terminate()
+        tree.terminate()
+        tree.close()
+        assert calls == [("assign", 1234, ctypes.c_void_p(-1).value),
+                         ("terminate", 1234, 124), ("close", 1234)]
+    else:
+        with pytest.raises(OSError, match="cannot contain worker process tree"):
+            containment.ProcessTree.contain_current_process()
+        assert calls == [("assign", 1234, ctypes.c_void_p(-1).value), ("close", 1234)]
