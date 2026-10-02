@@ -16,7 +16,7 @@ import inspect
 import json
 import math
 from pathlib import Path
-from types import CodeType, MappingProxyType
+from types import CodeType, MappingProxyType, ModuleType
 
 from infrastructure.research_store import ResearchError, digest, encode, identifier
 
@@ -33,12 +33,23 @@ def reject(detail, code="CONTRACT_MISMATCH"):
     raise ResearchError(code, detail)
 
 
-def _bounded_json(value, *, nodes=4096, depth=16, string_length=65536):
+def _bounded_json(value, *, nodes=4096, depth=16, string_length=65536, byte_limit=4 * 1024 * 1024):
     remaining = nodes
+    remaining_bytes = byte_limit
+    def charge_string(value):
+        nonlocal remaining_bytes
+        try:
+            remaining_bytes -= len(encode(value))
+        except UnicodeError as exc:
+            raise ResearchError("CONTRACT_MISMATCH", "JSON strings must be valid UTF-8") from exc
+        if remaining_bytes < 0:
+            reject("JSON value exceeds total byte quota")
     def visit(item, level):
-        nonlocal remaining
+        nonlocal remaining, remaining_bytes
         remaining -= 1
-        if remaining < 0 or level > depth:
+        # Conservative separator/container allowance, independent of nesting.
+        remaining_bytes -= 8
+        if remaining < 0 or level > depth or remaining_bytes < 0:
             reject("JSON declaration or value exceeds structural quota")
         if type(item) is dict:
             if len(item) > remaining:
@@ -46,6 +57,7 @@ def _bounded_json(value, *, nodes=4096, depth=16, string_length=65536):
             for key, child in item.items():
                 if type(key) is not str or len(key) > 128:
                     reject("JSON keys must be bounded strings")
+                charge_string(key)
                 visit(child, level + 1)
         elif type(item) is list:
             if len(item) > remaining:
@@ -55,17 +67,22 @@ def _bounded_json(value, *, nodes=4096, depth=16, string_length=65536):
         elif type(item) is str:
             if len(item) > string_length:
                 reject("JSON string exceeds structural quota")
+            charge_string(item)
         elif type(item) is int:
             # PCG RNG checkpoint state contains genuine unsigned 128-bit values.
             # This does not relax independently checked count/allocation quotas.
             if item.bit_length() > 256:
                 reject("JSON integer exceeds bounded checkpoint range")
+            remaining_bytes -= len(str(item))
         elif type(item) is float:
             if not math.isfinite(item):
                 reject("JSON number must be finite")
+            remaining_bytes -= len(encode(item))
         elif item is not None and type(item) is not bool:
             reject("declarations and values must contain only finite JSON types")
     visit(value, 0)
+    if remaining_bytes < 0:
+        reject("JSON value exceeds total byte quota")
 
 
 def validate_schema(schema):
@@ -120,7 +137,7 @@ def validate_schema(schema):
 
 def validate_value(schema, value):
     validate_schema(schema)
-    _bounded_json(value, nodes=2_000_000, depth=32, string_length=1024 * 1024)
+    _bounded_json(value, nodes=2_000_000, depth=32, string_length=1024 * 1024, byte_limit=64 * 1024 * 1024)
     def visit(node, item):
         kind = node["type"]
         valid = {"object": type(item) is dict, "array": type(item) is list,
@@ -177,23 +194,28 @@ def _code_identity(code):
     def visit(value, level):
         if level > 16 or len(value.co_code) > 65536 or len(value.co_consts) > remaining:
             reject("implementation code exceeds structural quota")
-        return {"bytecode": value.co_code.hex(), "constants": [constant(item, level + 1) for item in value.co_consts],
+        result = {"bytecode": value.co_code.hex(), "constants": [constant(item, level + 1) for item in value.co_consts],
             "names": list(value.co_names), "variables": list(value.co_varnames), "freevars": list(value.co_freevars),
             "cellvars": list(value.co_cellvars), "argcount": value.co_argcount, "posonly": value.co_posonlyargcount,
             "kwonly": value.co_kwonlyargcount, "flags": value.co_flags}
+        _bounded_json(result, nodes=16384, depth=48, string_length=131072)
+        return result
     return visit(code, 0)
 
 
-def _function_identity(function):
+def _function_identity(function, owner=None):
     # Captured configuration is implementation content, not merely source text.
     # Runtime stores/generators must instead be explicit execution context;
     # opaque closure objects cannot silently escape an immutable registration.
+    code = _code_identity(function.__code__)
     remaining = 4096
     def capture(value, level=0):
         nonlocal remaining
         remaining -= 1
         if remaining < 0 or level > 16:
             reject("implementation bindings exceed structural quota")
+        if owner is not None and value is owner:
+            return {"declaring_class": owner.__module__ + "." + owner.__qualname__}
         if type(value) in {tuple, list}:
             if len(value) > remaining:
                 reject("implementation bindings exceed structural quota")
@@ -206,26 +228,82 @@ def _function_identity(function):
         return value
     bindings = {"defaults": capture(function.__defaults__), "kwdefaults": capture(function.__kwdefaults__),
         "closure": [capture(cell.cell_contents) for cell in (function.__closure__ or ())]}
-    return {"code": _code_identity(function.__code__), "bindings": bindings}
+    global_configuration = {}
+    for name in function.__code__.co_names:
+        if name not in function.__globals__:
+            continue
+        value = function.__globals__[name]
+        if isinstance(value, ModuleType):
+            # Imported modules and dependencies are additionally bound by the
+            # StudySpec/environment; this is not a Python sandbox.
+            global_configuration[name] = {"module": value.__name__}
+        elif inspect.isfunction(value):
+            global_configuration[name] = {"function": value.__module__ + "." + value.__qualname__,
+                "code": _code_identity(value.__code__), "defaults": capture(value.__defaults__),
+                "kwdefaults": capture(value.__kwdefaults__)}
+        elif inspect.isclass(value):
+            global_configuration[name] = {"class": value.__module__ + "." + value.__qualname__}
+        else:
+            global_configuration[name] = capture(value)
+    _bounded_json(bindings)
+    _bounded_json(global_configuration)
+    result = {"code": code, "bindings": bindings, "globals": global_configuration}
+    _bounded_json(result, nodes=32768, depth=48, string_length=131072)
+    return result
+
+
+def _class_identity(builder):
+    bases = builder.__mro__[:-1]  # object has native, rather than declared code.
+    if len(bases) > 16:
+        reject("factory inheritance exceeds structural quota")
+    result = []
+    remaining_bytes = 16 * 1024 * 1024
+    for base in bases:
+        attributes = vars(base)
+        if len(attributes) > 256:
+            reject("factory attributes exceed structural quota")
+        methods, constants = {}, {}
+        for key, value in attributes.items():
+            if key in {"__dict__", "__weakref__", "__module__", "__qualname__", "__doc__"}:
+                continue
+            value = value.__func__ if isinstance(value, (staticmethod, classmethod)) else value
+            if inspect.isfunction(value):
+                methods[key] = _function_identity(value, base)
+            elif isinstance(value, property):
+                methods[key] = {name: _function_identity(function, base) if function else None
+                    for name, function in (("get", value.fget), ("set", value.fset), ("delete", value.fdel))}
+            else:
+                normalized = list(value) if type(value) is tuple else value
+                _bounded_json(normalized)
+                constants[key] = normalized
+            remaining_bytes -= len(encode(methods.get(key, constants.get(key)))) + len(encode(key))
+            if remaining_bytes < 0:
+                reject("factory identity exceeds aggregate byte quota")
+        result.append({"class": base.__module__ + "." + base.__qualname__, "methods": methods, "constants": constants})
+    return result
 
 
 def implementation_hash(builder):
     """Never invokes a factory; excludes local absolute filenames from identity."""
     try:
-        source = inspect.getsource(builder)
         path = Path(inspect.getsourcefile(builder))
-        if len(source.encode("utf-8")) > 65536 or path.stat().st_size > 4 * 1024 * 1024:
+        if path.stat().st_size > 4 * 1024 * 1024:
+            reject("inspectable implementation exceeds source quota")
+        with path.open("rb") as stream:
+            defining_module = stream.read(4 * 1024 * 1024 + 1)
+        if len(defining_module) > 4 * 1024 * 1024:
+            reject("inspectable implementation exceeds source quota")
+        source = inspect.getsource(builder)
+        if len(source.encode("utf-8")) > 65536:
             reject("inspectable implementation exceeds source quota")
         if inspect.isclass(builder):
-            methods = {key: value.__func__ if isinstance(value, (staticmethod, classmethod)) else value
-                       for key, value in vars(builder).items()}
-            codes = {key: _function_identity(value) for key, value in methods.items() if inspect.isfunction(value)}
+            codes = {"classes": _class_identity(builder)}
         else:
             if not inspect.isfunction(builder):
                 reject("registered factories must be inspectable functions or classes, not opaque bound instances")
             codes = {"callable": _function_identity(builder)}
         return digest({"source": source, "module": builder.__module__, "qualname": builder.__qualname__,
-            "defining_module_hash": hashlib.sha256(path.read_text(encoding="utf-8").encode()).hexdigest(), "codes": codes})
+            "defining_module_hash": hashlib.sha256(defining_module.decode("utf-8").replace("\r\n", "\n").encode()).hexdigest(), "codes": codes})
     except (OSError, TypeError, AttributeError, ValueError) as exc:
         if isinstance(exc, ResearchError):
             raise
@@ -296,7 +374,7 @@ def validate_resource_contract(contract):
         if type(limit) is not int or not 0 < limit <= GLOBAL_LIMITS[name]:
             reject("component resource quota exceeds shared hard limits", "RESOURCE_PLAN_REJECTED")
     for source in counts.values():
-        if type(source) is not dict or len(source) != 1 or next(iter(source)) not in {"constant", "config", "input"}:
+        if type(source) is not dict or len(source) != 1 or next(iter(source)) not in {"constant", "config", "input", "config_length", "input_length"}:
             reject("resource count needs a literal or a declared config/input path")
         kind, value = next(iter(source.items()))
         if kind == "constant":
@@ -366,8 +444,8 @@ class VersionedRegistry:
                 any(type(value) is not str for value in required_capabilities) or
                 not set(required_capabilities) <= entry.capabilities or
                 (entry_hash is not None and entry_hash != registration.entry_hash) or
-                (state_order is not None and tuple(state_order) != entry.state_order) or
-                (units is not None and tuple(units) != entry.units) or
+                (state_order is not None and (type(state_order) not in {tuple, list} or tuple(state_order) != entry.state_order)) or
+                (units is not None and (type(units) not in {tuple, list} or tuple(units) != entry.units)) or
                 (resource_class is not None and resource_class != entry.resource_class) or
                 (resume_level is not None and resume_level != entry.resume_level)):
             reject("requested component capability, identity or compatibility differs")
@@ -382,6 +460,7 @@ def plan_resources(entry, config, inputs, *, matrix_cells):
     entry = RegisteredComponent(encode(entry.manifest()), None).entry
     validate_value(entry.config_schema, config)
     validate_value(entry.input_schema, inputs)
+    config, inputs = json.loads(encode(config)), json.loads(encode(inputs))
     contract = entry.resource_contract
     limits = contract["limits"]
     if type(matrix_cells) is not int or not 0 < matrix_cells <= limits["matrix_cells"]:
@@ -390,12 +469,16 @@ def plan_resources(entry, config, inputs, *, matrix_cells):
     for name, source in contract["counts"].items():
         kind, value = next(iter(source.items()))
         if kind != "constant":
-            target = config if kind == "config" else inputs
+            target = config if kind in {"config", "config_length"} else inputs
             for key in value:
                 if type(target) is not dict or key not in target:
                     reject("declared resource count input is absent")
                 target = target[key]
             value = target
+            if kind.endswith("_length"):
+                if type(value) is not list:
+                    reject("resource length source must be an actual registered array")
+                value = len(value)
         if type(value) is not int or value < 0 or (name != "state_dim" and value > limits[name]):
             reject("path/step/mixture/component/input count exceeds quota", "RESOURCE_PLAN_REJECTED")
         counts[name] = value
