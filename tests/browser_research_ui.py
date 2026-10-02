@@ -131,8 +131,8 @@ def check_managed_adjudication(browser, root, expect):
     """Actual budgeted worker output, not a handcrafted browser verdict."""
     import xml.etree.ElementTree as ET
     from application.research_query import ResearchQuery
-    from tests.test_research_comparison import source, compute
-    managed = source.__wrapped__(root / "managed")
+    from tests.test_research_comparison import comparison_source, compute
+    managed = comparison_source(root / "managed", horizons=(1, 2))
     store = managed[0]
     result = compute(managed)
     assert result["state"] == "SUCCEEDED"
@@ -146,7 +146,7 @@ def check_managed_adjudication(browser, root, expect):
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(f"http://127.0.0.1:{server.server_port}/#session={server.session_token}")
-        expect(page.locator("#results tbody tr")).to_have_count(8)
+        expect(page.locator("#results tbody tr")).to_have_count(16)
         page.get_by_role("button", name="Comparisons & evidence", exact=True).click()
         row = page.locator("#results tbody tr").filter(has_text=result["comparison"]["aggregate_hash"])
         row.get_by_role("button", name="Compare & export", exact=True).click()
@@ -186,6 +186,20 @@ def check_managed_adjudication(browser, root, expect):
         assert metadata["computation_ref"] == data["aggregate"]["computation_ref"]
         assert metadata['cost_source'] == 'resolve-computation-ref-after-settlement'
         assert "benefit 1.0 m" in "".join(figure.itertext()) or "benefit 1 m" in "".join(figure.itertext())
+        for horizon in ('1', '2', 'all'):
+            page.locator('#comparison-horizon').select_option(horizon)
+            selected = next(entry for entry in data['package']['figures']
+                            if (entry['horizon'] or 'all') == horizon)
+            expect(frozen_image).to_have_attribute('data-artifact-id', selected['artifact_id'])
+            expect(frozen_image).to_have_attribute('data-horizon', horizon)
+            page.wait_for_function("document.querySelector('#comparison-figure img')?.naturalWidth > 0")
+            assert section.inner_text() == decision_before
+            expect(page.locator('#comparison-table tbody tr')).to_have_count(4 if horizon == 'all' else 2)
+            with page.expect_download() as downloaded:
+                page.get_by_role('button', name='Export comparison figure', exact=True).click()
+            assert Path(downloaded.value.path()).read_bytes() == store.read_artifact(
+                selected['artifact_id'], purpose='export', authorization=managed[2])
+            assert downloaded.value.suggested_filename == selected['filename']
         assert not errors, errors
         page.screenshot(path=str(root / "managed-adjudication.png"), full_page=True)
         page.close()

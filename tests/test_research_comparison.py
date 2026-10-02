@@ -19,6 +19,11 @@ from tests.test_research_store import spec
 
 @pytest.fixture
 def source(tmp_path):
+    return comparison_source(tmp_path)
+
+
+def comparison_source(tmp_path, *, horizons=None):
+    """Freeze optional strata before registration; never mutate an executed study."""
     store = ResearchStore(tmp_path / "runtime", "comparison", initialize=True)
     value = spec()
     value["arms"].append({**value["arms"][0], "arm_id": "candidate", "model_family_id": "candidate"})
@@ -26,6 +31,14 @@ def source(tmp_path):
         "failure_policy": "retain-and-exclude-incomplete-blocks", "adjudication_spec": policy(), "adjudication_hash": digest(policy())}
     value["cells"] = [{"arm_id": arm, "seed": seed, "block_id": block, "visibility": "synthetic"}
                       for arm in ("affine", "candidate") for block in ("block-1", "block-2") for seed in (1, 2)]
+    if horizons is not None:
+        assert horizons and len(set(horizons)) == len(horizons)
+        value['cells'] = [{**cell, 'horizon': horizon} for cell in value['cells'] for horizon in horizons]
+        frozen = value['comparison_plan']['adjudication_spec']
+        frozen['contrasts'][0]['stratum_weights'] = [
+            {'comparison_dimensions': {'horizon': horizon}, 'weight': 1 / len(horizons)}
+            for horizon in horizons]
+        value['comparison_plan']['adjudication_hash'] = digest(frozen)
     store.register(value, digest(value))
     grant = {"authorization_id": "viewer", "study_id": "synthetic", "expires_at": "2099-01-01T00:00:00+00:00",
         "evidence_hash": digest("synthetic comparison permission"), "purposes": ["preview", "export"],
