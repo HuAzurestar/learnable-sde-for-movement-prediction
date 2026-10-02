@@ -42,10 +42,8 @@ class SharedRunner:
         run_id = self.store.register_run(study_id, cell)
         for attempt in self.store.attempts().values():
             if attempt["run_id"] == run_id and attempt["state"] == "SUCCEEDED":
-                if not any(e["event_kind"] == "ADMISSION" and e["payload"].get("attempt_id") == attempt["attempt_id"]
-                           for e in self.store.events()):
-                    raise ResearchError("UNQUALIFIED", "legacy success has no input admission evidence")
-                return {**attempt, "reused": True, "exit_code": 0}
+                from application.research_reuse import verified_reuse
+                return verified_reuse(self.store, attempt, spec, cell, plugin)
         attempt = self.store.new_attempt(run_id, parent_attempt_id=parent_attempt_id, reason=reason)
         return AdmissionGate(self.store).run(attempt, spec, cell, plugin,
             lambda output: plugin.command_builder(output, spec, cell), budget, builtin_fixture=self.builtin_fixture)

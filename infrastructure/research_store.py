@@ -429,6 +429,23 @@ class ResearchStore:
             self._append("MANIFEST", {"object_id": object_id, "sha256": manifest_hash}, "manifest-" + digest([object_id, manifest_hash]))
         return metadata
 
+    def _verified_artifact_content(self, metadata):
+        """Integrity primitive; caller holds authority lock and controls access."""
+        artifact_id = metadata["artifact_id"]
+        if not isinstance(artifact_id, str) or not re.fullmatch(r"[0-9a-f]{64}", artifact_id):
+            raise ResearchError("CORRUPT_ARTIFACT", "artifact identity is invalid")
+        path = (self.path / "artifacts" / artifact_id).resolve()
+        if not path.is_relative_to((self.path / "artifacts").resolve()):
+            raise ResearchError("UNAUTHORIZED_DATA", "artifact path escapes root")
+        try:
+            content = path.read_bytes()
+        except FileNotFoundError as exc:
+            raise ResearchError("MISSING_INPUT", "published artifact bytes are missing") from exc
+        if (metadata.get("sha256") != artifact_id or len(content) != metadata["size_bytes"]
+                or hashlib.sha256(content).hexdigest() != artifact_id):
+            raise ResearchError("CORRUPT_ARTIFACT", "artifact hash mismatch")
+        return content
+
     def read_artifact(self, artifact_id: str, *, purpose: str, authorization: dict) -> bytes:
         if not re.fullmatch(r"[0-9a-f]{64}", artifact_id):
             raise ResearchError("UNAUTHORIZED_DATA", "invalid artifact ID")
@@ -464,13 +481,8 @@ class ResearchStore:
             if not allowed:
                 raise ResearchError("UNAUTHORIZED_DATA", "artifact disclosure not authorized")
             self._append("READ_STARTED", request)
-            path = (self.path / "artifacts" / artifact_id).resolve()
-            if not path.is_relative_to((self.path / "artifacts").resolve()):
-                raise ResearchError("UNAUTHORIZED_DATA", "artifact path escapes root")
             try:
-                content = path.read_bytes()
-                if len(content) != metadata["size_bytes"] or hashlib.sha256(content).hexdigest() != artifact_id:
-                    raise ResearchError("CORRUPT_ARTIFACT", "artifact hash mismatch")
+                content = self._verified_artifact_content(metadata)
             except (OSError, ResearchError):
                 self._append("READ_FAILED", request)
                 raise
