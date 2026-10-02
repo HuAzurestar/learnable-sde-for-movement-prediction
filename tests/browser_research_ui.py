@@ -127,6 +127,68 @@ def check_failure_states(browser, root, expect):
         thread.join(timeout=5)
 
 
+def check_managed_adjudication(browser, root, expect):
+    """Actual budgeted worker output, not a handcrafted browser verdict."""
+    import xml.etree.ElementTree as ET
+    from application.research_query import ResearchQuery
+    from tests.test_research_comparison import source, compute
+    managed = source.__wrapped__(root / "managed")
+    store = managed[0]
+    result = compute(managed)
+    assert result["state"] == "SUCCEEDED"
+    data = ResearchQuery(store, "viewer").comparison(result["comparison"]["aggregate_hash"])
+    server = make_server(store, "viewer")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        page = browser.new_page()
+        page.set_default_timeout(6000)
+        errors = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.goto(f"http://127.0.0.1:{server.server_port}/#session={server.session_token}")
+        expect(page.locator("#results tbody tr")).to_have_count(8)
+        page.get_by_role("button", name="Comparisons & evidence", exact=True).click()
+        row = page.locator("#results tbody tr").filter(has_text=result["comparison"]["aggregate_hash"])
+        row.get_by_role("button", name="Compare & export", exact=True).click()
+        section = page.locator("#comparison-adjudication")
+        for declared in ("GAIN", "engineering-fixture", "bonferroni", "independent-within-block", "NO_GAIN is not equivalence"):
+            expect(section).to_contain_text(declared)
+        verdict_row = section.locator("table").nth(1).locator("tbody tr")
+        expect(verdict_row).to_have_count(1)
+        expect(verdict_row.locator("td").nth(2)).to_have_text("1")
+        expect(verdict_row.locator("td").nth(4)).to_have_text("1 to 1")
+        expect(verdict_row.locator("td").nth(6)).to_have_text("2")
+        expect(section).to_contain_text(str(data["computation_receipt"]["cost"]["charged_ms"]))
+        decision_before = section.inner_text()
+        page.locator("#comparison-horizon").select_option("all")
+        assert section.inner_text() == decision_before
+        with page.expect_download() as downloaded:
+            page.get_by_role("button", name="Download frozen CSV", exact=True).click()
+        rows = list(csv.DictReader(io.StringIO(Path(downloaded.value.path()).read_text(encoding="utf-8"))))
+        assert all(json.loads(row["adjudication"]) == data["aggregate"]["adjudication"] for row in rows)
+        with page.expect_download() as downloaded:
+            page.get_by_role("button", name="Download computation receipt", exact=True).click()
+        assert json.loads(Path(downloaded.value.path()).read_bytes()) == data["computation_receipt"]
+        with page.expect_download() as downloaded:
+            page.get_by_role("button", name="Export comparison figure", exact=True).click()
+        figure = ET.fromstring(Path(downloaded.value.path()).read_bytes())
+        metadata = json.loads(figure.find("{http://www.w3.org/2000/svg}metadata").text)
+        assert metadata["adjudication"] == data["aggregate"]["adjudication"]
+        assert metadata["computation_ref"] == data["aggregate"]["computation_ref"]
+        assert metadata["computation_receipt"] == data["computation_receipt"]
+        assert "effect 1 m" in "".join(figure.itertext())
+        assert not errors, errors
+        page.screenshot(path=str(root / "managed-adjudication.png"), full_page=True)
+        page.close()
+        return {"aggregate_hash": data["aggregate"]["aggregate_hash"],
+                "compare_hash": data["aggregate"]["adjudication"]["compare_hash"],
+                "computation_receipt": data["computation_receipt"], "qualification": "engineering-fixture"}
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def main():
     from playwright.sync_api import sync_playwright, expect
     root = Path(tempfile.mkdtemp(prefix="pirc38-ui-acceptance-"))
@@ -259,11 +321,13 @@ def main():
                 restricted_thread.join(timeout=5)
             assert not errors, errors
             check_failure_states(browser, root, expect)
+            managed_adjudication = check_managed_adjudication(browser, root, expect)
             browser_version = browser.version
             browser.close()
         end_refs = refs()
         assert start_refs == end_refs, "Source refs changed during browser acceptance"
         receipt = {"status": "passed", "spec_hash": digest(spec), "aggregate_hash": aggregate["aggregate_hash"],
+                   "managed_adjudication": managed_adjudication,
                    "scientific_qualification": "not-granted", "root": str(root), "repositories": end_refs,
                    "python": platform.python_version(), "browser": browser_version}
         (root / "receipt.json").write_bytes(encode(receipt))

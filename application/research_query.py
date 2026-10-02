@@ -49,7 +49,7 @@ class ResearchQuery:
     def _comparison_visible(self, package, grant):
         # A package manifest itself contains hashes and artifact IDs. Do not expose it
         # unless every referenced artifact is within the preview grant's scope.
-        for key in ("aggregate_id", "table", "evidence-index"):
+        for key in ("aggregate_id", "table", "evidence-index", *(["computation-receipt"] if "computation-receipt" in package else [])):
             metadata = self.store.manifest("artifact-" + identifier(package[key]))
             if (metadata["study_id"] != grant["study_id"]
                     or metadata["visibility"] not in grant["visibilities"]
@@ -182,7 +182,11 @@ class ResearchQuery:
         if package["study_id"] != grant["study_id"] or not self._comparison_visible(package, grant):
             raise ResearchError("UNAUTHORIZED_DATA", "comparison outside session scope")
         content, _ = self.artifact(package["aggregate_id"])
-        return {"aggregate": json.loads(content), "package": package}
+        result = {"aggregate": json.loads(content), "package": package}
+        if "computation-receipt" in package:
+            receipt, _ = self.artifact(package["computation-receipt"])
+            result["computation_receipt"] = json.loads(receipt)
+        return result
 
     def result_manifest(self, artifact_id):
         content, media = self.artifact(artifact_id, export=True)

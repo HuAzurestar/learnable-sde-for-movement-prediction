@@ -148,9 +148,128 @@ def test_actual_deadline_and_failed_retry_history_are_not_silently_restarted(sou
 def test_corrupt_managed_result_cannot_be_reused_or_republished(source):
     store = source[0]
     result = compute(source)
+    assert result["state"] == "SUCCEEDED", result
     attempt = store.attempts()[result["attempt_id"]]
     (store.path / "artifacts" / attempt["artifact_id"]).write_bytes(b"damaged disposable synthetic result")
     before = BudgetLedger(store).balance("affine")
     with pytest.raises(ResearchError, match="CORRUPT_ARTIFACT"):
         compute(source)
     assert BudgetLedger(store).balance("affine") == before
+
+
+def test_adjudication_import_requires_actual_supervised_output(source, tmp_path):
+    from application.research_evidence import accept_aggregate, expected_metrics_csv, expected_paper_index
+    import hashlib
+    store = source[0]
+    result = compute(source, output=tmp_path / "managed")
+    view = ResearchQuery(store, "viewer").comparison(result["comparison"]["aggregate_hash"])
+    original = view["aggregate"]
+    altered = json.loads(encode(original))
+    altered["adjudication"]["records"][0]["verdict"] = "NO_GAIN"
+    decision = altered["adjudication"]
+    decision["compare_hash"] = digest({k: v for k, v in decision.items() if k != "compare_hash"})
+    altered["aggregate_hash"] = digest({k: v for k, v in altered.items() if k != "aggregate_hash"})
+    table = expected_metrics_csv(altered)
+    files = {"aggregate.json": encode(altered), "metrics.csv": table,
+             "PaperEvidenceIndex.json": encode(expected_paper_index(altered, table)),
+             "ComputationReceipt.json": (tmp_path / "managed/ComputationReceipt.json").read_bytes()}
+    files["manifest.json"] = encode({"schema_version": "pirc25-evidence-package-v1",
+        "aggregate_hash": altered["aggregate_hash"], "files": {n: hashlib.sha256(c).hexdigest() for n, c in files.items()}})
+    forged = tmp_path / "forged"
+    forged.mkdir()
+    for name, content in files.items():
+        (forged / name).write_bytes(content)
+    with pytest.raises(ResearchError, match="CORRUPT_ARTIFACT"):
+        accept_evidence_package(store, forged, altered["aggregate_hash"])
+    with pytest.raises(ResearchError, match="CORRUPT_ARTIFACT"):
+        accept_aggregate(store, altered, "synthetic")
+    # Removing the reference must yield a typed rejection, not a raw KeyError.
+    altered.pop("computation_ref")
+    altered["aggregate_hash"] = digest({k: v for k, v in altered.items() if k != "aggregate_hash"})
+    with pytest.raises(ResearchError, match="CONTRACT_MISMATCH"):
+        accept_aggregate(store, altered, "synthetic")
+    assert len(store.attempts()) == 9
+
+
+def test_publication_interruption_recovers_same_success_without_new_charge(source, monkeypatch):
+    store = source[0]
+    original = store.publish
+    def stop_receipt(object_id, value):
+        if object_id.startswith("computation-") and not object_id.startswith("computation-request-"):
+            raise OSError("synthetic receipt publication interruption")
+        return original(object_id, value)
+    monkeypatch.setattr(store, "publish", stop_receipt)
+    with pytest.raises(OSError, match="publication interruption"):
+        compute(source)
+    success = [a for a in store.attempts().values() if a["state"] == "SUCCEEDED"][-1]
+    before = BudgetLedger(store).balance("affine")
+    monkeypatch.setattr(store, "publish", original)
+    recovered = compute(source)
+    assert recovered["reused"] is True and recovered["attempt_id"] == success["attempt_id"]
+    assert BudgetLedger(store).balance("affine") == before and len(store.attempts()) == 9
+
+
+def test_independent_compare_cli_preserves_nonzero_timeout(source):
+    store, _, _, paper, package = source
+    command = [sys.executable, "-B", "-m", "experiments.pirc25", "--root", str(store.path.parent),
+        "--store-id", store.store_id, "compare", "synthetic", package["aggregate_hash"],
+        "--authorization-id", "viewer", "--paper-root", str(paper), "--seconds", "0.001"]
+    process = subprocess.run(command, capture_output=True, text=True, timeout=40)
+    assert process.returncode != 0, process.stdout + process.stderr
+    result = json.loads(process.stdout)
+    assert result.get("state") == "TIMEOUT" and result.get("exit_code") != 0, result
+    assert store.attempts()[result["attempt_id"]]["state"] == "TIMEOUT"
+    assert BudgetLedger(store).balance("affine")["closed"] is True
+
+
+@pytest.mark.parametrize("policy", [[], {"interval": ["bad"]}, {"contrasts": ["bad"]},
+    {"contrasts": [{"stratum_weights": "bad"}]}, {"interval": {"replicates": True}}])
+def test_malformed_computation_plan_fails_with_typed_diagnostic(policy):
+    from application.research_computation import comparison_plan
+    bundle = {"cells": [{"block_id": "synthetic", "metrics": None}],
+              "comparison_plan": {"adjudication_spec": policy}}
+    with pytest.raises(ResearchError, match="RESOURCE_PLAN_REJECTED"):
+        comparison_plan(bundle, 20_000_000)
+
+
+def test_independent_compare_cli_success_is_reconstructible_and_reusable(source, tmp_path):
+    store, _, _, paper, package = source
+    process = subprocess.run([sys.executable, "-B", "-m", "experiments.pirc25", "--root", str(store.path.parent),
+        "--store-id", store.store_id, "compare", "synthetic", package["aggregate_hash"],
+        "--authorization-id", "viewer", "--paper-root", str(paper), "--seconds", "10",
+        "--output", str(tmp_path / "cli-evidence")], capture_output=True, text=True, timeout=40)
+    assert process.returncode == 0, process.stdout + process.stderr
+    result = json.loads(process.stdout)
+    assert result["state"] == "SUCCEEDED"
+    imported = accept_evidence_package(store, tmp_path / "cli-evidence", result["comparison"]["aggregate_hash"])
+    assert imported == result["comparison"]
+    before = BudgetLedger(store).balance("affine")
+    assert compute(source)["attempt_id"] == result["attempt_id"]
+    assert BudgetLedger(store).balance("affine") == before
+
+
+def test_actual_admitted_formal_fixture_uses_managed_comparison(tmp_path, monkeypatch):
+    from tests.test_research_adjudication_binding import prepare
+    from experiments.pirc25.runner import SharedRunner
+    from application.research_comparison import ComparisonRunner
+    store, value, registry, grant = prepare(tmp_path, monkeypatch)
+    store.register(value, digest(value))
+    for cell in value["cells"]:
+        assert SharedRunner(store, registry).run_cell("synthetic", digest(cell), budget=BudgetSpec(10))["state"] == "SUCCEEDED"
+    bundle = export_evidence(store, "synthetic", grant)
+    paper = Path(__file__).resolve().parents[2] / "TSDE-SDE"
+    source_path = tmp_path / "formal.json"
+    source_path.write_bytes(encode(bundle))
+    subprocess.run([sys.executable, "-B", str(paper / "scripts/pirc25/aggregate.py"), str(source_path),
+        "--formal", "--expected-hash", bundle["bundle_hash"], "--output", str(tmp_path / "formal-evidence")],
+        capture_output=True, check=True, timeout=30)
+    aggregate = json.loads((tmp_path / "formal-evidence/aggregate.json").read_bytes())
+    package = accept_evidence_package(store, tmp_path / "formal-evidence", aggregate["aggregate_hash"])
+    result = ComparisonRunner(store, paper).run("synthetic", package["aggregate_hash"],
+        authorization_id=grant["authorization_id"], budget=BudgetSpec(10))
+    assert result["state"] == "SUCCEEDED", result
+    viewed = ResearchQuery(store, grant["authorization_id"]).comparison(result["comparison"]["aggregate_hash"])
+    assert viewed["aggregate"]["adjudication"]["qualification"] == "formal"
+    assert viewed["aggregate"]["adjudication"]["records"][0]["verdict"] == "INSUFFICIENT_DATA"
+    assert viewed["aggregate"]["adjudication"]["records"][0]["independent_n"] == 1
+    # This tests admission plumbing with synthetic inputs, not research qualification.

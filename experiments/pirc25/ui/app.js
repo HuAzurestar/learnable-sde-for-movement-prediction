@@ -104,7 +104,46 @@ async function inspectCase(target, artifactId) {
 function comparisonRows(aggregate, horizon) {
   return aggregate.arms.filter(arm => horizon === 'all' || String(arm.comparison_dimensions?.horizon) === horizon);
 }
-function comparisonFigure(aggregate, horizon) {
+function adjudicationLines(aggregate, receipt) {
+  const decision = aggregate.adjudication;
+  if (!decision) return ['Formal adjudication unavailable in this frozen version; descriptive intervals are not a verdict.'];
+  const policy = decision.adjudication_spec;
+  const lines = [`Frozen adjudication ${decision.compare_hash} · ${decision.status} · ${decision.qualification}`,
+    'Full fixed comparison family; horizon display filtering does not recompute or subset the decision.'];
+  if (policy) lines.push(`Primary ${policy.primary_metric.name} (${policy.primary_metric.unit}) · ${policy.primary_metric.direction} · threshold ${policy.practical_threshold} · multiplicity ${policy.multiplicity} · seed pairing ${policy.seed_pairing}`);
+  (decision.diagnostics || []).forEach(message => lines.push('Diagnostic: ' + message));
+  decision.records.forEach(record => {
+    lines.push(`${record.comparison_id}: ${record.verdict} · effect ${record.effect ?? 'Unavailable'} ${record.unit} · interval ${JSON.stringify(record.interval)} · confidence ${record.interval_confidence ?? 'Unavailable'}`);
+    lines.push(`  Independent paired blocks ${record.independent_n} · registered-cell denominator ${record.status_rates?.denominator ?? 'Unavailable'} · ${JSON.stringify(record.status_rates?.values || {})}`);
+  });
+  lines.push(`Computation receipt ${aggregate.computation_ref?.manifest_id ?? 'Unavailable'} · ${receipt?.cost?.charged_ms ?? 'Unknown'} ${receipt?.cost?.unit || 'slot-ms'} · ${receipt?.cost?.scope || 'Unknown cost scope'}`);
+  return lines;
+}
+function adjudicationView(aggregate, receipt) {
+  const section = document.createElement('section'); section.id = 'comparison-adjudication';
+  section.append(text('h3','Frozen preregistered adjudication'));
+  const decision = aggregate.adjudication;
+  if (!decision) {section.append(text('p',adjudicationLines(aggregate,receipt)[0])); return section;}
+  section.append(text('p',`${decision.status} · ${decision.qualification} · ${decision.compare_hash}`));
+  section.append(text('p','Full fixed comparison family. Changing the horizon display does not recompute intervals, weights, thresholds or multiplicity. NO_GAIN is not equivalence. Fixture verdicts are engineering tests, not scientific qualification.'));
+  const policy = decision.adjudication_spec;
+  if (policy) section.append(table(['Frozen policy field','Value'],[
+    ['Primary metric',JSON.stringify(policy.primary_metric)],['Practical threshold',policy.practical_threshold],
+    ['Interval',JSON.stringify(policy.interval)],['Multiplicity / fixed family',`${policy.multiplicity} / ${decision.family_size}`],
+    ['Independent unit / seed policy',`${policy.independent_unit} / ${policy.seed_aggregation} / ${policy.seed_pairing}`],
+    ['Minimum seeds / paired blocks',`${policy.minimum_seeds} / ${policy.minimum_paired_blocks}`],
+    ['Weighted strata',JSON.stringify(policy.contrasts)],['Failure / stopping rules',`${policy.missing_policy} / ${policy.attempt_policy} / ${policy.stopping_rule}`]
+  ]));
+  section.append(table(['Comparison','Verdict','Oriented benefit','Unit','Conditional interval','Confidence','Independent paired blocks','All-cell dispositions / denominator'], decision.records.map(record => [
+    record.comparison_id,record.verdict,record.effect ?? 'Unavailable',record.unit,record.interval ? record.interval.join(' to ') : 'Unavailable',record.interval_confidence ?? 'Unavailable',record.independent_n,
+    `${JSON.stringify(record.status_rates?.values || {})} / ${record.status_rates?.denominator ?? 'Unavailable'}`])));
+  section.append(text('pre',JSON.stringify({diagnostics:decision.diagnostics,records:decision.records},null,2)));
+  const cost = receipt?.cost;
+  section.append(text('p',`Shared computation: ${cost?.charged_ms ?? 'Unknown'} ${cost?.unit || 'slot-ms'} · ${cost?.scope || 'Unknown scope'} · charged arm ${cost?.arm_id || 'Unknown'}. This job cost is separate from frozen experimental costs; it is not repeated per contrast.`));
+  section.append(text('pre',JSON.stringify({computation_ref:aggregate.computation_ref,computation_receipt:receipt ?? null},null,2)));
+  return section;
+}
+function comparisonFigure(aggregate, horizon, receipt = null) {
   const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
   const lines = [`Frozen comparison · ${aggregate.aggregate_hash}`, `Horizon: ${horizon} · independent unit: block · ${aggregate.qualification}`];
   comparisonRows(aggregate, horizon).forEach(arm => {
@@ -113,6 +152,7 @@ function comparisonFigure(aggregate, horizon) {
     if (!Object.keys(arm.metrics).length) lines.push('  No complete metric; missing/failed cells retained');
     lines.push(`  Frozen cost (all attempts): charged ${arm.cost?.charged_ms ?? 'unavailable'}, reserved ${arm.cost?.reserved_ms ?? 'unavailable'}, measured ${arm.cost?.measured_ms ?? 'unknown'} slot-ms`);
   });
+  lines.push(...adjudicationLines(aggregate,receipt));
   svg.setAttribute('viewBox', `0 0 1100 ${50 + lines.length * 25}`); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'Frozen comparison values and provenance');
   lines.forEach((line,i) => {const node = document.createElementNS(ns,'text'); node.setAttribute('x','12'); node.setAttribute('y',String(25 + i*25)); node.setAttribute('font-size','13'); node.textContent=line; svg.append(node);});
   let y = 55 + lines.length * 25;
@@ -153,7 +193,8 @@ function showComparison(target, data) {
     pane.append(text('p','Costs cover all attempts in this stratum, including failed retries and unscored blocks. Unknown is not zero; these are frozen export costs, not the current arm balance.'));
     const costs = table(['Arm / dimensions','Charged slot-ms','Reserved slot-ms','Measured slot-ms','Unknown / pending attempts','Cost sources'], comparisonRows(aggregate,horizon).map(arm => [arm.arm_id + ' ' + dimensionsLabel(arm.comparison_dimensions),arm.cost?.charged_ms ?? 'Unavailable',arm.cost?.reserved_ms ?? 'Unavailable',arm.cost?.measured_ms ?? 'Unknown',`${arm.cost?.unknown_attempt_ids?.length ?? '?'} / ${arm.cost?.pending_attempt_ids?.length ?? '?'}`,arm.cost?.source_event_hashes?.join('\n') || 'No frozen source']));
     costs.id = 'comparison-costs'; pane.append(costs);
-    pane.append(comparisonFigure(aggregate,horizon));
+    pane.append(adjudicationView(aggregate,data.computation_receipt));
+    pane.append(comparisonFigure(aggregate,horizon,data.computation_receipt));
   };
   target.append(text('p','Aggregate version: ' + aggregate.aggregate_hash));
   target.append(selector('comparison-horizon','Comparison horizon',[['all','All horizons'],...horizons.map(h => [h,h])], () => {horizon = el('comparison-horizon').value; draw();}));
@@ -161,11 +202,14 @@ function showComparison(target, data) {
   target.append(action('Export comparison figure', async () => {
     const fresh = JSON.parse(await (await api('/api/artifacts/' + encodeURIComponent(data.package.aggregate_id) + '?download=1',true)).text());
     if (fresh.aggregate_hash !== aggregate.aggregate_hash) throw new Error('Aggregate version changed.');
-    sourceFigure(comparisonFigure(fresh,horizon), {artifact_id:data.package.aggregate_id, aggregate_hash:fresh.aggregate_hash,
+    const receipt = data.package['computation-receipt'] ? JSON.parse(await (await api('/api/artifacts/' + encodeURIComponent(data.package['computation-receipt']) + '?download=1',true)).text()) : null;
+    sourceFigure(comparisonFigure(fresh,horizon,receipt), {artifact_id:data.package.aggregate_id, aggregate_hash:fresh.aggregate_hash,
       spec_hash:fresh.spec_hash, protocol_hash:fresh.protocol_hash, horizon:horizon === 'all' ? null : Number(horizon),
+      adjudication:fresh.adjudication ?? null,computation_ref:fresh.computation_ref ?? null,computation_receipt:receipt,
       strata:comparisonRows(fresh,horizon).map(arm => ({stratum_id:arm.stratum_id,dimensions:arm.comparison_dimensions,units:arm.metric_units,cost:arm.cost}))}, 'Frozen comparison');
   }));
   target.append(action('Download frozen CSV', () => download(data.package.table)));
+  if (data.package['computation-receipt']) target.append(action('Download computation receipt', async () => saveBlob(await api('/api/artifacts/' + encodeURIComponent(data.package['computation-receipt']) + '?download=1',true),'research-computation-receipt.json')));
   target.append(action('Download aggregate manifest', async () => saveBlob(await api('/api/artifacts/' + encodeURIComponent(data.package.aggregate_id) + '?manifest=1',true),'research-aggregate-manifest.json')));
   target.append(text('h3','Comparison and provenance'),text('pre',JSON.stringify(aggregate,null,2)));
 }

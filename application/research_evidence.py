@@ -143,6 +143,11 @@ def accept_aggregate(store, aggregate, study_id):
     if (bundle["spec_hash"] != digest(spec) or aggregate.get("expected_cell_count") != len(spec["cells"])
             or aggregate.get("cell_dispositions") != bundle["cells"]):
         raise ResearchError("CONTRACT_MISMATCH", "aggregate is not bound to the frozen complete matrix")
+    if "adjudication" in aggregate or "computation_ref" in aggregate:
+        if "adjudication" not in aggregate or "computation_ref" not in aggregate:
+            raise ResearchError("CONTRACT_MISMATCH", "managed adjudication requires its computation reference")
+        from application.research_computation import verified_computation
+        verified_computation(store, aggregate["computation_ref"], aggregate=aggregate)
     from infrastructure.research_store import encode
     visibility = evidence_visibility(store, spec, bundle["cells"])
     return store.artifact(encode(aggregate), role="aggregate", visibility=visibility,
@@ -153,7 +158,9 @@ def expected_metrics_csv(aggregate):
     """Validate the frozen v1 table serialization without recalculating scores."""
     stream = io.StringIO(newline="")
     writer = csv.writer(stream, lineterminator="\n")
-    writer.writerow(["aggregate_hash", "arm_id", "metric", "value", "unit", "independent_n", "expected_cells", "successful_cells", "status", "stratum_id", "comparison_dimensions", "charged_ms", "reserved_ms", "measured_ms", "cost_unit", "cost_scope", "status_rates"])
+    extra = [name for name in ("adjudication", "computation_ref") if name in aggregate]
+    writer.writerow(["aggregate_hash", "arm_id", "metric", "value", "unit", "independent_n", "expected_cells", "successful_cells", "status", "stratum_id", "comparison_dimensions", "charged_ms", "reserved_ms", "measured_ms", "cost_unit", "cost_scope", "status_rates", *extra])
+    frozen = [encode(aggregate[name]).decode() for name in extra]
     for arm in aggregate["arms"]:
         costs = [arm["cost"][key] for key in ("charged_ms", "reserved_ms", "measured_ms", "unit", "scope")]
         rates = encode(arm.get("status_rates")).decode()
@@ -161,11 +168,11 @@ def expected_metrics_csv(aggregate):
         if not arm["metrics"]:
             writer.writerow([aggregate["aggregate_hash"], arm["arm_id"], "", "", "", arm["independent_n"],
                              arm["expected_cells"], arm["successful_cells"], arm["status"], arm["stratum_id"],
-                             dimensions, *costs, rates])
+                             dimensions, *costs, rates, *frozen])
         for metric, value in sorted(arm["metrics"].items()):
             writer.writerow([aggregate["aggregate_hash"], arm["arm_id"], metric, value, arm["metric_units"][metric],
                              arm["independent_n"], arm["expected_cells"], arm["successful_cells"], arm["status"],
-                             arm["stratum_id"], dimensions, *costs, rates])
+                             arm["stratum_id"], dimensions, *costs, rates, *frozen])
     return stream.getvalue().encode()
 
 
@@ -185,7 +192,8 @@ def expected_paper_index(aggregate, table):
     return {"schema_version": "pirc25-paper-evidence-v1", "study_id": aggregate["study_id"],
             "aggregate_hash": aggregate["aggregate_hash"], "table_sha256": hashlib.sha256(table).hexdigest(),
             "code_hash": aggregate["code_hash"], "evidence_status": "active", "relation": None,
-            "disclosure_scope": aggregate["disclosure_scope"], "claims": claims}
+            "disclosure_scope": aggregate["disclosure_scope"], "claims": claims,
+            **{name: aggregate[name] for name in ("adjudication", "computation_ref") if name in aggregate}}
 
 
 def accept_evidence_package(store, directory, expected_hash):
@@ -198,6 +206,8 @@ def accept_evidence_package(store, directory, expected_hash):
         path = root / name
         if path.is_symlink() or not path.resolve().is_relative_to(root):
             raise ResearchError("UNAUTHORIZED_DATA", "evidence package path escapes root")
+        if path.stat().st_size > 64 * 1024 * 1024:
+            raise ResearchError("RESOURCE_PLAN_REJECTED", "evidence package file exceeds byte quota")
         contents[name] = path.read_bytes()
     manifest = json.loads(contents["manifest.json"])
     if manifest.get("schema_version") != "pirc25-evidence-package-v1" or manifest.get("aggregate_hash") != expected_hash:
@@ -208,6 +218,20 @@ def accept_evidence_package(store, directory, expected_hash):
     aggregate = json.loads(contents["aggregate.json"])
     if aggregate.get("aggregate_hash") != expected_hash:
         raise ResearchError("CORRUPT_ARTIFACT", "aggregate does not match package")
+    if "adjudication" in aggregate or "computation_ref" in aggregate:
+        from application.research_computation import verified_computation
+        path = root / "ComputationReceipt.json"
+        if (path.is_symlink() or not path.resolve().is_relative_to(root) or not path.is_file()
+                or path.stat().st_size > 1024 * 1024):
+            raise ResearchError("CONTRACT_MISMATCH", "managed comparison requires a bounded computation receipt")
+        contents["ComputationReceipt.json"] = path.read_bytes()
+        if hashlib.sha256(contents["ComputationReceipt.json"]).hexdigest() != manifest["files"].get("ComputationReceipt.json"):
+            raise ResearchError("CORRUPT_ARTIFACT", "computation receipt differs from package manifest")
+        receipt = json.loads(contents["ComputationReceipt.json"])
+        _, worker_result = verified_computation(store, aggregate.get("computation_ref", {}), receipt=receipt, aggregate=aggregate)
+        if (contents["metrics.csv"] != worker_result["metrics_csv"].encode() or
+                contents["PaperEvidenceIndex.json"] != encode(worker_result["paper_index"])):
+            raise ResearchError("CORRUPT_ARTIFACT", "managed evidence is not the exact worker serialization")
     index = json.loads(contents["PaperEvidenceIndex.json"])
     if index.get("aggregate_hash") != expected_hash or index.get("table_sha256") != manifest["files"]["metrics.csv"]:
         raise ResearchError("CONTRACT_MISMATCH", "paper evidence/table version differs")
@@ -226,6 +250,10 @@ def accept_evidence_package(store, directory, expected_hash):
         attachments[role] = store.artifact(contents[name], role=role, visibility=artifact["visibility"],
                                           block_ids=artifact["block_ids"], study_id=artifact["study_id"],
                                           media_type="text/csv" if role == "table" else "application/json")["artifact_id"]
+    if "ComputationReceipt.json" in contents:
+        attachments["computation-receipt"] = store.artifact(contents["ComputationReceipt.json"],
+            role="computation-receipt", visibility=artifact["visibility"], block_ids=artifact["block_ids"],
+            study_id=artifact["study_id"])["artifact_id"]
     package = {"schema_version": "pirc25-imported-evidence-v1", "aggregate_hash": expected_hash,
                "aggregate_id": artifact["artifact_id"], "study_id": artifact["study_id"], **attachments}
     store.publish("comparison-" + expected_hash, package)

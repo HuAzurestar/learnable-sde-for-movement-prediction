@@ -53,6 +53,17 @@ def main(argv=None):
     evidence = commands.add_parser("import-evidence")
     evidence.add_argument("directory", type=Path)
     evidence.add_argument("--expected-hash", required=True)
+    comparison = commands.add_parser("compare", help="supervised statistical comparison of a frozen aggregate")
+    comparison.add_argument("study")
+    comparison.add_argument("aggregate_hash")
+    comparison.add_argument("--paper-root", type=Path, required=True)
+    comparison.add_argument("--authorization-id", required=True)
+    comparison.add_argument("--seconds", type=float, default=7200)
+    comparison.add_argument("--max-operations", type=int, default=20_000_000)
+    comparison.add_argument("--formal", action="store_true", default=None)
+    comparison.add_argument("--parent-attempt")
+    comparison.add_argument("--reason")
+    comparison.add_argument("--output", type=Path)
     server = commands.add_parser("serve")
     server.add_argument("--authorization-id", required=True)
     server.add_argument("--port", type=int, default=0)
@@ -107,6 +118,12 @@ def main(argv=None):
         elif args.command == "import-evidence":
             from application.research_evidence import accept_evidence_package
             result = accept_evidence_package(store, args.directory, args.expected_hash)
+        elif args.command == "compare":
+            from application.research_comparison import ComparisonRunner
+            result = ComparisonRunner(store, args.paper_root).run(args.study, args.aggregate_hash,
+                authorization_id=args.authorization_id, budget=BudgetSpec(args.seconds),
+                max_operations=args.max_operations, formal=args.formal,
+                parent_attempt_id=args.parent_attempt, reason=args.reason, output=args.output)
         elif args.command == "serve":
             from .web import serve
             serve(store, args.authorization_id, args.port)
@@ -120,7 +137,9 @@ def main(argv=None):
                       budget=BudgetSpec(args.seconds, category="smoke"),
                       parent_attempt_id=args.parent_attempt, reason=args.reason) for cell in cells]
         print(json.dumps(result, ensure_ascii=False, allow_nan=False))
-        return 1 if isinstance(result, list) and any(r.get("exit_code") for r in result) else 0
+        failed = (any(r.get("exit_code") for r in result) if isinstance(result, list)
+                  else bool(result.get("exit_code")) if isinstance(result, dict) else False)
+        return 1 if failed else 0
     except (ResearchError, OSError, ValueError) as error:
         payload = error.envelope() if isinstance(error, ResearchError) else {"code": "RUNTIME_ERROR", "retryable": False}
         print(json.dumps({"error": payload}))

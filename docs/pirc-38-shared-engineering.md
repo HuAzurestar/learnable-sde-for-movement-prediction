@@ -320,6 +320,52 @@ exact CSV bytes and preview-only export denial. It is not scientific validation.
 
 ## Verification and delivery
 
+### Managed statistical comparison
+
+The frozen comparison plan may include a complete `pirc25-adjudication-spec-v1`
+policy and its canonical hash. It declares the primary estimator/unit/direction,
+weighted strata, minimum seeds and paired blocks, explicit seed pairing,
+confidence/resampling/multiplicity, practical threshold, quality gates and fixed
+failure/attempt/stopping rules. A missing decision produces
+`NEEDS_PREREGISTRATION`, not an implicit default or a scientific gain.
+
+After importing a TSDE input package, run from the runtime repository:
+
+```console
+python -B -m experiments.pirc25 --root RUNTIME_DIR --store-id STORE_ID compare STUDY_ID INPUT_AGGREGATE_HASH --authorization-id GRANT_ID --paper-root TSDE_ROOT --seconds 7200 --output NEW_PACKAGE_DIR
+```
+
+The original-study grant must authorize export of the complete source matrix.
+The runtime retains the selected frozen input version, checks current source
+disclosure, bounds registered-size operations and bytes, and launches the TSDE
+kernel inside the existing supervisor/process-tree boundary. The derived
+computation study copies the original reference arm's identity/family and charges
+its existing cumulative 24-hour budget. It does not add a cell to the scientific
+matrix. The allocation is explicit; no new caller-selected arm resets costs.
+`--max-operations` can reduce the fixed 20-million operation cap. `--formal`
+requires qualified source evidence and its exact preregistration chain; fixtures
+remain engineering-only.
+
+The job freezes a full decision, same-version CSV/index and `computation_ref`.
+After the entire worker tree stops and measured cost settles, an immutable
+`ComputationReceipt.json` binds the actual result and reservation/start/settlement
+events. Aggregate/CSV/index reference that receipt without a circular cost hash.
+Imports verify the exact managed worker result; rehashing a changed verdict or
+table is insufficient. Older descriptive-only four-file packages retain their
+original bytes. Statistical computation cost is separate from frozen experimental
+costs and is not multiplied by the number of comparisons.
+
+Successful reuse validates actual worker bytes and provenance without another
+attempt/charge. Failed retries require `--parent-attempt` and `--reason`; a closed
+arm remains closed. Publication interrupted after settlement resumes publication
+of the same successful attempt. A timeout returns a nonzero CLI exit status.
+The UI displays the full fixed adjudication family independently of horizon
+display filters and exports its frozen decision and receipt with figures.
+
+These interfaces do not establish final acceptance. General plugin resource
+planning, acknowledged soft checkpoints, continuous-versus-resumed recovery and
+final paired-SHA review/merge evidence remain separate required audit items.
+
 ### Comparison dimensions
 
 Evidence export preserves each registered cell and its `comparison_dimensions`.
