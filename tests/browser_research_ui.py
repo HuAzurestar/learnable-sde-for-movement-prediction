@@ -189,6 +189,30 @@ def check_managed_adjudication(browser, root, expect):
         assert not errors, errors
         page.screenshot(path=str(root / "managed-adjudication.png"), full_page=True)
         page.close()
+        # Preview permission is not export permission, even for cached SVG bytes.
+        store.authorize({**managed[2], 'authorization_id': 'managed-preview', 'purposes': ['preview']})
+        preview_server = make_server(store, 'managed-preview')
+        preview_thread = threading.Thread(target=preview_server.serve_forever, daemon=True)
+        preview_thread.start()
+        try:
+            preview_page = browser.new_page()
+            downloads = []
+            preview_page.on('download', lambda download: downloads.append(download))
+            preview_page.goto(f'http://127.0.0.1:{preview_server.server_port}/#session={preview_server.session_token}')
+            preview_page.get_by_role('button', name='Comparisons & evidence', exact=True).click()
+            preview_page.locator('#results tbody tr').filter(has_text=result['comparison']['aggregate_hash']).get_by_role('button', name='Compare & export', exact=True).click()
+            expect(preview_page.locator('#comparison-figure img')).to_be_visible()
+            preview_page.wait_for_function("document.querySelector('#comparison-figure img')?.naturalWidth > 0")
+            with preview_page.expect_response(lambda response: 'download=1' in response.url) as response:
+                preview_page.get_by_role('button', name='Export comparison figure', exact=True).click()
+            assert response.value.status == 403
+            expect(preview_page.locator('#error')).to_contain_text('UNAUTHORIZED_DATA')
+            assert not downloads
+            preview_page.close()
+        finally:
+            preview_server.shutdown()
+            preview_server.server_close()
+            preview_thread.join(timeout=5)
         return {"aggregate_hash": data["aggregate"]["aggregate_hash"],
                 "compare_hash": data["aggregate"]["adjudication"]["compare_hash"],
                 "computation_receipt": data["computation_receipt"], "qualification": "engineering-fixture"}
@@ -284,11 +308,15 @@ def main():
             expect(page.locator("#comparison-costs tbody tr")).to_have_count(2)
             expect(page.locator("#comparison-costs")).to_contain_text("200")
             assert all(arm["cost"]["charged_ms"] == 200 for arm in aggregate["arms"])
-            with page.expect_download() as downloaded:
-                page.get_by_role("button", name="Export comparison figure", exact=True).click()
-            content = Path(downloaded.value.path()).read_text(encoding="utf-8")
-            assert aggregate["aggregate_hash"] in content and package["aggregate_id"] in content
-            assert '"horizon":2' in content
+            # Legacy descriptive packages have no budget-worker frozen figure.
+            # Preserve their tables/CSV; do not silently synthesize an export.
+            expect(page.locator('#comparison-figure')).to_contain_text('Frozen figure unavailable')
+            expect(page.locator('#comparison-figure img, #comparison-figure svg')).to_have_count(0)
+            legacy_downloads = []
+            page.on('download', lambda download: legacy_downloads.append(download))
+            page.get_by_role('button', name='Export comparison figure', exact=True).click()
+            expect(page.locator('#error')).to_contain_text('Frozen figure unavailable')
+            assert not legacy_downloads
             with page.expect_download() as downloaded:
                 page.get_by_role("button", name="Download frozen CSV", exact=True).click()
             assert Path(downloaded.value.path()).read_bytes() == (root / "evidence/metrics.csv").read_bytes()
@@ -304,8 +332,8 @@ def main():
             assert manifest["artifact"]["artifact_id"] == package["aggregate_id"]
             assert manifest["bindings"]["aggregate_hash"] == aggregate["aggregate_hash"]
             page.screenshot(path=str(root / "ui.png"), full_page=True)
-            # A preview-only session can inspect the same data, but exporting a
-            # client-rendered figure must still pass a fresh server export gate.
+            # Legacy preview-only session also cannot invent missing figures.
+            # Fresh export-gate checks use actual managed SVGs above.
             preview = {**store.manifest("authorization-browser"), "authorization_id": "preview-only", "purposes": ["preview"]}
             store.authorize(preview)
             restricted_server = make_server(store, "preview-only")
@@ -318,10 +346,8 @@ def main():
                 denied_page.goto(f"http://127.0.0.1:{restricted_server.server_port}/#session={restricted_server.session_token}")
                 denied_page.get_by_role("button", name="Comparisons & evidence", exact=True).click()
                 denied_page.get_by_role("button", name="Compare & export", exact=True).click()
-                with denied_page.expect_response(lambda response: 'download=1' in response.url) as response:
-                    denied_page.get_by_role("button", name="Export comparison figure", exact=True).click()
-                assert response.value.status == 403
-                expect(denied_page.locator('#error')).to_be_visible()
+                denied_page.get_by_role("button", name="Export comparison figure", exact=True).click()
+                expect(denied_page.locator('#error')).to_contain_text('Frozen figure unavailable')
                 assert not downloads
                 denied_page.close()
             finally:

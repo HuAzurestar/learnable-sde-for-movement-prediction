@@ -170,7 +170,7 @@ function frozenComparisonEntry(data, horizon) {
 async function frozenComparisonBlob(entry, exporting = false) {
   if (!entry) throw new Error('Frozen figure unavailable in this version; generate an authorized budgeted comparison.');
   const blob = await api('/api/artifacts/' + encodeURIComponent(entry.sha256) + (exporting ? '?download=1' : ''), true);
-  if (blob.type !== 'image/svg+xml' || blob.size !== entry.size_bytes || blob.size > 2*1024*1024) {
+  if (blob.type.split(';', 1)[0].trim().toLowerCase() !== 'image/svg+xml' || blob.size !== entry.size_bytes || blob.size > 2*1024*1024) {
     throw new Error('Frozen figure response mismatch.');
   }
   const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())),

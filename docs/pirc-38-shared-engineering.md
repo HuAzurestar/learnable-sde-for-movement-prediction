@@ -287,11 +287,21 @@ counts. Each metric uses its own visual scale. Case horizon selection requires a
 explicit `forecast.horizons` grid; absent grids are reported as unavailable, not
 invented. The existing single-axis fixture now exports its actual requested grid.
 
-Case/comparison SVG exports perform a fresh authorized export read, include
-artifact/spec/protocol references in captions and structured metadata, and preserve
-selected horizon and units. Preview permission alone cannot export figures. Frozen
-CSV remains the original TSDE byte stream. Run budgets are current ledger views,
-not retrospectively attached scientific costs to an older aggregate.
+Managed comparison previews and SVG exports consume exact budget-worker frozen
+files selected by the bound figure index. The browser verifies byte size and SHA
+before displaying a Blob image (never inline artifact markup). Horizon changes
+cannot replace the current image with a late previous response. Export performs a
+new permission-checked artifact read and downloads the original bytes/filename,
+not cached preview bytes or a locally regenerated figure. Frozen provenance refers
+to the settled computation receipt; that receipt and its measured cost are shown
+separately and remain downloadable. Preview permission alone cannot export.
+Legacy packages without frozen figures retain their tables/CSV and explicitly
+report unavailable figures rather than silently regenerating them.
+
+Case display exports currently render saved preview data; frozen worker case-figure
+delivery remains an engineering acceptance obligation. Frozen CSV remains the
+original TSDE byte stream. Run budgets are current ledger views, not retrospectively
+attached scientific costs to an older aggregate.
 
 Result and aggregate manifest downloads use `?manifest=1` on the authorized
 artifact-ID endpoint. They require export permission, verify the source artifact,
