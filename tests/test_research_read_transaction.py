@@ -1,0 +1,145 @@
+"""Locked read snapshots must not become permission or integrity caches."""
+
+import threading
+
+import pytest
+
+import infrastructure.research_store as store_module
+from infrastructure.research_store import ResearchError, encode
+from tests.test_research_artifact_read_bounds import published
+
+
+def test_single_read_bounds_physical_chain_reads_and_preserves_journal(tmp_path, monkeypatch):
+    store, artifact, grant = published(tmp_path)
+    original = store._json
+    reads = []
+
+    def observe(path):
+        if path.parent == store.path / 'events':
+            reads.append(path)
+        return original(path)
+
+    monkeypatch.setattr(store, '_json', observe)
+    assert store.read_artifact(artifact['artifact_id'], purpose='preview', authorization=grant) == b'{"value":2}'
+    physical_reads = len(reads)
+    events = store.events()
+    assert physical_reads <= 2 * len(events), 'authorized read rescans the entire chain for every metadata/journal operation'
+    assert [event['event_kind'] for event in events][-3:] == ['EXPOSURE_ALLOWED', 'READ_STARTED', 'READ_COMPLETED']
+
+
+def test_nested_scope_detaches_events_and_releases_cache(tmp_path):
+    store, artifact, grant = published(tmp_path)
+    with store._read_transaction():
+        with store._read_transaction():
+            events = store.events()
+            events[-1]['payload'].clear()
+            assert store.manifest('authorization-' + grant['authorization_id']) == grant
+            assert store.read_artifact(artifact['artifact_id'], purpose='preview', authorization=grant) == b'{"value":2}'
+    store.events()  # Physically revalidate the updated chain, not a leaked scope.
+
+
+def test_exception_clears_snapshot_before_next_request(tmp_path):
+    store, _, grant = published(tmp_path)
+    with pytest.raises(LookupError, match='interrupted'):
+        with store._read_transaction():
+            store.manifest('authorization-' + grant['authorization_id'])
+            raise LookupError('interrupted')
+    (store.path / 'events/0000000000000001.json').write_bytes(b'{}')
+    with pytest.raises(ResearchError, match='CORRUPT_ARTIFACT'):
+        store.events()
+
+
+def test_corrupt_chain_during_byte_read_never_returns_content(tmp_path, monkeypatch):
+    store, artifact, grant = published(tmp_path)
+    original = store._verified_artifact_content
+
+    def corrupt_after_read(metadata):
+        content = original(metadata)
+        (store.path / 'events/0000000000000001.json').write_bytes(b'{}')
+        return content
+
+    monkeypatch.setattr(store, '_verified_artifact_content', corrupt_after_read)
+    with pytest.raises(ResearchError, match='CORRUPT_ARTIFACT'):
+        store.read_artifact(artifact['artifact_id'], purpose='preview', authorization=grant)
+    with pytest.raises(ResearchError, match='CORRUPT_ARTIFACT'):
+        store.events()
+
+
+def test_each_read_rehashes_grant_manifest_inside_one_scope(tmp_path):
+    store, artifact, grant = published(tmp_path)
+    with store._read_transaction():
+        assert store.read_artifact(artifact['artifact_id'], purpose='preview', authorization=grant) == b'{"value":2}'
+        path = store.path / 'manifests' / ('authorization-' + grant['authorization_id'] + '.json')
+        path.write_bytes(encode({**grant, 'purposes': []}))
+        with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+            store.read_artifact(artifact['artifact_id'], purpose='preview', authorization=grant)
+    assert store.events()[-1]['event_kind'] == 'EXPOSURE_DENIED'
+
+
+def test_event_flushed_before_failed_head_is_not_overwritten_in_same_scope(tmp_path, monkeypatch):
+    store, _, _ = published(tmp_path)
+    original = store_module.atomic_write
+    failed = []
+
+    def fail_head_once(path, content):
+        if path == store.path / 'head.json' and not failed:
+            failed.append(True)
+            raise OSError('head publication failed')
+        return original(path, content)
+
+    with store._read_transaction():
+        monkeypatch.setattr(store_module, 'atomic_write', fail_head_once)
+        with pytest.raises(OSError, match='head publication failed'):
+            store.append('FIRST', {'value': 1}, 'first')
+        store.append('SECOND', {'value': 2}, 'second')
+    assert [event['event_id'] for event in store.events()][-2:] == ['first', 'second']
+
+
+def test_other_thread_cannot_borrow_the_locked_snapshot(tmp_path):
+    store, _, grant = published(tmp_path)
+    entered, release, other_done = threading.Event(), threading.Event(), threading.Event()
+    failures = []
+
+    def owner():
+        try:
+            with store._read_transaction():
+                entered.set()
+                assert release.wait(5)
+        except BaseException as error:
+            failures.append(error)
+
+    def other():
+        try:
+            store.manifest('authorization-' + grant['authorization_id'])
+            other_done.set()
+        except BaseException as error:
+            failures.append(error)
+
+    first, second = threading.Thread(target=owner), threading.Thread(target=other)
+    try:
+        first.start()
+        assert entered.wait(2), failures
+        second.start()
+        assert not other_done.wait(0.1), 'another thread bypassed the active OS lock'
+    finally:
+        release.set()
+        first.join(5)
+        if second.ident is not None:
+            second.join(5)
+    assert not first.is_alive() and not second.is_alive()
+    assert not failures, failures
+    assert other_done.is_set()
+
+
+def test_journal_failure_still_prevents_byte_read(tmp_path, monkeypatch):
+    store, artifact, grant = published(tmp_path)
+    reads = []
+
+    def refuse(*args, **kwargs):
+        raise OSError('journal unavailable')
+
+    monkeypatch.setattr(store, '_append', refuse)
+    monkeypatch.setattr(store, '_verified_artifact_content', lambda metadata: reads.append(metadata))
+    with pytest.raises(OSError, match='journal unavailable'):
+        store.read_artifact(artifact['artifact_id'], purpose='preview', authorization=grant)
+    assert not reads

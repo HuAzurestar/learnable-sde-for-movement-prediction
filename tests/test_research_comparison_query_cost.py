@@ -16,8 +16,8 @@ def test_managed_comparison_checks_study_once_and_authorizes_every_actual_read(s
     assert result['state'] == 'SUCCEEDED', result
     store = source[0]
     query = ResearchQuery(store, 'viewer')
-    original_grant, original_read = query._grant, store.read_artifact
-    grants, reads = [], []
+    original_grant, original_read, original_json = query._grant, store.read_artifact, store._json
+    grants, reads, chain_reads = [], [], []
 
     def checked_grant(*args, **kwargs):
         grants.append((args, kwargs))
@@ -27,10 +27,20 @@ def test_managed_comparison_checks_study_once_and_authorizes_every_actual_read(s
         reads.append((artifact_id, purpose, authorization))
         return original_read(artifact_id, purpose=purpose, authorization=authorization)
 
+    def checked_json(path):
+        if path.parent == store.path / 'events':
+            chain_reads.append(path)
+        return original_json(path)
+
     monkeypatch.setattr(query, '_grant', checked_grant)
     monkeypatch.setattr(store, 'read_artifact', checked_read)
+    monkeypatch.setattr(store, '_json', checked_json)
     previous_sequence = len(store.events())
+    chain_reads.clear()
     data = query.comparison(result['comparison']['aggregate_hash'])
+    physical_reads = len(chain_reads)
+    total_events = len(store.events())
+    assert physical_reads <= 2 * total_events, 'managed query repeatedly reads the same complete chain'
     expected = {data['package'][key] for key in ('aggregate_id', 'computation-receipt', 'figure-index')}
     assert {artifact_id for artifact_id, _, _ in reads} == expected
     assert all(purpose == 'preview' and authorization == source[2] for _, purpose, authorization in reads)
