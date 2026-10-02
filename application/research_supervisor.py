@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import threading
 
 from infrastructure.process_tree import ProcessTree
 from infrastructure.research_store import ResearchError, ResearchStore
@@ -53,8 +54,34 @@ class ResearchSupervisor:
         start = self.monotonic()
         deadline = start + budget.job_seconds
         wrapper = Path(__file__).resolve().parents[1] / "infrastructure/research_worker.py"
-        process, tree = None, None
+        process, tree, deadline_monitor = None, None, None
+        expired = threading.Event()
+        monitor_errors = []
         outcome, artifact_id, error_code = "FAILED", None, "WORKER_FAILED"
+        def stop_tree():
+            try:
+                if tree is not None:
+                    tree.terminate()
+                    if not tree.wait_stopped():
+                        raise ResearchError("WORKER_ACTIVE", "whole process tree stop is unconfirmed")
+                if process is not None:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait(timeout=1)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise ResearchError("WORKER_ACTIVE", "whole process tree stop is unconfirmed") from exc
+
+        def hard_stop():
+            # No store lock or journal I/O before the native tree kill. This
+            # remains live after the wrapper exits or the owner poll blocks.
+            expired.set()
+            try:
+                tree.terminate()
+            except OSError as exc:
+                monitor_errors.append(exc)
+
+        def past_deadline():
+            return expired.is_set() or self.monotonic() >= deadline
         self.store.transition(attempt_id, "RUNNING")
         try:
             with (work / "worker.log").open("xb") as log:
@@ -66,6 +93,9 @@ class ResearchSupervisor:
                     env={**os.environ, "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"},
                 )
                 tree = ProcessTree(process)
+                deadline_monitor = threading.Timer(max(0, deadline - self.monotonic()), hard_stop)
+                deadline_monitor.daemon = True
+                deadline_monitor.start()
                 with self.store.lock():
                     if self.store._attempts()[attempt_id]["state"] != "RUNNING":
                         raise ResearchError("IDENTITY_CONFLICT", "attempt reconciled before worker launch")
@@ -77,7 +107,7 @@ class ResearchSupervisor:
                 last_logged = start
                 while process.poll() is None:
                     now = self.monotonic()
-                    if now >= deadline:
+                    if expired.is_set() or now >= deadline:
                         outcome, error_code = "TIMEOUT", "TIMEOUT"
                         break
                     if self.budget.balance(run["arm_id"])["closed"]:
@@ -93,10 +123,18 @@ class ResearchSupervisor:
                         self.store.append("HEARTBEAT", {"attempt_id": attempt_id, "monotonic_elapsed_ms": math.ceil((now - start) * 1000)})
                         last_logged = now
                     time.sleep(min(0.025, max(0, deadline - now)))
-                if process.poll() is not None:
-                    if self.monotonic() >= deadline or process.returncode == 124:
+                completed_code = process.poll()
+                # A successful wrapper is not proof its descendants exited.
+                # Stop and confirm them before any owner-side result handling.
+                stop_tree()
+                self.store.append("WORKER_TREE_STOPPED", {"attempt_id": attempt_id,
+                    "reservation_id": reservation["reservation_id"],
+                    "observed_elapsed_ms": math.ceil((self.monotonic() - start) * 1000),
+                    "confirmation": "native-job-or-process-group-no-running-descendants"})
+                if completed_code is not None:
+                    if past_deadline() or completed_code == 124:
                         outcome, error_code = "TIMEOUT", "TIMEOUT"
-                    elif process.returncode == 0 and result_path.is_file():
+                    elif completed_code == 0 and result_path.is_file():
                         # Registered adapters must supply a finite JSON result; no pickle.
                         import json
                         content = result_path.read_bytes()
@@ -116,24 +154,47 @@ class ResearchSupervisor:
                         if result.get("admission_hash"):
                             receipt = self.store.manifest("admission-" + result["admission_hash"])
                             visibility = combine_visibility([visibility, admission_visibility(self.store.manifest, receipt)])
-                        artifact = self.store.artifact(content, role="result", visibility=visibility,
-                            block_ids=[run["cell"]["block_id"]], study_id=run["study_id"])
-                        outcome, artifact_id, error_code = "SUCCEEDED", artifact["artifact_id"], None
-        except BaseException:
+                        if past_deadline():
+                            outcome, error_code = "TIMEOUT", "TIMEOUT"
+                        else:
+                            artifact = self.store.artifact(content, role="result", visibility=visibility,
+                                block_ids=[run["cell"]["block_id"]], study_id=run["study_id"])
+                            outcome, artifact_id, error_code = "SUCCEEDED", artifact["artifact_id"], None
+        except BaseException as exc:
             # Even if recording is unavailable, containment cleanup always runs.
-            outcome, error_code = "INTERRUPTED", "SUPERVISOR_ERROR"
-            raise
+            if isinstance(exc, Exception) and past_deadline():
+                outcome, artifact_id, error_code = "TIMEOUT", None, "TIMEOUT"
+            else:
+                outcome, error_code = "INTERRUPTED", "SUPERVISOR_ERROR"
+                raise
         finally:
+            stop_confirmed = True
+            if deadline_monitor is not None:
+                deadline_monitor.cancel()
+                deadline_monitor.join(timeout=1)
+                stop_confirmed = not deadline_monitor.is_alive()
+            try:
+                stop_tree()
+            except (OSError, ResearchError, subprocess.TimeoutExpired):
+                stop_confirmed = False
             if tree is not None:
-                tree.terminate()
                 tree.close()
             if process is not None:
-                if process.poll() is None:
-                    process.kill()
-                process.wait()
                 process.stdin.close()
             elapsed = math.ceil((self.monotonic() - start) * 1000)
-            self.budget.settle(reservation["reservation_id"], elapsed, outcome=outcome)
+            if outcome == "SUCCEEDED" and (past_deadline() or elapsed > reservation["reserved_ms"]):
+                outcome, artifact_id, error_code = "TIMEOUT", None, "TIMEOUT"
+            if stop_confirmed:
+                self.budget.settle(reservation["reservation_id"], elapsed, outcome=outcome)
+            else:
+                # Do not release a possibly-live slot or invent measured cost.
+                # Recovery still requires actual stop evidence for settlement.
+                outcome, artifact_id, error_code = "INTERRUPTED", None, "WORKER_STOP_UNCONFIRMED"
+                self.store.append("WORKER_STOP_UNCONFIRMED", {"attempt_id": attempt_id,
+                    "reservation_id": reservation["reservation_id"], "observed_elapsed_ms": elapsed,
+                    "watchdog_error": bool(monitor_errors)})
+                self.store.append("ARM_CLOSED", {"arm_id": run["arm_id"], "reason": error_code})
+                elapsed = None
             self.store.transition(attempt_id, outcome, error_code=error_code, artifact_id=artifact_id)
         return {"attempt_id": attempt_id, "state": outcome, "artifact_id": artifact_id,
                 "exit_code": 0 if outcome == "SUCCEEDED" else 1, "elapsed_ms": elapsed}

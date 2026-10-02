@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import os
 import signal
+import sys
+import time
+from pathlib import Path
 
 
 def process_may_be_alive(pid):
@@ -77,6 +80,8 @@ class ProcessTree:
             self.kernel.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
             self.kernel.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
             self.kernel.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+            self.kernel.QueryInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
+                                                            wintypes.DWORD, ctypes.c_void_p]
             self.kernel.CloseHandle.argtypes = [wintypes.HANDLE]
             self.job = self.kernel.CreateJobObjectW(None, None)
             limits = Extended()
@@ -92,12 +97,66 @@ class ProcessTree:
     def terminate(self):
         if os.name == "nt":
             if self.job:
-                self.kernel.TerminateJobObject(self.job, 124)
+                if not self.kernel.TerminateJobObject(self.job, 124):
+                    import ctypes
+                    raise OSError(ctypes.get_last_error(), "cannot terminate contained process tree")
         else:
             try:
                 os.killpg(self.process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+    def active(self):
+        """Confirm the entire group/job, not just its already-dead leader.
+
+        Linux zombies are terminated, not executing descendants. Unknown OS
+        observations are errors: callers must retain the reservation.
+        """
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+            class Accounting(ctypes.Structure):
+                _fields_ = [(name, ctypes.c_int64) for name in (
+                    "TotalUserTime", "TotalKernelTime", "ThisPeriodTotalUserTime", "ThisPeriodTotalKernelTime")]
+                _fields_ += [(name, wintypes.DWORD) for name in (
+                    "TotalPageFaultCount", "TotalProcesses", "ActiveProcesses", "TotalTerminatedProcesses")]
+            data = Accounting()
+            if not self.job or not self.kernel.QueryInformationJobObject(
+                    self.job, 1, ctypes.byref(data), ctypes.sizeof(data), None):
+                raise OSError(ctypes.get_last_error(), "cannot confirm whole-job stop")
+            return data.ActiveProcesses != 0
+        if sys.platform.startswith("linux") and Path("/proc").is_dir():
+            for count, path in enumerate(Path("/proc").iterdir()):
+                if count > 100_000:
+                    raise OSError("process observation quota exceeded")
+                if not path.name.isdecimal():
+                    continue
+                try:
+                    # stat: pid (comm) state ppid pgrp ...; comm may contain ')'.
+                    fields = (path / "stat").read_text().rsplit(")", 1)[1].split()
+                    if int(fields[2]) == self.process.pid and fields[0] not in {"Z", "X"}:
+                        return True
+                except (FileNotFoundError, ProcessLookupError):
+                    continue
+                except (ValueError, IndexError) as exc:
+                    raise OSError("cannot parse process group observation") from exc
+            return False
+        try:
+            os.killpg(self.process.pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+
+    def wait_stopped(self, timeout=1):
+        """Bounded observation after kill, never an extra computation grace."""
+        until = time.monotonic() + timeout
+        while True:
+            self.process.poll()
+            if not self.active():
+                return True
+            if time.monotonic() >= until:
+                return False
+            time.sleep(0.005)
 
     def close(self):
         if self.job:

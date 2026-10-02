@@ -2,9 +2,12 @@
 
 import sys
 import time
+import pytest
 
 from application.research_budget import BudgetSpec
 from application.research_supervisor import ResearchSupervisor
+from application.research_queue import ResearchQueue
+from infrastructure.research_store import ResearchError, digest
 from tests.test_research_budget import registered
 
 
@@ -64,3 +67,53 @@ def test_independent_watchdog_stops_tree_when_owner_polling_blocks(tmp_path, mon
     assert calls, "counterexample must block the actual owner poll"
     assert result["state"] == "TIMEOUT" and result["exit_code"] != 0
     assert not marker.exists(), "deadline enforcement disappeared when the wrapper exited"
+
+
+@pytest.mark.parametrize("observation", ["active", "unavailable"])
+def test_unconfirmed_whole_tree_stop_retains_reservation_and_queue_slot(tmp_path, monkeypatch, observation):
+    from infrastructure.process_tree import ProcessTree
+    store, attempts = registered(tmp_path)
+    def unknown(self, timeout=1):
+        if observation == "unavailable":
+            raise OSError("synthetic stop observation failure")
+        return False
+    monkeypatch.setattr(ProcessTree, "wait_stopped", unknown)
+    supervisor = ResearchSupervisor(store)
+    validated = []
+    with pytest.raises(ResearchError, match="WORKER_ACTIVE"):
+        supervisor.run(attempts[0], lambda output: [sys.executable, "-c",
+            "import pathlib,sys; pathlib.Path(sys.argv[1]).write_text('{}')", str(output)],
+            BudgetSpec(4), result_validator=lambda value: validated.append(True))
+    assert validated == []
+    events = store.events()
+    reservation = next(e["payload"] for e in events if e["event_kind"] == "RESERVE")
+    assert not any(e["event_kind"] == "SETTLE" for e in events)
+    assert store.attempts()[attempts[0]]["error_code"] == "WORKER_STOP_UNCONFIRMED"
+    assert supervisor.budget.balance("affine")["committed_ms"] == reservation["reserved_ms"]
+    assert supervisor.budget.balance("affine")["closed"]
+    value = store.manifest("study-synthetic")["spec"]
+    arm = {**value["arms"][0], "arm_id": "other", "model_family_id": "other", "method_family_id": "other"}
+    other = {**value, "study_id": "other-study", "arms": [arm],
+             "cells": [{**value["cells"][0], "arm_id": "other"}]}
+    store.register(other, digest(other))
+    attempt = store.new_attempt(store.register_run("other-study", other["cells"][0]))
+    next_reservation = supervisor.budget.reserve(attempt, BudgetSpec(1))
+    queue = ResearchQueue(store)
+    queue.enqueue(next_reservation)
+    assert queue.claim(next_reservation["reservation_id"]) is None
+
+
+def test_numeric_process_group_kill_is_not_reissued_after_stop(monkeypatch):
+    from types import SimpleNamespace
+    import infrastructure.process_tree as containment
+    tree = object.__new__(containment.ProcessTree)
+    tree.process = SimpleNamespace(pid=12345)
+    tree.job = None
+    tree._termination_sent = False
+    calls = []
+    # Mock the module backend, not the host os.name or an actual unowned PID.
+    monkeypatch.setattr(containment, "os", SimpleNamespace(name="posix", killpg=lambda pid, sig: calls.append((pid, sig))))
+    monkeypatch.setattr(containment, "signal", SimpleNamespace(SIGKILL=9))
+    tree.terminate()
+    tree.terminate()
+    assert calls == [(12345, 9)], "a reaped numeric group ID must not be signaled again"
