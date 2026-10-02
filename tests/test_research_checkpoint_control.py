@@ -91,7 +91,7 @@ def test_owner_cannot_acknowledge_without_request(tmp_path):
 def test_failed_ack_publication_is_not_accepted(tmp_path, monkeypatch):
     exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", time.monotonic() + 3, 4096)
     exchange.request()
-    def unavailable(*args):
+    def unavailable(*args, **kwargs):
         raise OSError("synthetic unavailable acknowledgement")
     monkeypatch.setattr(control, "write_frame", unavailable)
     with pytest.raises(OSError):

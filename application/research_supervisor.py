@@ -98,7 +98,7 @@ class ResearchSupervisor:
                 frame = channel.response()
             except ControlError as exc:
                 raise ResearchError("CONTRACT_MISMATCH", str(exc)) from exc
-            if frame is None:
+            if frame is None or past_deadline():
                 return
             progress = frame["progress"]
             if (type(progress) is not dict or set(progress) != {"completed_steps", "total_steps", "throughput_per_second", "eta_seconds"}
@@ -116,9 +116,15 @@ class ResearchSupervisor:
             metadata = self.store.manifest("artifact-" + reference["artifact_id"])
             if metadata["role"] != "checkpoint" or metadata["study_id"] != run["study_id"]:
                 raise ResearchError("CONTRACT_MISMATCH", "owner checkpoint artifact scope differs")
-            saved_checkpoint = {**reference, "progress": progress, "elapsed_ms": math.ceil((self.monotonic() - start) * 1000)}
-            self.store.append("CHECKPOINT_SAVED", {"attempt_id": attempt_id, "request_id": channel.request_id, **saved_checkpoint})
+            if past_deadline():
+                return
+            candidate = {**reference, "progress": progress, "elapsed_ms": math.ceil((self.monotonic() - start) * 1000)}
+            self.store.append("CHECKPOINT_SAVED", {"attempt_id": attempt_id, "request_id": channel.request_id, **candidate})
+            if past_deadline():
+                return
             channel.acknowledge(reference["artifact_id"])
+            if not past_deadline():
+                saved_checkpoint = candidate
         self.store.transition(attempt_id, "RUNNING")
         try:
             with (work / "worker.log").open("xb") as log:

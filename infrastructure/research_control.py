@@ -109,15 +109,25 @@ def read_frame(path, limit):
     return value
 
 
-def write_frame(path, value, limit):
+def require_live(deadline):
+    if deadline is not None and (type(deadline) not in {int, float}
+            or (type(deadline) is int and deadline.bit_length() > 256)
+            or not math.isfinite(deadline) or time.monotonic() >= deadline):
+        raise ControlError("checkpoint control reached the hard deadline")
+
+
+def write_frame(path, value, limit, *, deadline=None):
     content = canonical(value, limit)
+    require_live(deadline)
     temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
     try:
         with temporary.open("xb") as stream:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
+        require_live(deadline)
         os.replace(temporary, path)
+        require_live(deadline)
     finally:
         try:
             temporary.unlink()
@@ -142,7 +152,7 @@ class CheckpointExchange:
         self.request_id = uuid.uuid4().hex
         value = {"schema_version": SCHEMA, "attempt_id": self.attempt_id, "token": self.token,
             "request_id": self.request_id, "deadline": self.deadline}
-        write_frame(self.directory / "checkpoint-request.json", value, 16384)
+        write_frame(self.directory / "checkpoint-request.json", value, 16384, deadline=self.deadline)
         return self.request_id
 
     def response(self):
@@ -162,7 +172,7 @@ class CheckpointExchange:
                 or re.fullmatch(r"[0-9a-f]{64}", artifact_id) is None):
             raise ControlError("checkpoint acknowledgement needs issued request and valid artifact")
         write_frame(self.directory / "checkpoint-ack.json", {"schema_version": SCHEMA,
-            "request_id": self.request_id, "artifact_id": artifact_id}, 16384)
+            "request_id": self.request_id, "artifact_id": artifact_id}, 16384, deadline=self.deadline)
         self.accepted = True
 
 
@@ -214,10 +224,11 @@ class WorkerControl:
             raise ControlError("checkpoint save has no live request")
         frame = {key: self.request[key] for key in ("schema_version", "attempt_id", "token", "request_id")}
         write_frame(self.directory / "checkpoint-response.json", {**frame, "state": state, "progress": progress},
-            self.descriptor["byte_limit"])
+            self.descriptor["byte_limit"], deadline=self.descriptor["deadline"])
         while time.monotonic() < self.descriptor["deadline"]:
             ack = read_frame(self.directory / "checkpoint-ack.json", 16384)
             if ack is not None:
+                require_live(self.descriptor["deadline"])
                 if (type(ack) is not dict or set(ack) != {"schema_version", "request_id", "artifact_id"}
                         or ack["schema_version"] != SCHEMA or ack["request_id"] != self.request["request_id"]
                         or type(ack["artifact_id"]) is not str or re.fullmatch(r"[0-9a-f]{64}", ack["artifact_id"]) is None):
