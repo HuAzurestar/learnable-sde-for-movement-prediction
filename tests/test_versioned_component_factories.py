@@ -181,3 +181,25 @@ def test_actual_trainer_cannot_mutate_iteration_bound_after_construction(monkeyp
     monkeypatch.setattr(app.estimator, "fit", lambda *a, **k: pytest.fail("over-quota iterations executed"))
     with pytest.raises(ResearchError, match="RESOURCE_PLAN_REJECTED"):
         app.train(data)
+
+
+def test_composition_snapshots_are_revalidated_as_one_pipeline(monkeypatch):
+    cfg = config()
+    bindings = root.component_bindings(cfg, profile(), matrix_cells=1)
+    original = root.plan_components
+    def race(configuration, document, **kwargs):
+        result = original(configuration, document, **kwargs)
+        if document is bindings:
+            for role, registry in (("model", root.MODEL_REGISTRY), ("trainer", root.ESTIMATOR_REGISTRY),
+                    ("predictor", root.INFERENCE_REGISTRY)):
+                binding = bindings[role]
+                binding["config"]["model"]["I1"]["n_modes"] = 3
+                entry = registry._versions.resolve(binding["component_id"], binding["component_version"]).entry
+                bindings[role] = execution_binding(entry, binding["config"], binding["inputs"], matrix_cells=1)
+        return result
+    monkeypatch.setattr(root, "plan_components", race)
+    try:
+        app = ExperimentApplication.from_config(cfg, component_bindings=bindings, matrix_cells=1)
+    except ResearchError:
+        return
+    assert app.model.n_modes == 2, "individually valid bindings bypassed the originally validated composition"

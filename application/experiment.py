@@ -151,7 +151,21 @@ class ExperimentApplication:
         return application
 
     def train(self, data: TrainingData | SegmentEMData) -> TrainingRun:
+        profile = self._component_inputs()
+        if profile is not None:
+            self._check_model_profile(self.model)
+            iterations = getattr(self.estimator, "max_iter", None)
+            if type(iterations) is not int or iterations <= 0:
+                raise ResearchError("CONTRACT_MISMATCH", "actual trainer iteration contract is invalid")
+            if iterations > profile["steps"]:
+                raise ResearchError("RESOURCE_PLAN_REJECTED", "actual trainer iterations exceed frozen step bound")
         if isinstance(data, TrainingData):
+            if profile is not None:
+                # Quotas precede validation masks and conversion allocations.
+                if (len(data.train) > profile["components"] or
+                        sum(segment.x.shape[0] for segment in data.train if segment.x.ndim > 0) > profile["observations"] or
+                        any(segment.x.ndim == 2 and segment.x.shape[1] > profile["state_dim"] for segment in data.train)):
+                    raise ResearchError("RESOURCE_PLAN_REJECTED", "trajectory inputs exceed frozen pre-adapter bound")
             data.validate()
             legacy_data = SegmentEMData(
                 tuple(to_phase_space_1d(segment) for segment in data.train),
@@ -163,9 +177,7 @@ class ExperimentApplication:
             raise DataValidationError(
                 "training data must be TrajectoryDataset or SegmentEMData"
             )
-        profile = self._component_inputs()
         if profile is not None:
-            self._check_model_profile(self.model)
             if (len(legacy_data.segments) > profile["components"]
                     or sum(segment.shape[0] for segment in legacy_data.segments) > profile["observations"]):
                 raise ResearchError("RESOURCE_PLAN_REJECTED", "actual training inputs exceed frozen observation/segment bound")
