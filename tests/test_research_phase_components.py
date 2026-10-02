@@ -92,3 +92,36 @@ def test_actual_registered_predictor_rejects_unplanned_inputs_before_rollout(fau
     with pytest.raises(ResearchError, match="RESOURCE_PLAN_REJECTED|CONTRACT_MISMATCH"):
         predictor(model, **arguments, n_samples=9 if fault == "paths" else 8,
             rng=np.random.default_rng(19), condition_field=None)
+
+
+def test_registered_trainer_cannot_fall_back_to_unversioned_model_constructor():
+    trainer = components()["trainer"]
+    with pytest.raises(ResearchError, match="CONTRACT_MISMATCH"):
+        trainer(affine.synthetic_cohort().splits["train"], condition_names=(), feature_basis="direct", ridge=1e-6)
+
+
+@pytest.mark.parametrize("fault", ["weights-dtype", "weights-shape", "diffusion-list", "diffusion-nan"])
+def test_predictor_rejects_actual_model_profile_before_any_rollout(monkeypatch, fault):
+    factories = components()
+    model = factories["trainer"](affine.synthetic_cohort().splits["train"], condition_names=(),
+        model_factory=factories["model"])
+    changes = {"weights-dtype": {"weights": model.weights.astype(np.float32)},
+        "weights-shape": {"weights": np.ones((3, 3))},
+        "diffusion-list": {"diffusion_covariance": [[1., 0.], [0., 1.]]},
+        "diffusion-nan": {"diffusion_covariance": np.full((2, 2), np.nan)}}
+    model = replace(model, **changes[fault])
+    monkeypatch.setattr(affine.phase_space_api(), "rollout_phase_space_from_state",
+        lambda *a, **k: pytest.fail("invalid model reached the actual rollout allocation"))
+    with pytest.raises(ResearchError, match="CONTRACT_MISMATCH"):
+        factories["predictor"](model, initial_state=np.ones(4), time_grid=np.arange(5, dtype=np.float64),
+            n_samples=8, rng=np.random.default_rng(19))
+
+
+def test_direct_four_state_adapter_checks_complete_combination_before_any_factory(monkeypatch):
+    registries = component_registries(4)
+    bindings = fixture_component_bindings(4, 19, matrix_cells=1, registries=registries)
+    # All role bindings remain individually valid; adapter seed must still
+    # reject the whole combination before the first actual constructor.
+    monkeypatch.setattr(ComponentRegistry, "create_bound", lambda *a, **k: pytest.fail("unbound combination constructed"))
+    with pytest.raises(ResearchError, match="CONTRACT_MISMATCH"):
+        affine.four_state(20, component_bindings=bindings, matrix_cells=1, registries=registries)
