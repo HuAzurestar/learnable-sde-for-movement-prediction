@@ -35,6 +35,9 @@ from .pipelines import EvidenceConditioner, EvaluationPipeline
 from .runtime import RunContext
 from dataclasses import asdict
 from copy import deepcopy
+import math
+import json
+from infrastructure.research_store import ResearchError, encode
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,8 @@ class ExperimentApplication:
         run_store: AtomicRunStore | None = None,
     ) -> None:
         self.config = config
+        self._component_plan_document = None
+        self._component_input_document = None
         self.model = model
         self.estimator = estimator
         self.runtime = runtime
@@ -85,6 +90,19 @@ class ExperimentApplication:
     @property
     def conditioner(self) -> EvidenceConditioner | None:
         return self.evaluation_pipeline.conditioner
+
+    @property
+    def component_plan(self):
+        return json.loads(self._component_plan_document) if self._component_plan_document is not None else None
+
+    def _component_inputs(self):
+        return json.loads(self._component_input_document) if self._component_input_document is not None else None
+
+    def _check_model_profile(self, model):
+        profile = self._component_inputs()
+        if profile is not None and (model.state_dim != profile["state_dim"] or model.noise_dim != profile["noise_dim"]
+                or str(model.dtype).removeprefix("torch.") != profile["dtype"] or str(model.device) != profile["device"]):
+            raise ResearchError("CONTRACT_MISMATCH", "constructed or supplied model differs from frozen input profile")
 
     @classmethod
     def from_config(
@@ -124,7 +142,12 @@ class ExperimentApplication:
             conditioner=conditioner,
             run_store=run_store,
         )
-        application.component_plan = component_plan
+        if component_plan is not None:
+            application._component_plan_document = encode(component_plan)
+            application._component_input_document = encode(component_bindings["model"]["inputs"])
+            application._check_model_profile(application.model)
+            if not application.inference_engine.supports(application.model):
+                raise ResearchError("CONTRACT_MISMATCH", "constructed predictor does not support the actual model")
         return application
 
     def train(self, data: TrainingData | SegmentEMData) -> TrainingRun:
@@ -140,6 +163,14 @@ class ExperimentApplication:
             raise DataValidationError(
                 "training data must be TrajectoryDataset or SegmentEMData"
             )
+        profile = self._component_inputs()
+        if profile is not None:
+            self._check_model_profile(self.model)
+            if (len(legacy_data.segments) > profile["components"]
+                    or sum(segment.shape[0] for segment in legacy_data.segments) > profile["observations"]):
+                raise ResearchError("RESOURCE_PLAN_REJECTED", "actual training inputs exceed frozen observation/segment bound")
+            if any(segment.ndim != 2 or segment.shape[1] != profile["state_dim"] for segment in legacy_data.segments):
+                raise ResearchError("CONTRACT_MISMATCH", "actual training state shape differs")
         prepared = SegmentEMData(
             tuple(
                 segment.to(device=self.runtime.device, dtype=self.runtime.dtype)
@@ -157,6 +188,31 @@ class ExperimentApplication:
         return TrainingRun(self.model, result)
 
     def predict(self, model: SDEModel, request: ForecastRequest) -> Forecast:
+        profile = self._component_inputs()
+        if profile is not None:
+            self._check_model_profile(model)
+            request.validate()
+            if type(request.n_samples) is not int or request.n_samples > profile["paths"]:
+                raise ResearchError("RESOURCE_PLAN_REJECTED", "actual forecast paths exceed frozen sample bound")
+            if request.initial_state.numel() != profile["state_dim"]:
+                raise ResearchError("CONTRACT_MISMATCH", "forecast initial state shape differs")
+            steps = len(request.horizons) + 1
+            if hasattr(self.inference_engine, "max_step"):
+                max_step = self.inference_engine.max_step
+                if not math.isfinite(max_step) or max_step <= 0:
+                    raise ResearchError("CONTRACT_MISMATCH", "predictor step must be positive and finite")
+                steps, previous = 1, 0.0
+                for value in request.horizons:
+                    horizon = float(value)
+                    ratio = (horizon - previous) / max_step
+                    if not math.isfinite(ratio) or ratio > profile["steps"]:
+                        raise ResearchError("RESOURCE_PLAN_REJECTED", "forecast time grid exceeds frozen step bound")
+                    # Conservative extra rounding step avoids undercounting
+                    # legacy float accumulation without simulating a rollout.
+                    steps += max(1, math.ceil(math.nextafter(ratio, math.inf)))
+                    previous = horizon
+            if steps > profile["steps"]:
+                raise ResearchError("RESOURCE_PLAN_REJECTED", "forecast time grid exceeds frozen step bound")
         return self.evaluation_pipeline.predict(model, request, self.runtime)
 
     def submit_evidence(self, evidence: SearchEvidence) -> EvidenceId:

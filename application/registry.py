@@ -48,9 +48,13 @@ class ComponentRegistry(Generic[ConfigT, ComponentT]):
         component's typed model/fit/forecast interfaces validate those results.
         It must be invoked inside a managed worker for budgeted research jobs.
         """
-        _, registration = self.plan_bound(binding, matrix_cells=matrix_cells, **compatibility)
-        return registration.builder(json.loads(encode(binding["config"])),
-            json.loads(encode(binding["inputs"])), context)
+        # First establish bounded JSON; then detach and revalidate exactly the
+        # content used by the constructor. A caller mutation between planning
+        # and snapshotting cannot smuggle unplanned configuration into it.
+        self.plan_bound(binding, matrix_cells=matrix_cells, **compatibility)
+        sealed = json.loads(encode(binding))
+        _, registration = self.plan_bound(sealed, matrix_cells=matrix_cells, **compatibility)
+        return registration.builder(sealed["config"], sealed["inputs"], context)
 
     @property
     def names(self) -> tuple[str, ...]:

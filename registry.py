@@ -157,7 +157,8 @@ def _profile_schema():
 
 def _entry(component_id, kind, builder, capabilities):
     tensors = {
-        "model": [{"name": "model_covariances", "axes": ["mixtures", "state_dim", "state_dim"], "item_bytes": 8}],
+        "model": [{"name": "model_covariances", "axes": ["mixtures", "state_dim", "state_dim"], "item_bytes": 8},
+            {"name": "model_parameters", "axes": ["mixtures", "state_dim", "state_dim", "state_dim"], "item_bytes": 8}],
         "trainer": [{"name": "fit_workspace", "axes": ["components", "observations", "state_dim", "state_dim"], "item_bytes": 8}],
         "predictor": [{"name": "rollout", "axes": ["paths", "steps", "state_dim"], "item_bytes": 8}]}
     return RegistryEntry(component_id=component_id, component_kind=kind, version="1.0.0",
@@ -223,6 +224,8 @@ def plan_components(cfg, bindings, *, matrix_cells):
                 or entries["model"]["units"] != entries[role]["units"]
                 or not required <= set(entries["model"]["capabilities"])):
             raise ResearchError("CONTRACT_MISMATCH", "component requires unavailable model capability or state contract")
+    if cfg.protocol["em"]["max_iter"] > inputs["steps"]:
+        raise ResearchError("RESOURCE_PLAN_REJECTED", "trainer iteration bound exceeds frozen step bound")
     totals = {key: sum(plan[key] for plan in plans.values()) for key in ("tensor_elements", "tensor_bytes")}
     if any(totals[key] > GLOBAL_LIMITS[key] for key in totals):
         raise ResearchError("RESOURCE_PLAN_REJECTED", "combined component allocation exceeds shared quota")

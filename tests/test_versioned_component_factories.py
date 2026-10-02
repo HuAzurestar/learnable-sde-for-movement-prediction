@@ -158,3 +158,26 @@ def test_actual_component_execution_cannot_exceed_frozen_profile(monkeypatch, fa
         monkeypatch.setattr(app.inference_engine, "forecast", lambda *a, **k: pytest.fail("over-quota prediction executed"))
         with pytest.raises(ResearchError, match="RESOURCE_PLAN_REJECTED"):
             app.predict(app.model, request)
+
+
+def test_trajectory_quota_is_checked_before_allocating_phase_space_adapter(monkeypatch):
+    from domain import TrajectoryDataset, TrajectorySegment
+    cfg = config()
+    app = ExperimentApplication.from_config(cfg,
+        component_bindings=root.component_bindings(cfg, profile(), matrix_cells=1), matrix_cells=1)
+    data = TrajectoryDataset(train=(TrajectorySegment(t=torch.arange(41, dtype=torch.float64),
+        x=torch.arange(41, dtype=torch.float64).reshape(-1, 1), dt=1., meta={"segment_id": "synthetic-limit"}),))
+    monkeypatch.setattr("application.experiment.to_phase_space_1d", lambda *a, **k: pytest.fail("unplanned adapter allocation"))
+    with pytest.raises(ResearchError, match="RESOURCE_PLAN_REJECTED"):
+        app.train(data)
+
+
+def test_actual_trainer_cannot_mutate_iteration_bound_after_construction(monkeypatch):
+    cfg = config()
+    app = ExperimentApplication.from_config(cfg,
+        component_bindings=root.component_bindings(cfg, profile(), matrix_cells=1), matrix_cells=1)
+    app.estimator.max_iter = 9
+    data, _ = make_synthetic_em_data(n_segments=4, length=10, dt=1., seed=19)
+    monkeypatch.setattr(app.estimator, "fit", lambda *a, **k: pytest.fail("over-quota iterations executed"))
+    with pytest.raises(ResearchError, match="RESOURCE_PLAN_REJECTED"):
+        app.train(data)
