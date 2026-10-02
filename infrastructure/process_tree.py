@@ -53,6 +53,7 @@ class ProcessTree:
     def __init__(self, process):
         self.process = process
         self.job = None
+        self._termination_sent = False
         if os.name == "nt":
             import ctypes
             from ctypes import wintypes
@@ -95,16 +96,25 @@ class ProcessTree:
                 raise OSError(error, "cannot contain worker process tree")
 
     def terminate(self):
-        if os.name == "nt":
-            if self.job:
-                if not self.kernel.TerminateJobObject(self.job, 124):
+        if self._termination_sent:
+            return
+        # Claim the one-shot operation before a native call can release the GIL.
+        # A numeric POSIX group may be reused after its last member is reaped.
+        self._termination_sent = True
+        try:
+            if os.name == "nt":
+                if self.job and not self.kernel.TerminateJobObject(self.job, 124):
                     import ctypes
                     raise OSError(ctypes.get_last_error(), "cannot terminate contained process tree")
-        else:
-            try:
-                os.killpg(self.process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            else:
+                try:
+                    os.killpg(self.process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        except OSError:
+            if os.name == "nt":
+                self._termination_sent = False  # This immutable job handle can be retried safely.
+            raise
 
     def active(self):
         """Confirm the entire group/job, not just its already-dead leader.
