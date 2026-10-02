@@ -7,7 +7,7 @@ outside Git, and reopening requires the original store identity.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import threading
 import time
 import uuid
 
@@ -120,6 +121,7 @@ class ResearchStore:
         self.path = root / "pirc25"
         self.store_id = identifier(store_id)
         self.writer_epoch = uuid.uuid4().hex
+        self._read_scope = threading.local()
         if initialize:
             self.path.mkdir(parents=True, exist_ok=True)
         if not self.path.is_dir():
@@ -144,7 +146,30 @@ class ResearchStore:
                 self._events()
 
     def lock(self):
+        if self._read_snapshot() is not None:
+            return nullcontext()  # This thread still owns the outer OS lock.
         return file_lock(self.path / ".writer.lock")
+
+    def _read_snapshot(self):
+        snapshot = getattr(self._read_scope, 'snapshot', None)
+        # A forked process cannot inherit permission to bypass its parent's lock.
+        return snapshot if snapshot is not None and snapshot[0] == os.getpid() else None
+
+    @contextmanager
+    def _read_transaction(self):
+        if self._read_snapshot() is not None:
+            yield
+            return
+        with self.lock():
+            events = self._events()
+            self._read_scope.snapshot = (os.getpid(), events)
+            try:
+                yield
+            finally:
+                del self._read_scope.snapshot
+                # Also detects physical corruption during I/O. No content leaves
+                # the outer request until this fresh, uncached validation passes.
+                self._events()
 
     @staticmethod
     def _json(path):
@@ -154,6 +179,10 @@ class ResearchStore:
             raise ResearchError("CORRUPT_ARTIFACT", "invalid authoritative object") from exc
 
     def _events(self) -> list[dict]:
+        snapshot = self._read_snapshot()
+        if snapshot is not None and snapshot[1] is not None:
+            # Do not let a caller mutate the verified prefix or appended payloads.
+            return json.loads(encode(snapshot[1]))
         events = []
         previous = "0" * 64
         for sequence, path in enumerate(sorted((self.path / "events").glob("*.json")), 1):
@@ -232,7 +261,18 @@ class ResearchStore:
                 "event_kind": kind, "payload": payload, "created_at": utc_now(),
                 "writer_epoch": self.writer_epoch}
         event = {**body, "hash": digest(body)}
-        atomic_write(self.path / "events" / f"{event['sequence']:016d}.json", encode(event))
+        try:
+            atomic_write(self.path / "events" / f"{event['sequence']:016d}.json", encode(event))
+        except BaseException:
+            if self._read_snapshot() is not None:
+                # Rename may have succeeded before a directory-sync failure.
+                # Keep the lock, but physically reread before any later append.
+                self._read_scope.snapshot = (os.getpid(), None)
+            raise
+        snapshot = self._read_snapshot()
+        if snapshot is not None and snapshot[1] is not None:
+            # The event is durable even if publishing head.json fails afterwards.
+            snapshot[1].append(json.loads(encode(event)))
         atomic_write(self.path / "head.json", encode({"sequence": event["sequence"], "hash": event["hash"]}))
         return event
 
@@ -463,7 +503,7 @@ class ResearchStore:
     def read_artifact(self, artifact_id: str, *, purpose: str, authorization: dict) -> bytes:
         if not re.fullmatch(r"[0-9a-f]{64}", artifact_id):
             raise ResearchError("UNAUTHORIZED_DATA", "invalid artifact ID")
-        with self.lock():
+        with self._read_transaction():
             metadata = self._manifest("artifact-" + artifact_id)
             try:
                 grant = self._manifest("authorization-" + identifier(authorization.get("authorization_id")))

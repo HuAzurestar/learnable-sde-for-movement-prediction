@@ -47,6 +47,10 @@ class ResearchQuery:
         return items
 
     def _comparison_visible(self, package, grant):
+        with self.store._read_transaction():
+            return self._visible_comparison(package, grant)
+
+    def _visible_comparison(self, package, grant):
         # A package manifest itself contains hashes and artifact IDs. Do not expose it
         # unless every referenced artifact is within the preview grant's scope.
         references = [package[key] for key in ("aggregate_id", "table", "evidence-index")]
@@ -169,8 +173,9 @@ class ResearchQuery:
                 "selectors": row["selectors"], "comparison_dimensions": row["comparison_dimensions"], "budget": row["budget"]}
 
     def artifact(self, artifact_id, *, export=False):
-        grant = self._grant("export" if export else "preview")
-        return self._artifact(artifact_id, grant, export=export)
+        with self.store._read_transaction():
+            grant = self._grant("export" if export else "preview")
+            return self._artifact(artifact_id, grant, export=export)
 
     def _artifact(self, artifact_id, grant, *, export=False):
         # One comparison is one study disclosure, not three repeated whole-chain
@@ -195,6 +200,10 @@ class ResearchQuery:
         return content, metadata["media_type"]
 
     def comparison(self, aggregate_hash):
+        with self.store._read_transaction():
+            return self._comparison(aggregate_hash)
+
+    def _comparison(self, aggregate_hash):
         grant = self._grant()
         package = self.store.manifest("comparison-" + identifier(aggregate_hash))
         if package["study_id"] != grant["study_id"] or not self._comparison_visible(package, grant):
