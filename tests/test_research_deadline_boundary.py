@@ -153,3 +153,48 @@ def test_wrapper_self_containment_uses_native_pseudo_handle_and_fails_closed(mon
         with pytest.raises(OSError, match="cannot contain worker process tree"):
             containment.ProcessTree.contain_current_process()
         assert calls == [("assign", 1234, ctypes.c_void_p(-1).value), ("close", 1234)]
+
+
+@pytest.mark.parametrize("stop_confirmed", [True, False])
+def test_stale_control_pipe_close_cannot_mask_deadline_settlement(tmp_path, monkeypatch, stop_confirmed):
+    import errno
+    import application.research_supervisor as supervision
+    from infrastructure.process_tree import ProcessTree
+    store, attempts = registered(tmp_path)
+    original_popen = supervision.subprocess.Popen
+    class StaleStdin:
+        def __init__(self, stream):
+            self.stream = stream
+        def write(self, value):
+            return self.stream.write(value)
+        def flush(self):
+            return self.stream.flush()
+        def close(self):
+            try:
+                self.stream.close()
+            except OSError:
+                pass
+            raise OSError(errno.EINVAL, "synthetic stale worker control pipe")
+    def popen(*args, **kwargs):
+        process = original_popen(*args, **kwargs)
+        process.stdin = StaleStdin(process.stdin)
+        return process
+    monkeypatch.setattr(supervision.subprocess, "Popen", popen)
+    if not stop_confirmed:
+        monkeypatch.setattr(ProcessTree, "wait_stopped", lambda self, timeout=1: False)
+    supervisor = ResearchSupervisor(store)
+    command = lambda output: [sys.executable, "-c", "import time; time.sleep(20)"]
+    if stop_confirmed:
+        result = supervisor.run(attempts[0], command, BudgetSpec(0.2))
+        assert result["state"] == "TIMEOUT" and result["exit_code"] != 0
+        settlements = [event for event in store.events() if event["event_kind"] == "SETTLE"]
+        assert len(settlements) == 1 and settlements[0]["payload"]["outcome"] == "TIMEOUT"
+        assert result["elapsed_ms"] > 0
+        assert store.attempts()[attempts[0]]["state"] == "TIMEOUT"
+    else:
+        with pytest.raises(ResearchError, match="WORKER_ACTIVE"):
+            supervisor.run(attempts[0], command, BudgetSpec(0.2))
+        assert not any(event["event_kind"] == "SETTLE" for event in store.events())
+        assert store.attempts()[attempts[0]]["error_code"] == "WORKER_STOP_UNCONFIRMED"
+        assert supervisor.budget.balance("affine")["committed_ms"] == 200
+    assert supervisor.budget.balance("affine")["closed"]
