@@ -27,6 +27,8 @@ class ComparisonRunner:
             aggregate = value["aggregate"]
             decision = aggregate["adjudication"]
             table = value["metrics_csv"].encode()
+            from application.research_figures import validate_figure_package
+            validate_figure_package(aggregate, value["figure_index"], value["figures"])
             if (value["schema_version"] != "pirc25-computation-result-v1" or
                     value["request_hash"] != digest(request) or value["computation_ref"] != request["computation_ref"] or
                     aggregate["computation_ref"] != request["computation_ref"] or
@@ -39,7 +41,7 @@ class ComparisonRunner:
                     decision["compare_hash"] != digest({k: v for k, v in decision.items() if k != "compare_hash"}) or
                     decision["source_bundle_hash"] != bundle["bundle_hash"] or
                     decision["adjudication_spec"] != (bundle.get("comparison_plan") or {}).get("adjudication_spec") or
-                    table != expected_metrics_csv(aggregate) or value["paper_index"] != expected_paper_index(aggregate, table) or
+                    table != expected_metrics_csv(aggregate) or value["paper_index"] != expected_paper_index(aggregate, table, value["figure_index"]) or
                     len(encode(value)) > MAX_OUTPUT_BYTES or
                     code_hash() != request["runtime_code_hash"] or paper_identity(self.paper_root) != request["paper_identity"]):
                 raise ResearchError("CONTRACT_MISMATCH", "managed comparison output binding changed")
@@ -148,7 +150,9 @@ class ComparisonRunner:
         verified_computation(self.store, reference, receipt=receipt, aggregate=value["aggregate"])
         authorize_study(self.store, study_id, grant, "export")  # Expiry during the job must still deny disclosure.
         files = {"aggregate.json": encode(value["aggregate"]), "metrics.csv": value["metrics_csv"].encode(),
-                 "PaperEvidenceIndex.json": encode(value["paper_index"]), "ComputationReceipt.json": encode(receipt)}
+                 "PaperEvidenceIndex.json": encode(value["paper_index"]), "ComputationReceipt.json": encode(receipt),
+                 "FigureIndex.json": encode(value["figure_index"]),
+                 **{name: content.encode("utf-8") for name, content in value["figures"].items()}}
         files["manifest.json"] = encode({"schema_version": "pirc25-evidence-package-v1",
             "aggregate_hash": value["aggregate"]["aggregate_hash"],
             "files": {name: hashlib.sha256(content).hexdigest() for name, content in files.items()}})

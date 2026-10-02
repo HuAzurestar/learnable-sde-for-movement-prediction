@@ -176,7 +176,7 @@ def expected_metrics_csv(aggregate):
     return stream.getvalue().encode()
 
 
-def expected_paper_index(aggregate, table):
+def expected_paper_index(aggregate, table, figure_index=None):
     claims = []
     for arm in aggregate["arms"]:
         for metric, number in sorted(arm["metrics"].items()):
@@ -193,6 +193,7 @@ def expected_paper_index(aggregate, table):
             "aggregate_hash": aggregate["aggregate_hash"], "table_sha256": hashlib.sha256(table).hexdigest(),
             "code_hash": aggregate["code_hash"], "evidence_status": "active", "relation": None,
             "disclosure_scope": aggregate["disclosure_scope"], "claims": claims,
+            **({"figure_index_hash": digest(figure_index)} if figure_index is not None else {}),
             **{name: aggregate[name] for name in ("adjudication", "computation_ref") if name in aggregate}}
 
 
@@ -216,6 +217,7 @@ def accept_evidence_package(store, directory, expected_hash):
         if hashlib.sha256(contents[name]).hexdigest() != manifest["files"].get(name):
             raise ResearchError("CORRUPT_ARTIFACT", "evidence package content differs from manifest")
     aggregate = json.loads(contents["aggregate.json"])
+    figure_index, figure_contents = None, {}
     if aggregate.get("aggregate_hash") != expected_hash:
         raise ResearchError("CORRUPT_ARTIFACT", "aggregate does not match package")
     if "adjudication" in aggregate or "computation_ref" in aggregate:
@@ -232,13 +234,31 @@ def accept_evidence_package(store, directory, expected_hash):
         if (contents["metrics.csv"] != worker_result["metrics_csv"].encode() or
                 contents["PaperEvidenceIndex.json"] != encode(worker_result["paper_index"])):
             raise ResearchError("CORRUPT_ARTIFACT", "managed evidence is not the exact worker serialization")
+        if "figure_index" in worker_result or "figures" in worker_result:
+            from application.research_figures import validate_figure_package
+            validate_figure_package(aggregate, worker_result.get("figure_index"), worker_result.get("figures"))
+            figure_index = worker_result["figure_index"]
+            files = {"FigureIndex.json": encode(figure_index),
+                     **{name: value.encode("utf-8") for name, value in worker_result["figures"].items()}}
+            for name, expected_content in files.items():
+                path = root / name
+                if (path.is_symlink() or not path.resolve().is_relative_to(root) or not path.is_file() or
+                        path.stat().st_size > 2 * 1024 * 1024):
+                    raise ResearchError("CONTRACT_MISMATCH", "frozen figure file is missing or outside quota")
+                content = path.read_bytes()
+                if content != expected_content or hashlib.sha256(content).hexdigest() != manifest["files"].get(name):
+                    raise ResearchError("CORRUPT_ARTIFACT", "figure is not the exact managed worker output")
+                contents[name] = content
+            figure_contents = {name: contents[name] for name in worker_result["figures"]}
+    if set(manifest.get("files", {})) != set(contents) - {"manifest.json"}:
+        raise ResearchError("CONTRACT_MISMATCH", "evidence manifest contains missing or extra files")
     index = json.loads(contents["PaperEvidenceIndex.json"])
     if index.get("aggregate_hash") != expected_hash or index.get("table_sha256") != manifest["files"]["metrics.csv"]:
         raise ResearchError("CONTRACT_MISMATCH", "paper evidence/table version differs")
     try:
         if contents["metrics.csv"] != expected_metrics_csv(aggregate):
             raise ResearchError("CONTRACT_MISMATCH", "frozen CSV differs from aggregate values")
-        if contents["PaperEvidenceIndex.json"] != encode(expected_paper_index(aggregate, contents["metrics.csv"])):
+        if contents["PaperEvidenceIndex.json"] != encode(expected_paper_index(aggregate, contents["metrics.csv"], figure_index)):
             raise ResearchError("CONTRACT_MISMATCH", "paper evidence index differs from aggregate values")
     except (KeyError, TypeError, ValueError) as exc:
         if isinstance(exc, ResearchError):
@@ -254,6 +274,15 @@ def accept_evidence_package(store, directory, expected_hash):
         attachments["computation-receipt"] = store.artifact(contents["ComputationReceipt.json"],
             role="computation-receipt", visibility=artifact["visibility"], block_ids=artifact["block_ids"],
             study_id=artifact["study_id"])["artifact_id"]
+    if figure_index is not None:
+        attachments["figure-index"] = store.artifact(contents["FigureIndex.json"], role="figure-index",
+            visibility=artifact["visibility"], block_ids=artifact["block_ids"], study_id=artifact["study_id"])["artifact_id"]
+        attachments["figures"] = []
+        for entry in figure_index["figures"]:
+            figure = store.artifact(figure_contents[entry["filename"]], role="comparison-figure",
+                visibility=artifact["visibility"], block_ids=artifact["block_ids"], study_id=artifact["study_id"],
+                media_type="image/svg+xml")
+            attachments["figures"].append({**entry, "artifact_id": figure["artifact_id"]})
     package = {"schema_version": "pirc25-imported-evidence-v1", "aggregate_hash": expected_hash,
                "aggregate_id": artifact["artifact_id"], "study_id": artifact["study_id"], **attachments}
     store.publish("comparison-" + expected_hash, package)

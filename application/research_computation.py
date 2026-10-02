@@ -73,13 +73,22 @@ def comparison_plan(bundle, max_operations):
         preparation += len(rows) * (1 + 2 * len(weights))
     blocks = len({row["block_id"] for row in rows})
     resampling = repetitions * blocks * len(contrasts)
-    planned = preparation + resampling
+    from application.research_dimensions import comparison_dimensions
+    horizons = {str(comparison_dimensions(row).get("horizon")) for row in rows
+                if "horizon" in comparison_dimensions(row)}
+    if len(horizons) > 256:
+        raise ResearchError("RESOURCE_PLAN_REJECTED", "comparison figure horizon quota exceeded")
+    figure_count = 1 + len(horizons)
+    graph_operations = figure_count * (256 + len(rows) * (8 + 8 * metric_count))
+    planned = preparation + resampling + graph_operations
     if planned > max_operations:
         raise ResearchError("RESOURCE_PLAN_REJECTED", "registered statistical plan exceeds operation quota")
     return {"schema_version": "pirc25-computation-plan-v1", "maximum_input_bytes": MAX_INPUT_BYTES,
             "maximum_output_bytes": MAX_OUTPUT_BYTES, "maximum_operations": max_operations,
             "registered_cells": len(rows), "registered_blocks": blocks,
             "preparation_operation_bound": preparation, "bootstrap_operation_bound": resampling,
+            "comparison_figure_count_bound": figure_count, "figure_byte_bound": 2 * 1024 * 1024,
+            "graph_operation_bound": graph_operations,
             "planned_operation_bound": planned, "allocation": "shared-job-on-frozen-reference-arm"}
 
 

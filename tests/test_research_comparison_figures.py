@@ -45,7 +45,7 @@ def test_actual_managed_figures_are_frozen_authorized_and_import_verified(source
     '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
     '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)" />',
     '<svg xmlns="http://www.w3.org/2000/svg"><image href="https://external.example" /></svg>',
-    '<!DOCTYPE svg [<!ENTITY e SYSTEM "file:///private">]><svg xmlns="http://www.w3.org/2000/svg">&e;</svg>',
+    '<!DOCTYPE svg [<!ENTITY e SYSTEM "https://external.invalid/entity">]><svg xmlns="http://www.w3.org/2000/svg">&e;</svg>',
     '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject /></svg>',
     '<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:url(https://external.example)" /></svg>',
 ])

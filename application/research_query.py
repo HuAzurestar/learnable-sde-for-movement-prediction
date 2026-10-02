@@ -49,8 +49,11 @@ class ResearchQuery:
     def _comparison_visible(self, package, grant):
         # A package manifest itself contains hashes and artifact IDs. Do not expose it
         # unless every referenced artifact is within the preview grant's scope.
-        for key in ("aggregate_id", "table", "evidence-index", *(["computation-receipt"] if "computation-receipt" in package else [])):
-            metadata = self.store.manifest("artifact-" + identifier(package[key]))
+        references = [package[key] for key in ("aggregate_id", "table", "evidence-index")]
+        references.extend(package[key] for key in ("computation-receipt", "figure-index") if key in package)
+        references.extend(entry["artifact_id"] for entry in package.get("figures", []))
+        for artifact_id in references:
+            metadata = self.store.manifest("artifact-" + identifier(artifact_id))
             if (metadata["study_id"] != grant["study_id"]
                     or metadata["visibility"] not in grant["visibilities"]
                     or not set(metadata["block_ids"]) <= set(grant["block_ids"])):
@@ -163,12 +166,16 @@ class ResearchQuery:
     def artifact(self, artifact_id, *, export=False):
         grant = self._grant("export" if export else "preview")
         metadata = self.store.manifest("artifact-" + identifier(artifact_id))
-        if metadata["media_type"] not in {"application/json", "text/csv"}:
+        svg = metadata["media_type"] == "image/svg+xml" and metadata["role"] == "comparison-figure"
+        if metadata["media_type"] not in {"application/json", "text/csv"} and not svg:
             raise ResearchError("UNAUTHORIZED_DATA", "artifact media type is not safe for this read service")
         if metadata["study_id"] != grant["study_id"] or metadata["size_bytes"] > MAX_RESPONSE:
             raise ResearchError("UNAUTHORIZED_DATA" if metadata["study_id"] != grant["study_id"] else "TOO_LARGE",
                                 "artifact outside scope or larger than 2 MiB")
         content = self.store.read_artifact(artifact_id, purpose="export" if export else "preview", authorization=grant)
+        if svg:
+            from application.research_figures import validate_figure_svg
+            validate_figure_svg(content)
         if metadata["media_type"] == "application/json" and not export:
             value = json.loads(content)
             samples = value.get("forecast", {}).get("samples") if isinstance(value, dict) else None
@@ -186,6 +193,9 @@ class ResearchQuery:
         if "computation-receipt" in package:
             receipt, _ = self.artifact(package["computation-receipt"])
             result["computation_receipt"] = json.loads(receipt)
+        if "figure-index" in package:
+            index, _ = self.artifact(package["figure-index"])
+            result["figure_index"] = json.loads(index)
         return result
 
     def result_manifest(self, artifact_id):
