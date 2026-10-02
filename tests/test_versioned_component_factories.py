@@ -117,3 +117,44 @@ def test_real_application_rejects_invalid_component_before_any_factory(tmp_path,
     monkeypatch.setattr(ComponentRegistry, "create_bound", lambda *a, **k: pytest.fail("invalid plan invoked a factory"))
     with pytest.raises(ResearchError, match="CONTRACT_MISMATCH|RESOURCE_PLAN_REJECTED"):
         ExperimentApplication.from_config(cfg, component_bindings=bindings, matrix_cells=1)
+
+
+def test_caller_cannot_change_constructor_inputs_after_plan_validation(monkeypatch):
+    value, entry = component_registry()
+    binding = execution_binding(entry, {}, {}, matrix_cells=1)
+    original = value.plan_bound
+    def race(document, **kwargs):
+        result = original(document, **kwargs)
+        if document is binding:
+            binding["config"]["unadmitted"] = True
+        return result
+    monkeypatch.setattr(value, "plan_bound", race)
+    calls = []
+    try:
+        value.create_bound(binding, matrix_cells=1, context=calls)
+    except ResearchError:
+        pass
+    assert not calls or calls == [({}, {})], "factory consumed content that was never planned"
+
+
+@pytest.mark.parametrize("fault", ["paths", "horizons", "euler-grid", "observations", "segments"])
+def test_actual_component_execution_cannot_exceed_frozen_profile(monkeypatch, fault):
+    cfg = config()
+    if fault == "euler-grid":
+        cfg.components.inference = "euler"
+        cfg.protocol["euler"] = {"max_step": 0.01}
+    bindings = root.component_bindings(cfg, profile(), matrix_cells=1)
+    app = ExperimentApplication.from_config(cfg, component_bindings=bindings, matrix_cells=1)
+    if fault in {"observations", "segments"}:
+        data, _ = make_synthetic_em_data(n_segments=5 if fault == "segments" else 4,
+            length=8 if fault == "segments" else 11, dt=1.0, seed=19)
+        monkeypatch.setattr(app.estimator, "fit", lambda *a, **k: pytest.fail("over-quota fitting executed"))
+        with pytest.raises(ResearchError, match="RESOURCE_PLAN_REJECTED"):
+            app.train(data)
+    else:
+        request = ForecastRequest(torch.tensor([1.0, 0.25], dtype=torch.float64),
+            torch.arange(1, 10, dtype=torch.float64) if fault == "horizons" else torch.tensor([1., 2.], dtype=torch.float64),
+            9 if fault == "paths" else 8, ModelContext(regime=0))
+        monkeypatch.setattr(app.inference_engine, "forecast", lambda *a, **k: pytest.fail("over-quota prediction executed"))
+        with pytest.raises(ResearchError, match="RESOURCE_PLAN_REJECTED"):
+            app.predict(app.model, request)
