@@ -8,6 +8,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import secrets
 import time
 import uuid
@@ -22,7 +23,30 @@ class ControlError(ValueError):
 
 
 def canonical(value, limit):
+    if type(limit) is not int or not 0 < limit <= 64 * 1024 * 1024:
+        raise ControlError("checkpoint frame byte quota is invalid")
     remaining = 65536
+    remaining_bytes = limit
+    def charge(size):
+        nonlocal remaining_bytes
+        remaining_bytes -= size
+        if remaining_bytes < 0:
+            raise ControlError("checkpoint frame exceeds byte quota")
+    def charge_string(item):
+        # Count the exact ensure_ascii=False JSON UTF-8 representation without
+        # allocating it. In particular, many individually small strings must
+        # not reach json.dumps when their aggregate is already over quota.
+        charge(2)
+        for character in item:
+            code = ord(character)
+            if 0xD800 <= code <= 0xDFFF:
+                raise ControlError("checkpoint frame must be finite UTF-8 JSON")
+            if character in '\\"\\\\\b\f\n\r\t':
+                charge(2)
+            elif code < 0x20:
+                charge(6)
+            else:
+                charge(1 if code < 0x80 else 2 if code < 0x800 else 3 if code < 0x10000 else 4)
     stack = [(value, 0)]
     while stack:
         item, depth = stack.pop()
@@ -32,20 +56,29 @@ def canonical(value, limit):
         if type(item) is dict:
             if len(item) > remaining or any(type(key) is not str or len(key) > 128 for key in item):
                 raise ControlError("checkpoint frame keys exceed quota")
+            charge(2 + len(item) + max(0, len(item) - 1))
+            for key in item:
+                charge_string(key)
             stack.extend((child, depth + 1) for child in item.values())
         elif type(item) in {list, tuple}:
             if len(item) > remaining:
                 raise ControlError("checkpoint frame array exceeds quota")
+            charge(2 + max(0, len(item) - 1))
             stack.extend((child, depth + 1) for child in item)
         elif type(item) is str:
             if len(item) > min(limit, 65536):
                 raise ControlError("checkpoint frame string exceeds quota")
+            charge_string(item)
         elif type(item) is int:
             if item.bit_length() > 256:
                 raise ControlError("checkpoint frame integer exceeds quota")
+            charge(len(str(item)))
         elif type(item) is float:
             if not math.isfinite(item):
                 raise ControlError("checkpoint frame must be finite")
+            charge(len(repr(item)))
+        elif item is None or type(item) is bool:
+            charge(4 if item is None or item is True else 5)
         elif item is not None and type(item) is not bool:
             raise ControlError("checkpoint frame must be JSON")
     try:
@@ -134,11 +167,15 @@ class WorkerControl:
     def __init__(self, descriptor):
         if (type(descriptor) is not dict or set(descriptor) != {"schema_version", "directory", "attempt_id", "deadline", "byte_limit", "token"}
                 or descriptor["schema_version"] != SCHEMA or type(descriptor["directory"]) is not str
+                or "\x00" in descriptor["directory"] or not Path(descriptor["directory"]).is_absolute()
+                or type(descriptor["attempt_id"]) is not str
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", descriptor["attempt_id"]) is None
+                or type(descriptor["token"]) is not str or re.fullmatch(r"[0-9a-f]{64}", descriptor["token"]) is None
                 or type(descriptor["deadline"]) not in {float, int} or not math.isfinite(descriptor["deadline"])
                 or type(descriptor["byte_limit"]) is not int or not 0 < descriptor["byte_limit"] <= 64 * 1024 * 1024):
             raise ControlError("checkpoint control descriptor is invalid")
-        self.descriptor = descriptor
-        self.directory = Path(descriptor["directory"])
+        self.descriptor = json.loads(canonical(descriptor, 16384))
+        self.directory = Path(self.descriptor["directory"])
         self.request = None
 
     @classmethod
@@ -148,7 +185,13 @@ class WorkerControl:
             return None
         if len(content) > 16384:
             raise ControlError("checkpoint descriptor exceeds quota")
-        return cls(json.loads(content))
+        try:
+            if len(content.encode("utf-8")) > 16384:
+                raise ControlError("checkpoint descriptor exceeds quota")
+            descriptor = json.loads(content)
+        except (ValueError, UnicodeError, RecursionError) as exc:
+            raise ControlError("checkpoint descriptor is invalid UTF-8 JSON") from exc
+        return cls(descriptor)
 
     def poll(self):
         value = read_frame(self.directory / "checkpoint-request.json", 16384)

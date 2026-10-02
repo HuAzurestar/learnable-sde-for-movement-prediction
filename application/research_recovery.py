@@ -127,14 +127,25 @@ class SharedRecovery:
         if BudgetLedger(self.store).balance(run["arm_id"])["closed"]:
             raise ResearchError("BUDGET_EXHAUSTED", "checkpoint cannot reopen a fused arm")
         content = self.store.read_artifact(checkpoint_id, purpose="resume", authorization=authorization)
-        value = json.loads(content)
-        if (value.get("schema_version") != "pirc25-checkpoint-v1"
+        try:
+            value = json.loads(content)
+        except (ValueError, UnicodeError, RecursionError) as exc:
+            raise ResearchError("CONTRACT_MISMATCH", "checkpoint is invalid JSON") from exc
+        if (type(value) is not dict or value.get("schema_version") != "pirc25-checkpoint-v1"
                 or value.get("parent_attempt_id") != attempt_id or value.get("run_id") != run["run_id"]
                 or value.get("plugin_id") != plugin.plugin_id or value.get("resume_level") != plugin.resume_level
                 or value.get("plugin_version") != plugin.registry_entry.version
                 or value.get("recovery_command_hash") != implementation_hash(adapter.command_builder)
                 or value.get("bindings") != bindings(spec, cell) or digest(value.get("state")) != value.get("payload_hash")):
             raise ResearchError("CONTRACT_MISMATCH", "checkpoint schema, identity or code/data/method hashes differ")
+        metadata = self.store.manifest("artifact-" + checkpoint_id)
+        saved = {"attempt_id": attempt_id, "artifact_id": checkpoint_id,
+                 "resume_level": plugin.resume_level, "bindings_hash": digest(value["bindings"])}
+        if (metadata.get("role") != "checkpoint" or metadata.get("study_id") != run["study_id"]
+                or metadata.get("block_ids") != [cell["block_id"]]
+                or not any(event["event_kind"] == "CHECKPOINT" and event["payload"] == saved
+                           for event in self.store.events())):
+            raise ResearchError("CONTRACT_MISMATCH", "checkpoint lacks authoritative source save and scope")
         return {"run": run, "spec": spec, "cell": cell, "plugin": plugin,
                 "adapter": adapter, "state": value["state"], "checkpoint_id": checkpoint_id}
 

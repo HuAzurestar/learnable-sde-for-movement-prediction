@@ -1,6 +1,5 @@
 """Strict IPC bounds/types and authoritative checkpoint source controls."""
 
-from copy import deepcopy
 import json
 import time
 
@@ -20,6 +19,15 @@ def test_total_frame_byte_quota_precedes_json_serialization(monkeypatch):
     monkeypatch.setattr(control.json, "dumps", lambda *a, **k: pytest.fail("over-byte-quota frame reached encoding allocation"))
     with pytest.raises(control.ControlError):
         control.canonical({"payload": ["x" * 32] * 8}, 128)
+
+
+@pytest.mark.parametrize("value", [None, True, False, 0, -(2**128), 1e100, -0.0,
+    {"中\u0000\n": ["😀\t\\\"", (), {"x": "é"}]}, {"empty": []}])
+def test_canonical_accepts_exact_byte_boundary_and_rejects_one_less(value):
+    expected = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
+    assert control.canonical(value, len(expected)) == expected
+    with pytest.raises(control.ControlError):
+        control.canonical(value, len(expected) - 1)
 
 
 @pytest.mark.parametrize("field,value", [("attempt_id", []), ("attempt_id", ""), ("attempt_id", "../escape"),
