@@ -76,6 +76,17 @@ def test_empty_runs_and_failed_attempt_trace_are_visible(tmp_path):
         assert status == 200 and json.loads(trace)["attempts"][0]["error_code"] == "TIMEOUT"
 
 
+def test_csp_allows_verified_blob_images_without_blob_scripts_or_frames(tmp_path):
+    with service(tmp_path) as (_, _, server):
+        status, headers, _ = request(server, '/')
+        assert status == 200
+        directives = {parts[0]: parts[1:] for directive in headers['Content-Security-Policy'].split(';')
+                      if (parts := directive.split())}
+        assert directives.get('img-src') == ["'self'", 'blob:']
+        assert directives['script-src'] == ["'self'"]
+        assert directives['frame-ancestors'] == ["'none'"]
+
+
 def test_csv_is_exact_frozen_artifact_and_corruption_fails_closed(tmp_path):
     with service(tmp_path) as (store, value, server):
         data = b"aggregate_hash,metric,value,unit\nv1,error,2.5,m\n"

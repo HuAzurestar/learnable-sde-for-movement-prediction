@@ -47,7 +47,7 @@ const context = {Blob,crypto:crypto.webcrypto,TextEncoder,console,
     if(id===aggregateId) return new Blob([JSON.stringify(aggregate)],{type:'application/json'});
     let content=contents[id];assert.ok(content,'unknown artifact '+id);
     if(mode==='corrupt') content=content.replace('worker','tamper');
-    const blob=new Blob([content],{type:mode==='media'?'text/html':'image/svg+xml'});
+    const blob=new Blob([content],{type:mode==='media'?'text/html':mode==='charset'?'image/svg+xml; charset=utf-8':'image/svg+xml'});
     if(mode==='race') return await new Promise(resolve=>pending.push(()=>resolve(blob)));
     return blob;
   }};
@@ -88,6 +88,14 @@ selectors['comparison-horizon'].value='2';await selectors['comparison-horizon'].
 assert.ok(requests.some(r=>r.path==='/api/artifacts/'+entries[2].sha256),'wrong horizon artifact');
 await button(root).callback();assert.equal(await saved[0].blob.text(),contents[entries[2].sha256]);
 assert.equal(generated.filter(v=>v==='svg').length,0);
+""")
+
+
+def test_real_service_svg_media_type_with_charset_is_accepted():
+    run_script(r"""
+mode='charset';const root=new Element('root');await context.showComparison(root,data);await settle();
+assert.ok(image(root),'real service MIME parameters must not reject valid SVG');
+await button(root).callback();assert.equal(await saved[0].blob.text(),contents[entries[0].sha256]);
 """)
 
 

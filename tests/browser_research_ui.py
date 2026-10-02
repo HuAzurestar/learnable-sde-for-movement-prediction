@@ -159,6 +159,11 @@ def check_managed_adjudication(browser, root, expect):
         expect(verdict_row.locator("td").nth(4)).to_have_text("1 to 1")
         expect(verdict_row.locator("td").nth(6)).to_have_text("2")
         expect(section).to_contain_text(str(data["computation_receipt"]["cost"]["charged_ms"]))
+        frozen_image = page.locator('#comparison-figure img')
+        expect(frozen_image).to_be_visible()
+        expect(frozen_image).to_have_attribute('data-artifact-id', data['package']['figures'][0]['artifact_id'])
+        page.wait_for_function("document.querySelector('#comparison-figure img')?.naturalWidth > 0")
+        expect(page.locator('#comparison-figure svg')).to_have_count(0)
         decision_before = section.inner_text()
         page.locator("#comparison-horizon").select_option("all")
         assert section.inner_text() == decision_before
@@ -171,12 +176,16 @@ def check_managed_adjudication(browser, root, expect):
         assert json.loads(Path(downloaded.value.path()).read_bytes()) == data["computation_receipt"]
         with page.expect_download() as downloaded:
             page.get_by_role("button", name="Export comparison figure", exact=True).click()
-        figure = ET.fromstring(Path(downloaded.value.path()).read_bytes())
+        content = Path(downloaded.value.path()).read_bytes()
+        entry = data['package']['figures'][0]
+        assert content == store.read_artifact(entry['artifact_id'], purpose='export', authorization=managed[2])
+        assert downloaded.value.suggested_filename == entry['filename']
+        figure = ET.fromstring(content)
         metadata = json.loads(figure.find("{http://www.w3.org/2000/svg}metadata").text)
         assert metadata["adjudication"] == data["aggregate"]["adjudication"]
         assert metadata["computation_ref"] == data["aggregate"]["computation_ref"]
-        assert metadata["computation_receipt"] == data["computation_receipt"]
-        assert "effect 1 m" in "".join(figure.itertext())
+        assert metadata['cost_source'] == 'resolve-computation-ref-after-settlement'
+        assert "benefit 1.0 m" in "".join(figure.itertext()) or "benefit 1 m" in "".join(figure.itertext())
         assert not errors, errors
         page.screenshot(path=str(root / "managed-adjudication.png"), full_page=True)
         page.close()

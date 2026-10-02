@@ -17,7 +17,7 @@ def test_partial_preregistration_renders_diagnostics_not_exceptions(missing):
         "qualification": "engineering-fixture", "compare_hash": "synthetic", "family_size": 0,
         "diagnostics": [missing], "records": []}}
     script = (Path(__file__).resolve().parents[1] / "experiments/pirc25/ui/app.js").read_text(encoding="utf-8")
-    renderers = script[script.index("function adjudicationLines("):script.index("function comparisonFigure(")]
+    renderers = script[script.index("function adjudicationLines("):script.index("function frozenComparisonEntry(")]
     harness = """const vm = require('vm'); let output=[];
 const context={document:{createElement:()=>({append:(...v)=>output.push(...v)})},
 text:(_,value)=>String(value ?? 'Unavailable'),table:(headers,rows)=>JSON.stringify([headers,rows])};

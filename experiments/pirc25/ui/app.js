@@ -145,38 +145,45 @@ function adjudicationView(aggregate, receipt) {
   section.append(text('pre',JSON.stringify({computation_ref:aggregate.computation_ref,computation_receipt:receipt ?? null},null,2)));
   return section;
 }
-function comparisonFigure(aggregate, horizon, receipt = null) {
-  const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
-  const lines = [`Frozen comparison · ${aggregate.aggregate_hash}`, `Horizon: ${horizon} · independent unit: block · ${aggregate.qualification}`];
-  comparisonRows(aggregate, horizon).forEach(arm => {
-    lines.push(`${arm.arm_id} · ${dimensionsLabel(arm.comparison_dimensions)} · n=${arm.independent_n} · ${arm.status}`);
-    Object.entries(arm.metrics).forEach(([metric,value]) => lines.push(`  ${metric}: ${value} ${arm.metric_units[metric]} · cells ${arm.successful_cells}/${arm.expected_cells}`));
-    if (!Object.keys(arm.metrics).length) lines.push('  No complete metric; missing/failed cells retained');
-    lines.push(`  Frozen cost (all attempts): charged ${arm.cost?.charged_ms ?? 'unavailable'}, reserved ${arm.cost?.reserved_ms ?? 'unavailable'}, measured ${arm.cost?.measured_ms ?? 'unknown'} slot-ms`);
-  });
-  lines.push(...adjudicationLines(aggregate,receipt));
-  svg.setAttribute('viewBox', `0 0 1100 ${50 + lines.length * 25}`); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'Frozen comparison values and provenance');
-  lines.forEach((line,i) => {const node = document.createElementNS(ns,'text'); node.setAttribute('x','12'); node.setAttribute('y',String(25 + i*25)); node.setAttribute('font-size','13'); node.textContent=line; svg.append(node);});
-  let y = 55 + lines.length * 25;
-  const selected = comparisonRows(aggregate,horizon), metrics = [...new Set(selected.flatMap(arm => Object.keys(arm.metrics)))];
-  const label = (value,x,at) => {const node=document.createElementNS(ns,'text'); node.setAttribute('x',String(x)); node.setAttribute('y',String(at)); node.setAttribute('font-size','12'); node.textContent=value; svg.append(node);};
-  metrics.forEach(metric => {
-    const values = selected.filter(arm => Number.isFinite(arm.metrics[metric]));
-    const min = Math.min(0,...values.map(arm=>arm.metrics[metric])), max = Math.max(0,...values.map(arm=>arm.metrics[metric]));
-    const x = value => 440 + (value-min)/(max-min || 1)*470;
-    label(`${metric} (${values[0].metric_units[metric]}) · separate metric scale; no pooled horizons`,12,y); y+=25;
-    values.forEach(arm => {
-      label(`${arm.arm_id} ${dimensionsLabel(arm.comparison_dimensions)}`,12,y+12);
-      const bar=document.createElementNS(ns,'rect'); bar.setAttribute('x',String(Math.min(x(0),x(arm.metrics[metric])))); bar.setAttribute('y',String(y)); bar.setAttribute('width',String(Math.max(1,Math.abs(x(arm.metrics[metric])-x(0))))); bar.setAttribute('height','14'); bar.setAttribute('fill','#287c9c'); svg.append(bar);
-      label(String(arm.metrics[metric]),930,y+12); y+=25;
-    }); y+=20;
-  });
-  svg.setAttribute('viewBox',`0 0 1100 ${y+15}`); return svg;
+function frozenComparisonEntry(data, horizon) {
+  const index = data.figure_index, aggregate = data.aggregate;
+  if (!index) return null;
+  if (index.schema_version !== 'pirc25-figure-index-v1' || index.aggregate_hash !== aggregate.aggregate_hash ||
+      index.compare_hash !== (aggregate.adjudication?.compare_hash ?? null) ||
+      JSON.stringify(index.computation_ref ?? null) !== JSON.stringify(aggregate.computation_ref ?? null) ||
+      !Array.isArray(index.figures) || index.figures.length < 1 || index.figures.length > 257 ||
+      !Array.isArray(data.package.figures)) throw new Error('Frozen figure index mismatch.');
+  const matches = index.figures.filter(entry => (entry.horizon === null ? 'all' : String(entry.horizon)) === horizon);
+  if (!matches.length) return null;
+  if (matches.length !== 1) throw new Error('Frozen figure selection mismatch.');
+  const entry = matches[0], hash = entry.sha256;
+  const published = data.package.figures.filter(item => item.sha256 === hash);
+  if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash) || entry.filename !== `figure-${hash}.svg` ||
+      entry.kind !== 'comparison' || entry.media_type !== 'image/svg+xml' ||
+      !Number.isSafeInteger(entry.size_bytes) || entry.size_bytes < 1 || entry.size_bytes > 2*1024*1024 ||
+      published.length !== 1 || published[0].artifact_id !== hash ||
+      ['filename','kind','horizon','size_bytes','media_type'].some(key => published[0][key] !== entry[key])) {
+    throw new Error('Frozen figure package mismatch.');
+  }
+  return entry;
+}
+async function frozenComparisonBlob(entry, exporting = false) {
+  if (!entry) throw new Error('Frozen figure unavailable in this version; generate an authorized budgeted comparison.');
+  const blob = await api('/api/artifacts/' + encodeURIComponent(entry.sha256) + (exporting ? '?download=1' : ''), true);
+  if (blob.type !== 'image/svg+xml' || blob.size !== entry.size_bytes || blob.size > 2*1024*1024) {
+    throw new Error('Frozen figure response mismatch.');
+  }
+  const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())),
+    byte => byte.toString(16).padStart(2, '0')).join('');
+  if (hash !== entry.sha256) throw new Error('Frozen figure hash mismatch.');
+  return blob;
 }
 function showComparison(target, data) {
-  const aggregate = data.aggregate, pane = document.createElement('div'); let horizon = 'all';
+  const aggregate = data.aggregate, pane = document.createElement('div'); let horizon = 'all', drawSequence = 0, previewURL = null;
   const horizons = [...new Set(aggregate.arms.map(arm => arm.comparison_dimensions?.horizon).filter(h => h !== undefined).map(String))].sort((a,b) => Number(a)-Number(b));
-  const draw = () => {
+  const draw = async () => {
+    const sequence = ++drawSequence, selectedHorizon = horizon;
+    if (previewURL) {URL.revokeObjectURL(previewURL); previewURL = null;}
     pane.replaceChildren();
     const summary = table(['Arm / dimensions', 'Metric', 'Value', 'Unit', 'Independent blocks', 'Cells (successful / expected)', 'Status'],
       comparisonRows(aggregate,horizon).flatMap(arm => Object.keys(arm.metrics).length ? Object.entries(arm.metrics).map(([metric,value]) => [arm.arm_id + ' ' + dimensionsLabel(arm.comparison_dimensions), metric,value,arm.metric_units[metric],arm.independent_n,`${arm.successful_cells} / ${arm.expected_cells}`,arm.status]) : [[arm.arm_id + ' ' + dimensionsLabel(arm.comparison_dimensions),'No complete metric','—','—',arm.independent_n,`${arm.successful_cells} / ${arm.expected_cells}`,arm.status]]));
@@ -196,24 +203,33 @@ function showComparison(target, data) {
     const costs = table(['Arm / dimensions','Charged slot-ms','Reserved slot-ms','Measured slot-ms','Unknown / pending attempts','Cost sources'], comparisonRows(aggregate,horizon).map(arm => [arm.arm_id + ' ' + dimensionsLabel(arm.comparison_dimensions),arm.cost?.charged_ms ?? 'Unavailable',arm.cost?.reserved_ms ?? 'Unavailable',arm.cost?.measured_ms ?? 'Unknown',`${arm.cost?.unknown_attempt_ids?.length ?? '?'} / ${arm.cost?.pending_attempt_ids?.length ?? '?'}`,arm.cost?.source_event_hashes?.join('\n') || 'No frozen source']));
     costs.id = 'comparison-costs'; pane.append(costs);
     pane.append(adjudicationView(aggregate,data.computation_receipt));
-    pane.append(comparisonFigure(aggregate,horizon,data.computation_receipt));
+    const figure = text('div','Loading frozen worker figure…'); figure.id = 'comparison-figure'; pane.append(figure);
+    try {
+      const entry = frozenComparisonEntry(data, selectedHorizon), blob = await frozenComparisonBlob(entry);
+      if (sequence !== drawSequence) return;
+      const image = document.createElement('img'), url = URL.createObjectURL(blob); previewURL = url;
+      image.alt = `Frozen comparison ${aggregate.aggregate_hash} · horizon ${selectedHorizon}`;
+      image.dataset.artifactId = entry.sha256; image.dataset.horizon = selectedHorizon;
+      image.onload = () => {URL.revokeObjectURL(url); if (previewURL === url) previewURL = null;};
+      image.onerror = () => {image.onload(); if (sequence === drawSequence) figure.replaceChildren(text('p','Frozen figure unavailable: image decoding failed.'));};
+      image.src = url; figure.replaceChildren(image);
+    } catch (error) {
+      if (sequence === drawSequence) figure.replaceChildren(text('p','Frozen figure unavailable: ' + error.message));
+    }
   };
   target.append(text('p','Aggregate version: ' + aggregate.aggregate_hash));
-  target.append(selector('comparison-horizon','Comparison horizon',[['all','All horizons'],...horizons.map(h => [h,h])], () => {horizon = el('comparison-horizon').value; draw();}));
-  target.append(pane); draw();
+  target.append(selector('comparison-horizon','Comparison horizon',[['all','All horizons'],...horizons.map(h => [h,h])], () => {horizon = el('comparison-horizon').value; return draw();}));
+  target.append(pane); const ready = draw();
   target.append(action('Export comparison figure', async () => {
-    const fresh = JSON.parse(await (await api('/api/artifacts/' + encodeURIComponent(data.package.aggregate_id) + '?download=1',true)).text());
-    if (fresh.aggregate_hash !== aggregate.aggregate_hash) throw new Error('Aggregate version changed.');
-    const receipt = data.package['computation-receipt'] ? JSON.parse(await (await api('/api/artifacts/' + encodeURIComponent(data.package['computation-receipt']) + '?download=1',true)).text()) : null;
-    sourceFigure(comparisonFigure(fresh,horizon,receipt), {artifact_id:data.package.aggregate_id, aggregate_hash:fresh.aggregate_hash,
-      spec_hash:fresh.spec_hash, protocol_hash:fresh.protocol_hash, horizon:horizon === 'all' ? null : Number(horizon),
-      adjudication:fresh.adjudication ?? null,computation_ref:fresh.computation_ref ?? null,computation_receipt:receipt,
-      strata:comparisonRows(fresh,horizon).map(arm => ({stratum_id:arm.stratum_id,dimensions:arm.comparison_dimensions,units:arm.metric_units,cost:arm.cost}))}, 'Frozen comparison');
+    const entry = frozenComparisonEntry(data, horizon);
+    // Never reuse preview bytes: export must pass a fresh server-side grant check.
+    saveBlob(await frozenComparisonBlob(entry, true), entry.filename);
   }));
   target.append(action('Download frozen CSV', () => download(data.package.table)));
   if (data.package['computation-receipt']) target.append(action('Download computation receipt', async () => saveBlob(await api('/api/artifacts/' + encodeURIComponent(data.package['computation-receipt']) + '?download=1',true),'research-computation-receipt.json')));
   target.append(action('Download aggregate manifest', async () => saveBlob(await api('/api/artifacts/' + encodeURIComponent(data.package.aggregate_id) + '?manifest=1',true),'research-aggregate-manifest.json')));
   target.append(text('h3','Comparison and provenance'),text('pre',JSON.stringify(aggregate,null,2)));
+  return ready;
 }
 async function download(id) {
   const blob = await api('/api/artifacts/' + encodeURIComponent(id) + '?download=1', true);
