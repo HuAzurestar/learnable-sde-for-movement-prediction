@@ -19,6 +19,19 @@ def input_profile(dimensions):
         "observations": 40 if dimensions == 1 else 32, "paths": 8, "steps": 8, "components": 4}
 
 
+def _check_phase_model(model, inputs):
+    from .affine import phase_space_api
+    import numpy as np
+    shapes = {"feature_mean": (2,), "feature_scale": (2,), "weights": (3, 2), "diffusion_covariance": (2, 2)}
+    if (not isinstance(model, phase_space_api().AffineVelocityModel)
+            or model.condition_names != () or model.feature_basis != "direct" or model.feature_names != ("vx", "vy")
+            or type(model.transition_count) is not int or not 0 < model.transition_count <= inputs["observations"]
+            or any(not isinstance(getattr(model, name), np.ndarray) or getattr(model, name).shape != shape
+                or str(getattr(model, name).dtype) != inputs["dtype"] or not np.isfinite(getattr(model, name)).all()
+                for name, shape in shapes.items())):
+        raise ResearchError("CONTRACT_MISMATCH", "actual four-state model differs from frozen profile")
+
+
 def phase_model(document, inputs, context):
     from .affine import phase_space_api
     import numpy as np
@@ -59,6 +72,8 @@ def phase_trainer(document, inputs, context):
         if (tuple(condition_names) != () or condition_resolver is not None
                 or feature_basis != expected.get("feature_basis", "direct") or ridge != expected["ridge"]):
             raise ResearchError("CONTRACT_MISMATCH", "actual four-state trainer differs from frozen configuration")
+        if not callable(model_factory):
+            raise ResearchError("CONTRACT_MISMATCH", "registered four-state model constructor is mandatory")
         return api.fit_affine_velocity_model(segments, condition_names=(), feature_basis=feature_basis,
             ridge=ridge, model_factory=model_factory)
     return fit
@@ -77,9 +92,8 @@ def phase_predictor(document, inputs, context):
             raise ResearchError("CONTRACT_MISMATCH", "actual four-state forecast shape/dtype differs")
         if not 2 <= len(time_grid) <= inputs["steps"]:
             raise ResearchError("RESOURCE_PLAN_REJECTED", "actual four-state time grid exceeds frozen bound")
-        if (not isinstance(model, api.AffineVelocityModel) or model.diffusion_covariance.shape != (2, 2)
-                or str(model.diffusion_covariance.dtype) != inputs["dtype"] or model.condition_names != ()
-                or condition_field is not None or not isinstance(rng, np.random.Generator)):
+        _check_phase_model(model, inputs)
+        if condition_field is not None or not isinstance(rng, np.random.Generator):
             raise ResearchError("CONTRACT_MISMATCH", "actual four-state model/random/context profile differs")
         return api.rollout_phase_space_from_state(model, initial_state=initial_state, time_grid=time_grid,
             n_samples=n_samples, rng=rng, condition_field=None)

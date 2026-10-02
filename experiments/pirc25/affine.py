@@ -99,9 +99,19 @@ def four_state(seed, *, component_bindings=None, matrix_cells=1, registries=None
     composition = None
     benchmark = load_phase_space_spec()
     if component_bindings is not None:
+        from application.research_composition import component_plan
+        from .plugins import affine_plugin
+        from infrastructure.research_store import encode
+        import json
+        entry = affine_plugin(4).registry_entry
+        component_plan(entry, registries, component_bindings, matrix_cells=matrix_cells, seed=seed)
+        component_bindings = json.loads(encode(component_bindings))
+        registries = dict(registries)
+        component_plan(entry, registries, component_bindings, matrix_cells=matrix_cells, seed=seed)
+        # Freeze the benchmark before any factory callback can inspect inputs.
+        benchmark = json.loads(encode(component_bindings["model"]["config"]["benchmark"]))
         composition = {role: registry.create_bound(component_bindings[role], matrix_cells=matrix_cells)
             for role, registry in registries.items()}
-        benchmark = component_bindings["model"]["config"]["benchmark"]
     report = run_phase_space_benchmark(synthetic_cohort(), benchmark, n_samples=8, seed=seed, composition=composition)
     return {"metrics": report["metrics"], "forecast": {"per_segment": report["per_segment"]},
             "fit": report["model"], "source_schema": report["schema_version"]}
