@@ -19,7 +19,8 @@ def published(tmp_path):
 
 
 @pytest.mark.parametrize("purpose", ["preview", "resume"])
-def test_authorized_artifact_read_uses_frozen_size_bound(tmp_path, monkeypatch, purpose):
+@pytest.mark.parametrize("grow_after_open", [False, True])
+def test_authorized_artifact_read_uses_frozen_size_bound(tmp_path, monkeypatch, purpose, grow_after_open):
     store, artifact, grant = published(tmp_path)
     target = store.path / "artifacts" / artifact["artifact_id"]
     original_open = Path.open
@@ -36,13 +37,37 @@ def test_authorized_artifact_read_uses_frozen_size_bound(tmp_path, monkeypatch, 
         def read(self, size=-1):
             assert 0 <= size <= artifact["size_bytes"] + 1, "artifact read allocates without its frozen size quota"
             reads.append(size)
+            if grow_after_open:
+                with original_open(target, "wb") as output:
+                    output.write(b"x" * 8192)
             return self.stream.read(size)
     def open_guard(path, *args, **kwargs):
         stream = original_open(path, *args, **kwargs)
         return BoundedStream(stream) if path == target else stream
     monkeypatch.setattr(Path, "open", open_guard)
-    assert store.read_artifact(artifact["artifact_id"], purpose=purpose, authorization=grant) == b'{"value":2}'
-    assert reads and store.events()[-1]["event_kind"] == "READ_COMPLETED"
+    if grow_after_open:
+        with pytest.raises(ResearchError, match="CORRUPT_ARTIFACT"):
+            store.read_artifact(artifact["artifact_id"], purpose=purpose, authorization=grant)
+        assert store.events()[-1]["event_kind"] == "READ_FAILED"
+    else:
+        assert store.read_artifact(artifact["artifact_id"], purpose=purpose, authorization=grant) == b'{"value":2}'
+        assert store.events()[-1]["event_kind"] == "READ_COMPLETED"
+    assert reads
+
+
+@pytest.mark.parametrize("content", [b"", b"{\"value\":2}"])
+def test_owner_integrity_accepts_zero_and_exact_size(tmp_path, content):
+    store, _, _ = published(tmp_path)
+    artifact = store.artifact(content, role="aggregate", visibility="synthetic", block_ids=["b"], study_id="synthetic")
+    assert store._verified_artifact_content(artifact) == content
+
+
+def test_same_size_corruption_is_not_accepted(tmp_path):
+    store, artifact, grant = published(tmp_path)
+    (store.path / "artifacts" / artifact["artifact_id"]).write_bytes(b"x" * artifact["size_bytes"])
+    with pytest.raises(ResearchError, match="CORRUPT_ARTIFACT"):
+        store.read_artifact(artifact["artifact_id"], purpose="resume", authorization=grant)
+    assert store.events()[-1]["event_kind"] == "READ_FAILED"
 
 
 def test_grown_corrupt_artifact_rejects_before_content_allocation(tmp_path, monkeypatch):

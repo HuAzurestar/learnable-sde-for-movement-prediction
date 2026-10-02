@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import time
 import uuid
 
@@ -434,14 +435,27 @@ class ResearchStore:
         artifact_id = metadata["artifact_id"]
         if not isinstance(artifact_id, str) or not re.fullmatch(r"[0-9a-f]{64}", artifact_id):
             raise ResearchError("CORRUPT_ARTIFACT", "artifact identity is invalid")
+        size = metadata.get("size_bytes")
+        if type(size) is not int or size < 0 or metadata.get("sha256") != artifact_id:
+            raise ResearchError("CORRUPT_ARTIFACT", "artifact frozen size or hash is invalid")
         path = (self.path / "artifacts" / artifact_id).resolve()
         if not path.is_relative_to((self.path / "artifacts").resolve()):
             raise ResearchError("UNAUTHORIZED_DATA", "artifact path escapes root")
         try:
-            content = path.read_bytes()
+            information = path.stat()
+            if not stat.S_ISREG(information.st_mode) or information.st_size != size:
+                raise ResearchError("CORRUPT_ARTIFACT", "artifact frozen size differs before read")
+            with path.open("rb") as stream:
+                information = os.fstat(stream.fileno())
+                if not stat.S_ISREG(information.st_mode) or information.st_size != size:
+                    raise ResearchError("CORRUPT_ARTIFACT", "artifact frozen size differs at open")
+                # A changed file cannot turn a previously admitted small
+                # artifact into an unbounded read. The extra byte detects
+                # growth even after the open-handle size check.
+                content = stream.read(size + 1)
         except FileNotFoundError as exc:
             raise ResearchError("MISSING_INPUT", "published artifact bytes are missing") from exc
-        if (metadata.get("sha256") != artifact_id or len(content) != metadata["size_bytes"]
+        if (len(content) != size
                 or hashlib.sha256(content).hexdigest() != artifact_id):
             raise ResearchError("CORRUPT_ARTIFACT", "artifact hash mismatch")
         return content
