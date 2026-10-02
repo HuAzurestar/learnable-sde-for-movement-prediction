@@ -143,3 +143,69 @@ def test_journal_failure_still_prevents_byte_read(tmp_path, monkeypatch):
     with pytest.raises(OSError, match='journal unavailable'):
         store.read_artifact(artifact['artifact_id'], purpose='preview', authorization=grant)
     assert not reads
+
+
+def test_event_rename_then_error_forces_physical_reread_before_next_append(tmp_path, monkeypatch):
+    store, _, _ = published(tmp_path)
+    original = store_module.atomic_write
+    failed = []
+
+    def fail_after_event_write(path, content):
+        original(path, content)
+        if path.parent == store.path / 'events' and not failed:
+            failed.append(True)
+            raise OSError('directory sync failed after rename')
+
+    with store._read_transaction():
+        monkeypatch.setattr(store_module, 'atomic_write', fail_after_event_write)
+        with pytest.raises(OSError, match='directory sync failed'):
+            store.append('FIRST', {'value': 1}, 'first')
+        store.append('SECOND', {'value': 2}, 'second')
+    assert [event['event_id'] for event in store.events()][-2:] == ['first', 'second']
+
+
+def test_foreign_pid_snapshot_cannot_bypass_physical_lock_or_chain(tmp_path, monkeypatch):
+    store, _, grant = published(tmp_path)
+    original = store_module.file_lock
+    locks = []
+
+    def observe_lock(path, *args, **kwargs):
+        locks.append(path)
+        return original(path, *args, **kwargs)
+
+    # Model inherited thread-local state without forking the test runner.
+    store._read_scope.snapshot = (-1, store.events())
+    monkeypatch.setattr(store_module, 'file_lock', observe_lock)
+    try:
+        assert store.manifest('authorization-' + grant['authorization_id']) == grant
+        assert locks == [store.path / '.writer.lock']
+        (store.path / 'events/0000000000000001.json').write_bytes(b'{}')
+        with pytest.raises(ResearchError, match='CORRUPT_ARTIFACT'):
+            store.events()
+    finally:
+        del store._read_scope.snapshot
+
+
+def test_appended_payload_and_returned_event_cannot_mutate_snapshot(tmp_path):
+    store, _, _ = published(tmp_path)
+    payload = {'nested': {'value': 1}}
+    with store._read_transaction():
+        event = store.append('FIRST', payload, 'first')
+        payload['nested']['value'] = 2
+        event['payload']['nested']['value'] = 3
+        assert store.events()[-1]['payload'] == {'nested': {'value': 1}}
+        store.append('SECOND', {}, 'second')
+    assert store.events()[-2]['payload'] == {'nested': {'value': 1}}
+
+
+def test_explicit_tail_recovery_invalidates_verified_read_snapshot(tmp_path):
+    store, _, _ = published(tmp_path)
+    with store._read_transaction():
+        last = store.events()[-1]
+        path = store.path / 'events' / f"{last['sequence']:016d}.json"
+        path.write_bytes(b'{}')
+        hold = store.quarantine_tail('synthetic corruption during locked read')
+        assert store.events()[-1]['event_kind'] == 'RECOVERY_HOLD'
+        assert store.events()[-1]['sequence'] == last['sequence']
+    assert (store.path / hold['quarantine'] / path.name).read_bytes() == b'{}'
+    assert (store.path / 'recovery-hold.json').is_file()
