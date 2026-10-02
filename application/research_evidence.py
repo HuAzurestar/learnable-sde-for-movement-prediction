@@ -82,6 +82,9 @@ def export_evidence(store: ResearchStore, study_id: str, authorization: dict):
                 raise ResearchError("CORRUPT_ARTIFACT", "evidence result/spec binding mismatch")
             row.update(metrics=result["metrics"], metric_units=result["metric_units"], qualification=result["qualification"],
                        state_order=result["state_order"], units=result["units"], protocol_hash=result["protocol_hash"])
+            for field in ("metric_definitions", "comparison_diagnostics"):
+                if field in result:
+                    row[field] = result[field]
             if result.get("admission_hash"):
                 admission = store.manifest("admission-" + result["admission_hash"])
                 body = {key: value for key, value in admission.items() if key != "admission_hash"}
@@ -118,6 +121,7 @@ def export_evidence(store: ResearchStore, study_id: str, authorization: dict):
                "code_hash": spec["code_hash"], "feature_hash": spec["feature_hash"], "selection_hash": spec["selection_hash"],
                "comparison_family": spec["comparison_family"], "independent_unit": "block_id",
                "comparison_plan": spec.get("comparison_plan"),
+               "registered_spec": spec,
                "visibility": visibility,
                "expected_cells": [{"cell_hash": digest(c), "arm_id": c["arm_id"], "block_id": c["block_id"], "seed": c["seed"],
                                    "comparison_dimensions": comparison_dimensions(c)} for c in spec["cells"]],

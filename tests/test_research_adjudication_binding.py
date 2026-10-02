@@ -86,6 +86,13 @@ def test_formal_policy_is_frozen_and_actual_export_retains_metric_definition(tmp
     assert computed["records"][0]["verdict"] == "INSUFFICIENT_DATA"  # one real block, never two seeds-as-n
     assert computed["records"][0]["interval"] is None
 
+    clipped = deepcopy(bundle)
+    clipped["cells"].pop()
+    clipped["expected_cells"].pop()
+    clipped["bundle_hash"] = digest({k: v for k, v in clipped.items() if k != "bundle_hash"})
+    refused = paper_compare(tmp_path, clipped)
+    assert refused.returncode != 0 and "registered matrix" in refused.stderr
+
     # A legacy exporter can rehash the spec/receipts consistently, but it cannot
     # move the policy into the already published preregistration before reads.
     changed = deepcopy(bundle)
@@ -93,6 +100,7 @@ def test_formal_policy_is_frozen_and_actual_export_retains_metric_definition(tmp
     new_spec["comparison_plan"]["adjudication_spec"]["practical_threshold"] = 0.9
     new_spec["comparison_plan"]["adjudication_hash"] = digest(new_spec["comparison_plan"]["adjudication_spec"])
     changed.update(spec_hash=digest(new_spec), comparison_plan=new_spec["comparison_plan"])
+    changed["registered_spec"] = new_spec
     for row in changed["cells"]:
         receipt = row["admission"]
         receipt.update(spec=new_spec, spec_hash=digest(new_spec))

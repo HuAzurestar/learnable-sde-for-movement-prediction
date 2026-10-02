@@ -200,6 +200,13 @@ class AdmissionGate:
                         or package.get("preregistration_hash") != protocol["preregistration_hash"]
                         or spec.get("comparison_plan", {}).get("preregistration_hash") != protocol["preregistration_hash"]):
                     raise ResearchError("UNQUALIFIED", "formal execution requires the bound blind preregistration")
+                plan = spec.get("comparison_plan", {})
+                if "adjudication_spec" in plan or "adjudication_hash" in plan:
+                    policy = plan.get("adjudication_spec")
+                    if (not isinstance(policy, dict) or policy.get("schema_version") != "pirc25-adjudication-spec-v1"
+                            or plan.get("adjudication_hash") != digest(policy)
+                            or prereg.get("adjudication_spec") != policy):
+                        raise ResearchError("UNQUALIFIED", "adjudication policy differs from pre-read frozen preregistration")
                 report, evidence = self._qualification(package, prereg, grant)
                 documents.update(qualification=report, qualification_evidence=evidence)
             purpose = settings.get("purpose")
@@ -235,6 +242,12 @@ class AdmissionGate:
             if (receipt["mode"] == "formal" and
                     set(result["metrics"]) != set(receipt["documents"]["preregistration"]["primary_metrics"])):
                 raise ResearchError("UNQUALIFIED", "formal result primary metrics differ from frozen plan")
+            policy = spec.get("comparison_plan", {}).get("adjudication_spec")
+            metric = policy.get("primary_metric") if isinstance(policy, dict) else None
+            if isinstance(metric, dict) and all(metric.get(k) is not None for k in ("name", "definition", "unit")):
+                if (result.get("metric_definitions", {}).get(metric["name"]) != metric["definition"]
+                        or result["metric_units"].get(metric["name"]) != metric["unit"]):
+                    raise ResearchError("UNQUALIFIED", "result metric definition/unit differs from frozen adjudication policy")
             if result.get("qualification") != receipt["qualification"]:
                 raise ResearchError("UNQUALIFIED", "worker cannot change admitted qualification")
             if result.get("admission_hash", receipt["admission_hash"]) != receipt["admission_hash"]:
