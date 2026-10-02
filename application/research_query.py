@@ -60,7 +60,7 @@ class ResearchQuery:
                 return False
         return True
 
-    def _run_metadata(self, row, spec, events):
+    def _run_metadata(self, row, spec, events, balances=None):
         manifest = row["manifest"]
         arm = next(a for a in spec["arms"] if a["arm_id"] == manifest["arm_id"])
         cell = manifest["cell"]
@@ -79,7 +79,8 @@ class ResearchQuery:
                          payload["monotonic_elapsed_ms"] is not None else "unknown-conservative-reservation")
                 sources[payload["reservation_id"]] = {**payload, "event_hash": event["hash"],
                     "event_sequence": event["sequence"], "cost_basis": basis}
-        row["budget"] = {**BudgetLedger(self.store).balance(arm["arm_id"]), "unit": "slot-ms",
+        balance = BudgetLedger(self.store).balance(arm["arm_id"]) if balances is None else balances[arm["arm_id"]]
+        row["budget"] = {**balance, "unit": "slot-ms",
                          "limit_ms": 86400000, "scope": "cumulative-arm-all-attempts",
                          "sources": list(sources.values())}
         return row
@@ -91,7 +92,7 @@ class ResearchQuery:
         grant = self._grant()
         def data_watermark():
             return max((e["sequence"] for e in self.store.events()
-                        if e["event_kind"] in {"MANIFEST", "ATTEMPT", "RESERVE", "SETTLE", "ARM_CLOSED"}), default=0)
+                        if e["event_kind"] in {"MANIFEST", "ATTEMPT", "RESERVE", "SETTLE", "ARM_CLOSED", "RECOVERY_HOLD"}), default=0)
 
         snapshot_start = data_watermark()
         filters = {"model": model, "version": version, "horizon": horizon, "seed": seed,
@@ -114,7 +115,11 @@ class ResearchQuery:
                                               "cell": cell, "arm_id": cell["arm_id"], "seed": cell["seed"]},
                                  "attempts": [], "state": "MISSING"})
             events = self.store.events()
-            rows = [self._run_metadata(row, spec, events) for row in rows]
+            # Query-local only: new requests always read current authority. The
+            # watermark below rejects concurrent cost/closure/recovery changes.
+            balances = {name: BudgetLedger(self.store).balance(name)
+                        for name in dict.fromkeys(row['manifest']['arm_id'] for row in rows)}
+            rows = [self._run_metadata(row, spec, events, balances) for row in rows]
             rows = [row for row in rows if all(selected is None or
                     (row["selectors"][key] is not None and str(row["selectors"][key]) == str(selected))
                     for key, selected in filters.items())]
