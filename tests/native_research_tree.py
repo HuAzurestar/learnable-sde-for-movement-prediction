@@ -30,16 +30,23 @@ def exercise(containment, root, name, *, early_exit=False, deadline_seconds=5, w
     directory.mkdir()
     marker, ready = directory / "escaped", directory / "started"
     child = ("import pathlib,sys,time; marker=pathlib.Path(sys.argv[1]); "
-             "marker.with_name('started').touch(); time.sleep(1.4); marker.touch(); time.sleep(5)")
+             "marker.with_name('started').touch(); "
+             "time.sleep(max(0,float(sys.argv[2])-time.monotonic()) if len(sys.argv)>2 else 1.4); "
+             "marker.write_text(str(time.monotonic())); time.sleep(5)")
     worker = ("import pathlib,subprocess,sys,time; "
-              "subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[2]]); "
+              "pathlib.Path(sys.argv[2]).with_name('worker-started').write_text(str(time.monotonic())); "
+              "subprocess.Popen([sys.executable,'-c',sys.argv[1],*sys.argv[2:]]); "
               "ready=pathlib.Path(sys.argv[2]).with_name('started'); "
               "\nwhile not ready.exists(): time.sleep(0.005)"
               + ("\n" if early_exit else "\ntime.sleep(5)"))
     deadline = time.monotonic() + deadline_seconds
+    # This native fixture includes all startup in its declared deadline. Its
+    # post-deadline marker must not be confused with work permitted before it.
+    child_arguments = [str(marker), str(deadline + 0.4)] if watchdog else [str(marker)]
+    error_log = tempfile.TemporaryFile()
     process = subprocess.Popen([sys.executable, str(ROOT / "infrastructure/research_worker.py"),
-        str(directory / "heartbeat.json"), str(deadline), sys.executable, "-c", worker, child, str(marker)],
-        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        str(directory / "heartbeat.json"), str(deadline), sys.executable, "-c", worker, child, *child_arguments],
+        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=error_log,
         start_new_session=os.name != "nt", creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
     tree = containment.ProcessTree(process)
     stopped = False
@@ -48,7 +55,16 @@ def exercise(containment, root, name, *, early_exit=False, deadline_seconds=5, w
         process.stdin.flush()
         while not ready.exists():
             if process.poll() is not None or time.monotonic() > deadline:
-                raise AssertionError("fixture descendant did not start inside the contained tree")
+                error_log.seek(0)
+                diagnostic = {"check": name, "returncode": process.poll(),
+                    "elapsed_seconds": time.monotonic() - deadline + deadline_seconds,
+                    "deadline_seconds": deadline_seconds, "ready": ready.exists(),
+                    "worker_started": (directory / "worker-started").read_text()
+                        if (directory / "worker-started").exists() else None,
+                    "heartbeat": (directory / "heartbeat.json").exists(),
+                    "stderr": error_log.read(4096).decode("utf-8", errors="replace")}
+                raise AssertionError("fixture descendant did not start inside the contained tree: "
+                                     + json.dumps(diagnostic, sort_keys=True))
             time.sleep(0.005)
         if watchdog:
             assert process.wait(timeout=5) != 0
@@ -65,15 +81,21 @@ def exercise(containment, root, name, *, early_exit=False, deadline_seconds=5, w
         if not watchdog:
             tree.terminate()
         time.sleep(1.5)
-        assert not marker.exists(), "descendant performed work after whole-tree stop"
+        assert not marker.exists(), "descendant performed work after whole-tree stop: " + json.dumps({
+            "check": name, "deadline_seconds": deadline_seconds,
+            "marker_seconds_after_deadline": float(marker.read_text()) - deadline if marker.exists() else None,
+            "observed_seconds_after_deadline": time.monotonic() - deadline,
+            "returncode": process.returncode}, sort_keys=True)
         return name
     finally:
         # A failed observation still needs fixture cleanup. On the watchdog
         # success path the wrapper already killed its own group/job tree.
         if not stopped:
             tree.terminate()
+            process.wait(timeout=5)
         tree.close()
         process.stdin.close()
+        error_log.close()
 
 
 def main():
@@ -93,7 +115,7 @@ def main():
         root = Path(temporary)
         checks = [exercise(containment, root, "live-parent-tree"),
                   exercise(containment, root, "stopped-leader-tree", early_exit=True),
-                  exercise(containment, root, "wrapper-independent-watchdog", deadline_seconds=1, watchdog=True)]
+                  exercise(containment, root, "wrapper-independent-watchdog", watchdog=True)]
     if files != {name: source_hash(ROOT / name) for name in files}:
         raise ValueError("native implementation moved during verification")
     print(json.dumps({"status": "passed", "scope": "native containment and stdlib wrapper only",
