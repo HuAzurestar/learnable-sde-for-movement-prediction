@@ -56,8 +56,10 @@ def _bounded_json(value, *, nodes=4096, depth=16, string_length=65536):
             if len(item) > string_length:
                 reject("JSON string exceeds structural quota")
         elif type(item) is int:
-            if item.bit_length() > 63:
-                reject("JSON integer exceeds bounded signed range")
+            # PCG RNG checkpoint state contains genuine unsigned 128-bit values.
+            # This does not relax independently checked count/allocation quotas.
+            if item.bit_length() > 256:
+                reject("JSON integer exceeds bounded checkpoint range")
         elif type(item) is float:
             if not math.isfinite(item):
                 reject("JSON number must be finite")
@@ -73,7 +75,8 @@ def validate_schema(schema):
     def visit(node, depth):
         nonlocal remaining
         remaining -= 1
-        if remaining < 0 or depth > 8 or type(node) is not dict or node.get("type") not in JSON_TYPES:
+        if (remaining < 0 or depth > 8 or type(node) is not dict or
+                type(node.get("type")) is not str or node["type"] not in JSON_TYPES):
             reject("schema type or structural quota is invalid")
         kind = node["type"]
         allowed = {"type", "enum"}
@@ -148,23 +151,62 @@ def validate_value(schema, value):
 
 
 def _code_identity(code):
-    def constant(value):
+    remaining = 4096
+    def constant(value, level):
+        nonlocal remaining
+        remaining -= 1
+        if remaining < 0 or level > 16:
+            reject("implementation constants exceed structural quota")
         if isinstance(value, CodeType):
-            return {"code": _code_identity(value)}
+            return {"code": visit(value, level + 1)}
         if type(value) in {tuple, frozenset}:
-            result = [constant(item) for item in value]
+            if len(value) > remaining:
+                reject("implementation constants exceed structural quota")
+            result = [constant(item, level + 1) for item in value]
             return {"tuple" if type(value) is tuple else "frozenset": result if type(value) is tuple else sorted(result, key=encode)}
         if type(value) is bytes:
+            if len(value) > 65536:
+                reject("implementation bytes exceed structural quota")
             return {"bytes": value.hex()}
         if value is Ellipsis:
             return {"ellipsis": True}
         if value is None or type(value) in {str, int, float, bool}:
+            _bounded_json(value)
             return value
         reject("implementation contains an unsupported code constant")
-    return {"bytecode": code.co_code.hex(), "constants": [constant(item) for item in code.co_consts],
-        "names": list(code.co_names), "variables": list(code.co_varnames), "freevars": list(code.co_freevars),
-        "cellvars": list(code.co_cellvars), "argcount": code.co_argcount, "posonly": code.co_posonlyargcount,
-        "kwonly": code.co_kwonlyargcount, "flags": code.co_flags}
+    def visit(value, level):
+        if level > 16 or len(value.co_code) > 65536 or len(value.co_consts) > remaining:
+            reject("implementation code exceeds structural quota")
+        return {"bytecode": value.co_code.hex(), "constants": [constant(item, level + 1) for item in value.co_consts],
+            "names": list(value.co_names), "variables": list(value.co_varnames), "freevars": list(value.co_freevars),
+            "cellvars": list(value.co_cellvars), "argcount": value.co_argcount, "posonly": value.co_posonlyargcount,
+            "kwonly": value.co_kwonlyargcount, "flags": value.co_flags}
+    return visit(code, 0)
+
+
+def _function_identity(function):
+    # Captured configuration is implementation content, not merely source text.
+    # Runtime stores/generators must instead be explicit execution context;
+    # opaque closure objects cannot silently escape an immutable registration.
+    remaining = 4096
+    def capture(value, level=0):
+        nonlocal remaining
+        remaining -= 1
+        if remaining < 0 or level > 16:
+            reject("implementation bindings exceed structural quota")
+        if type(value) in {tuple, list}:
+            if len(value) > remaining:
+                reject("implementation bindings exceed structural quota")
+            return {"tuple" if type(value) is tuple else "list": [capture(item, level + 1) for item in value]}
+        if type(value) is dict:
+            if len(value) > remaining or any(type(key) is not str or len(key) > 128 for key in value):
+                reject("implementation bindings need bounded string keys")
+            return {"dict": {key: capture(item, level + 1) for key, item in value.items()}}
+        _bounded_json(value)
+        return value
+    bindings = {"defaults": capture(function.__defaults__), "kwdefaults": capture(function.__kwdefaults__),
+        "closure": [capture(cell.cell_contents) for cell in (function.__closure__ or ())]}
+    return {"code": _code_identity(function.__code__), "bindings": bindings}
 
 
 def implementation_hash(builder):
@@ -177,10 +219,11 @@ def implementation_hash(builder):
         if inspect.isclass(builder):
             methods = {key: value.__func__ if isinstance(value, (staticmethod, classmethod)) else value
                        for key, value in vars(builder).items()}
-            codes = {key: _code_identity(value.__code__) for key, value in methods.items() if inspect.isfunction(value)}
+            codes = {key: _function_identity(value) for key, value in methods.items() if inspect.isfunction(value)}
         else:
-            function = builder.__func__ if inspect.ismethod(builder) else builder
-            codes = {"callable": _code_identity(function.__code__)}
+            if not inspect.isfunction(builder):
+                reject("registered factories must be inspectable functions or classes, not opaque bound instances")
+            codes = {"callable": _function_identity(builder)}
         return digest({"source": source, "module": builder.__module__, "qualname": builder.__qualname__,
             "defining_module_hash": hashlib.sha256(path.read_text(encoding="utf-8").encode()).hexdigest(), "codes": codes})
     except (OSError, TypeError, AttributeError, ValueError) as exc:
@@ -218,7 +261,7 @@ def validate_entry(entry):
         reject("versioned RegistryEntry is required")
     for value in (entry.component_id, entry.version):
         identifier(value)
-    if (entry.component_kind not in {"model", "trainer", "predictor", "execution-adapter"} or
+    if (type(entry.component_kind) is not str or entry.component_kind not in {"model", "trainer", "predictor", "execution-adapter"} or
             type(entry.code_hash) is not str or len(entry.code_hash) != 64 or
             any(character not in "0123456789abcdef" for character in entry.code_hash) or
             type(entry.state_order) is not tuple or not 0 < len(entry.state_order) <= 32 or
@@ -226,7 +269,8 @@ def validate_entry(entry):
             len(set(entry.state_order)) != len(entry.state_order) or type(entry.units) is not tuple or
             len(entry.units) != len(entry.state_order) or any(type(unit) is not str or not unit or len(unit) > 32 for unit in entry.units) or
             type(entry.capabilities) is not frozenset or not 0 < len(entry.capabilities) <= 64 or
-            entry.resource_class not in {"cpu", "gpu"} or entry.resume_level not in RESUME_LEVELS):
+            type(entry.resource_class) is not str or entry.resource_class not in {"cpu", "gpu"} or
+            type(entry.resume_level) is not str or entry.resume_level not in RESUME_LEVELS):
         reject("component identity, state, units, capability or resource/recovery declaration is invalid")
     for capability in entry.capabilities:
         identifier(capability)
@@ -333,6 +377,9 @@ class VersionedRegistry:
 def plan_resources(entry, config, inputs, *, matrix_cells):
     """Constant-size declared arithmetic, never numerical tensors or factories."""
     validate_entry(entry)
+    # Detach the policy before deriving the plan; the caller cannot invalidate
+    # the already-hashed result by subsequently editing the declaration.
+    entry = RegisteredComponent(encode(entry.manifest()), None).entry
     validate_value(entry.config_schema, config)
     validate_value(entry.input_schema, inputs)
     contract = entry.resource_contract
@@ -371,6 +418,6 @@ def plan_resources(entry, config, inputs, *, matrix_cells):
         "config_hash": digest(config), "input_hash": digest(inputs), "matrix_cells": matrix_cells,
         "counts": counts, "tensors": tensors, "tensor_elements": total_elements, "tensor_bytes": total_bytes,
         "maximum_result_bytes": limits["result_bytes"], "resource_class": entry.resource_class,
-        "limits": limits, "global_limits_hash": digest(dict(GLOBAL_LIMITS))}
+        "limits": dict(limits), "global_limits_hash": digest(dict(GLOBAL_LIMITS))}
     result["resource_plan_hash"] = digest(result)
     return result
