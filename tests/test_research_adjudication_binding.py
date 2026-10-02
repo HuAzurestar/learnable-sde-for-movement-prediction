@@ -23,6 +23,7 @@ def policy():
     return {"schema_version": "pirc25-adjudication-spec-v1",
         "primary_metric": {"name": "error", "definition": "admitted-synthetic-error-v1", "unit": "m", "direction": "minimize"},
         "independent_unit": "block_id", "seed_aggregation": "mean-within-block", "minimum_seeds": 1, "minimum_paired_blocks": 2,
+        "seed_pairing": "independent-within-block",
         "interval": {"method": "paired-block-percentile-bootstrap", "confidence": 0.95, "replicates": 2000, "seed": 19},
         "multiplicity": "bonferroni", "practical_threshold": 0.5, "attempt_policy": "first-successful-attempt",
         "missing_policy": "exclude-incomplete-paired-blocks", "stopping_rule": "fixed-family-no-test-driven-expansion",
