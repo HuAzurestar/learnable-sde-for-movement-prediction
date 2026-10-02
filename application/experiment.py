@@ -33,6 +33,8 @@ from registry import build_estimator, build_inference_engine, build_model
 
 from .pipelines import EvidenceConditioner, EvaluationPipeline
 from .runtime import RunContext
+from dataclasses import asdict
+from copy import deepcopy
 
 
 @dataclass(frozen=True)
@@ -92,24 +94,38 @@ class ExperimentApplication:
         evaluator: Evaluator | None = None,
         conditioner: EvidenceConditioner | None = None,
         run_store: AtomicRunStore | None = None,
+        component_bindings=None,
+        matrix_cells=1,
     ) -> "ExperimentApplication":
+        component_plan = None
+        if component_bindings is not None:
+            from registry import MODEL_REGISTRY, ESTIMATOR_REGISTRY, INFERENCE_REGISTRY, plan_components
+            component_plan = plan_components(config, component_bindings, matrix_cells=matrix_cells)
+            component_bindings = deepcopy(component_bindings)
+            config = Config.from_dict(deepcopy(asdict(config)))
         config.validate()
         runtime = RunContext.create(
             config.seed,
             device=config.device,
             dtype={"float32": torch.float32, "float64": torch.float64}[config.dtype],
         )
-        return cls(
+        components = None
+        if component_bindings is not None:
+            components = {role: registry.create_bound(component_bindings[role], matrix_cells=matrix_cells)
+                for role, registry in (("model", MODEL_REGISTRY), ("trainer", ESTIMATOR_REGISTRY), ("predictor", INFERENCE_REGISTRY))}
+        application = cls(
             config=config,
-            model=build_model(config),
-            estimator=build_estimator(config),
-            inference_engine=build_inference_engine(config),
+            model=components["model"] if components is not None else build_model(config),
+            estimator=components["trainer"] if components is not None else build_estimator(config),
+            inference_engine=components["predictor"] if components is not None else build_inference_engine(config),
             runtime=runtime,
             model_store=TorchModelStore(),
             evaluator=evaluator,
             conditioner=conditioner,
             run_store=run_store,
         )
+        application.component_plan = component_plan
+        return application
 
     def train(self, data: TrainingData | SegmentEMData) -> TrainingRun:
         if isinstance(data, TrainingData):

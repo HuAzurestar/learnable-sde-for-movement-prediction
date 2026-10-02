@@ -16,7 +16,7 @@ def affine_configuration(dimensions):
     # Steps is a conservative bound for the eight-point synthetic segments,
     # including origin; single-axis forecasts have two registered horizons.
     return {"paths": 8, "steps": 8, "mixtures": 2 if dimensions == 1 else 1,
-        "components": 4, "dtype": "float64", "device": "cpu", "noise_dim": 2}, \
+        "components": 4, "dtype": "float64", "device": "cpu", "noise_dim": 1 if dimensions == 1 else 2}, \
         {"observations": 40 if dimensions == 1 else 32, "state_dim": 2 if dimensions == 1 else 4}
 
 

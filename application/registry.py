@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Callable, Dict, Generic, TypeVar
 
 from domain import ConfigurationError
+from .research_registry import VersionedRegistry, plan_resources
+from .research_execution import BINDING_FIELDS
+from infrastructure.research_store import ResearchError, encode
+import json
 
 ConfigT = TypeVar("ConfigT")
 ComponentT = TypeVar("ComponentT")
@@ -13,6 +17,40 @@ ComponentT = TypeVar("ComponentT")
 class ComponentRegistry(Generic[ConfigT, ComponentT]):
     def __init__(self) -> None:
         self._builders: Dict[str, Callable[[ConfigT], ComponentT]] = {}
+        self._versions = VersionedRegistry()
+
+    def register_version(self, entry, builder) -> str:
+        """Register an explicit immutable implementation without constructing it.
+
+        Versioned factories take bounded JSON config/inputs and explicit runtime
+        context. Legacy factories remain separate; resolution never falls back.
+        """
+        return self._versions.register(entry, builder)
+
+    def plan_bound(self, binding, *, matrix_cells, **compatibility):
+        if (type(binding) is not dict or set(binding) != BINDING_FIELDS or
+                binding.get("schema_version") != "pirc25-execution-binding-v1"):
+            raise ResearchError("CONTRACT_MISMATCH", "explicit sealed component binding required")
+        registration = self._versions.resolve(binding["component_id"], binding["component_version"],
+            entry_hash=binding["registry_entry_hash"], **compatibility)
+        entry = registration.entry
+        if binding["resource_class"] != entry.resource_class:
+            raise ResearchError("CONTRACT_MISMATCH", "component resource class differs")
+        plan = plan_resources(entry, binding["config"], binding["inputs"], matrix_cells=matrix_cells)
+        if binding["resource_plan_hash"] != plan["resource_plan_hash"]:
+            raise ResearchError("CONTRACT_MISMATCH", "component plan differs from frozen inputs")
+        return plan, registration
+
+    def create_bound(self, binding, *, matrix_cells, context=None, **compatibility):
+        """Construct only after exact resolution and allocation preflight.
+
+        This constructs the existing component, not its numerical result; the
+        component's typed model/fit/forecast interfaces validate those results.
+        It must be invoked inside a managed worker for budgeted research jobs.
+        """
+        _, registration = self.plan_bound(binding, matrix_cells=matrix_cells, **compatibility)
+        return registration.builder(json.loads(encode(binding["config"])),
+            json.loads(encode(binding["inputs"])), context)
 
     @property
     def names(self) -> tuple[str, ...]:

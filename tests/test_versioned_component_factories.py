@@ -83,12 +83,16 @@ def test_real_application_uses_frozen_versions_without_changing_affine_numerics(
     assert {value["component_kind"] for value in plan["entries"].values()} == {"model", "trainer", "predictor"}
     versioned = ExperimentApplication.from_config(cfg, component_bindings=bindings, matrix_cells=1)
     legacy = ExperimentApplication.from_config(cfg)
-    data, _ = make_synthetic_em_data(n_segments=4, length=10, dt=1.0, seed=cfg.seed)
-    versioned.train(data)
-    legacy.train(data)
     request = ForecastRequest(torch.tensor([1.0, 0.25], dtype=torch.float64),
         torch.tensor([1.0, 2.0], dtype=torch.float64), 8, ModelContext(regime=0))
     assert torch.equal(versioned.predict(versioned.model, request).samples, legacy.predict(legacy.model, request).samples)
+    data, _ = make_synthetic_em_data(n_segments=4, length=10, dt=1.0, seed=cfg.seed)
+    versioned.train(data)
+    legacy.train(data)
+    # Existing test_shared_runner uses these pre-existing float64 tolerances.
+    # Repeated legacy least-squares fitting itself is not bitwise deterministic.
+    torch.testing.assert_close(versioned.predict(versioned.model, request).samples,
+        legacy.predict(legacy.model, request).samples, rtol=1e-10, atol=1e-12)
     assert versioned.component_plan == plan
 
 
