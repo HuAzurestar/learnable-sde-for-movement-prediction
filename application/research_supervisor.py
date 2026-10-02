@@ -22,7 +22,7 @@ class ResearchSupervisor:
         self.budget = BudgetLedger(store)
         self.monotonic = monotonic
 
-    def run(self, attempt_id: str, command_builder, budget: BudgetSpec, *, result_validator=None, resource_plan=None):
+    def run(self, attempt_id: str, command_builder, budget: BudgetSpec, *, result_validator=None, resource_plan=None, checkpoint_handler=None):
         reservation = self.budget.reserve(attempt_id, budget)
         if reservation["settled"]:
             raise ResearchError("IDENTITY_CONFLICT", "settled attempt cannot execute again")
@@ -57,6 +57,9 @@ class ResearchSupervisor:
             raise
         start = self.monotonic()
         deadline = start + budget.job_seconds
+        from infrastructure.research_control import CheckpointExchange, ControlError
+        channel = CheckpointExchange(work, attempt_id, deadline, maximum_result_bytes) if checkpoint_handler is not None else None
+        saved_checkpoint = None
         wrapper = Path(__file__).resolve().parents[1] / "infrastructure/research_worker.py"
         process, tree, deadline_monitor = None, None, None
         expired = threading.Event()
@@ -87,6 +90,35 @@ class ResearchSupervisor:
 
         def past_deadline():
             return expired.is_set() or self.monotonic() >= deadline
+        def collect_checkpoint():
+            nonlocal saved_checkpoint
+            if channel is None or saved_checkpoint is not None or past_deadline():
+                return
+            try:
+                frame = channel.response()
+            except ControlError as exc:
+                raise ResearchError("CONTRACT_MISMATCH", str(exc)) from exc
+            if frame is None:
+                return
+            progress = frame["progress"]
+            if (type(progress) is not dict or set(progress) != {"completed_steps", "total_steps", "throughput_per_second", "eta_seconds"}
+                    or type(progress["completed_steps"]) is not int or type(progress["total_steps"]) is not int
+                    or not 0 <= progress["completed_steps"] <= progress["total_steps"]
+                    or progress["total_steps"] <= 0
+                    or any(type(progress[key]) not in {int, float} or not math.isfinite(progress[key]) or progress[key] < 0
+                        for key in ("throughput_per_second", "eta_seconds"))):
+                raise ResearchError("CONTRACT_MISMATCH", "worker checkpoint progress is invalid")
+            reference = checkpoint_handler(frame["state"], progress, deadline)
+            if past_deadline():
+                return
+            if type(reference) is not dict or set(reference) != {"artifact_id", "resume_level"}:
+                raise ResearchError("CONTRACT_MISMATCH", "owner checkpoint receipt is invalid")
+            metadata = self.store.manifest("artifact-" + reference["artifact_id"])
+            if metadata["role"] != "checkpoint" or metadata["study_id"] != run["study_id"]:
+                raise ResearchError("CONTRACT_MISMATCH", "owner checkpoint artifact scope differs")
+            saved_checkpoint = {**reference, "progress": progress, "elapsed_ms": math.ceil((self.monotonic() - start) * 1000)}
+            self.store.append("CHECKPOINT_SAVED", {"attempt_id": attempt_id, "request_id": channel.request_id, **saved_checkpoint})
+            channel.acknowledge(reference["artifact_id"])
         self.store.transition(attempt_id, "RUNNING")
         try:
             with (work / "worker.log").open("xb") as log:
@@ -95,7 +127,8 @@ class ResearchSupervisor:
                     stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT,
                     start_new_session=os.name != "nt",
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-                    env={**os.environ, "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"},
+                    env={**os.environ, "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1",
+                        **(channel.environment() if channel is not None else {})},
                 )
                 tree = ProcessTree(process)
                 deadline_monitor = threading.Timer(max(0, deadline - self.monotonic()), hard_stop)
@@ -122,13 +155,17 @@ class ResearchSupervisor:
                         outcome, error_code = "INTERRUPTED", "HEARTBEAT_LOST"
                         break
                     if now - start >= budget.job_seconds * 0.8 and not warned:
-                        self.store.append("CHECKPOINT_REQUESTED", {"attempt_id": attempt_id, "remaining_seconds": max(0, deadline - now)})
+                        request_id = channel.request() if channel is not None else None
+                        self.store.append("CHECKPOINT_REQUESTED", {"attempt_id": attempt_id,
+                            "remaining_seconds": max(0, deadline - now), "request_id": request_id, "supported": channel is not None})
                         warned = True
+                    collect_checkpoint()
                     if now - last_logged >= 5:
                         self.store.append("HEARTBEAT", {"attempt_id": attempt_id, "monotonic_elapsed_ms": math.ceil((now - start) * 1000)})
                         last_logged = now
                     time.sleep(min(0.025, max(0, deadline - now)))
                 completed_code = process.poll()
+                collect_checkpoint()
                 # A successful wrapper is not proof its descendants exited.
                 # Stop and confirm them before any owner-side result handling.
                 stop_tree()
@@ -139,6 +176,8 @@ class ResearchSupervisor:
                 if completed_code is not None:
                     if past_deadline() or completed_code == 124:
                         outcome, error_code = "TIMEOUT", "TIMEOUT"
+                    elif completed_code == 85 and saved_checkpoint is not None:
+                        outcome, error_code = "FAILED", "CHECKPOINT_SAVED"
                     elif completed_code == 0 and result_path.is_file():
                         # Registered adapters must supply a finite JSON result; no pickle.
                         import json
@@ -226,6 +265,8 @@ class ResearchSupervisor:
             self.store.transition(attempt_id, outcome, error_code=error_code, artifact_id=artifact_id)
         result = {"attempt_id": attempt_id, "state": outcome, "artifact_id": artifact_id,
                   "exit_code": 0 if outcome == "SUCCEEDED" else 1, "elapsed_ms": elapsed}
+        if saved_checkpoint is not None:
+            result["checkpoint"] = saved_checkpoint
         if control_close_error:
             result["cleanup"] = {"control_pipe_close_error": "PIPE_CLOSE_FAILED",
                                  "diagnostic_recorded": control_close_recorded}

@@ -5,7 +5,6 @@ scientific qualification. It must consume the same actual random stream after
 reopening the store; a serialized-state roundtrip cannot satisfy these tests.
 """
 
-from dataclasses import replace
 import inspect
 import json
 from pathlib import Path
@@ -104,7 +103,7 @@ def prepared(root, level, study):
     registry.register(plugin)
     adapters = RecoveryRegistry()
     adapters.register(RecoveryPlugin(plugin.plugin_id, level, resume_command, "1.0.0"))
-    grant = admit_fixture(store, value, plugin, root)
+    grant = admit_fixture(store, value, plugin, root, recovery_command_builder=resume_command)
     store.register(value, digest(value))
     return store, value, registry, adapters, grant
 

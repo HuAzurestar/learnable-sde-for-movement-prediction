@@ -272,7 +272,7 @@ class AdmissionGate:
             result["admission_hash"] = receipt["admission_hash"]
         return validate
 
-    def run(self, attempt_id, spec, cell, plugin, command_builder, budget, *, builtin_fixture=False, recovery_builder=None):
+    def run(self, attempt_id, spec, cell, plugin, command_builder, budget, *, builtin_fixture=False, recovery_builder=None, checkpoint_handler=None):
         from .research_supervisor import ResearchSupervisor
         admitted = {}
         resource_plan = {}
@@ -292,5 +292,7 @@ class AdmissionGate:
             return command_builder(output)
         def validate(result):
             return self.result_validator(admitted, spec, cell, plugin)(result)
+        def checkpoint(state, progress, deadline):
+            return checkpoint_handler(state, progress, admitted, deadline)
         return ResearchSupervisor(self.store).run(attempt_id, command, budget, result_validator=validate,
-            resource_plan=resource_plan)
+            resource_plan=resource_plan, checkpoint_handler=checkpoint if checkpoint_handler is not None else None)

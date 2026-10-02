@@ -37,7 +37,7 @@ def bind_fixture_execution(value, plugin, config=None, inputs=None):
 
 
 def admit_fixture(store, value, plugin, root, *, formal=False, package_visibility="synthetic",
-                  execution_config=None, execution_inputs=None):
+                  execution_config=None, execution_inputs=None, recovery_command_builder=None):
     bind_fixture_execution(value, plugin, execution_config, execution_inputs)
     content = b"explicit synthetic plugin input"
     (root / "plugin-input.bin").write_bytes(content)
@@ -80,7 +80,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
         "code_hash": value["code_hash"], "data_hash": value["data_hash"], "input_hash": value["data_hash"],
         "protocol_hash": value["protocol_hash"], "output_hash": digest(payload), "payload": payload,
         "plugin_hash": plugin_binding(plugin), "command_hash": command_binding(plugin.command_builder),
-        "recovery_command_hash": command_binding(plugin.command_builder), "upstream_hash": upstream["manifest_hash"],
+        "recovery_command_hash": command_binding(recovery_command_builder or plugin.command_builder), "upstream_hash": upstream["manifest_hash"],
         "qualification": "qualified" if formal else "fixture"}
     if formal:
         package["preregistration_hash"] = protocol["preregistration_hash"]

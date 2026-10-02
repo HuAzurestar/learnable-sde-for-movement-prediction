@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import time
 
 from .research_budget import BudgetLedger, BudgetSpec
 from .research_admission import AdmissionGate
@@ -74,11 +75,26 @@ class SharedRecovery:
         execution_plan(spec, cell, plugin)
         return attempt, run, spec, cell, plugin
 
-    def checkpoint(self, attempt_id, state: dict):
+    def checkpoint_handler(self, attempt_id):
+        def save(state, progress, receipt, deadline):
+            attempt, run, spec, cell, plugin = self._context(attempt_id)
+            if (attempt["state"] != "RUNNING" or receipt["attempt_id"] != attempt_id
+                    or receipt["cell_hash"] != digest(cell) or type(state) is not dict
+                    or state.get("step") != progress["completed_steps"]
+                    or progress["total_steps"] > receipt["resource_plan"]["counts"]["steps"]):
+                raise ResearchError("CONTRACT_MISMATCH", "checkpoint differs from the admitted running job")
+            artifact = self.checkpoint(attempt_id, state, admission_hash=receipt["admission_hash"],
+                progress=progress, deadline=deadline)
+            return {"artifact_id": artifact, "resume_level": plugin.resume_level}
+        return save
+
+    def checkpoint(self, attempt_id, state: dict, *, admission_hash=None, progress=None, deadline=None):
         attempt, run, spec, cell, plugin = self._context(attempt_id)
         adapter = self.recovery.resolve(plugin.plugin_id, plugin.resume_level, plugin.registry_entry.version)
         required = {"step", "data_position", "method_state", "rng_state"}
-        if not required <= state.keys() or not isinstance(state["step"], int) or state["step"] < 0:
+        from .research_registry import _bounded_json
+        _bounded_json(state, nodes=65536, depth=32)
+        if type(state) is not dict or not required <= state.keys() or type(state["step"]) is not int or state["step"] < 0:
             raise ResearchError("CONTRACT_MISMATCH", "checkpoint needs method, position and actual RNG state")
         if plugin.resume_level == "chunk" and state.get("chunk_complete") is not True:
             raise ResearchError("CONTRACT_MISMATCH", "chunk checkpoint must be at a completed boundary")
@@ -89,10 +105,16 @@ class SharedRecovery:
                  "plugin_version": plugin.registry_entry.version, "recovery_command_hash": implementation_hash(adapter.command_builder),
                  "resume_level": plugin.resume_level, "bindings": bindings(spec, cell),
                  "payload_hash": digest(state), "state": state}
+        if admission_hash is not None:
+            value.update(admission_hash=admission_hash, progress=progress)
         from infrastructure.research_store import encode
         from infrastructure.research_visibility import study_visibility
+        if deadline is not None and time.monotonic() >= deadline:
+            raise ResearchError("TIMEOUT", "checkpoint publication reached the hard deadline")
         artifact = self.store.artifact(encode(value), role="checkpoint", visibility=study_visibility(self.store.manifest, spec),
                                       block_ids=[cell["block_id"]], study_id=run["study_id"])
+        if deadline is not None and time.monotonic() >= deadline:
+            raise ResearchError("TIMEOUT", "checkpoint publication reached the hard deadline")
         self.store.append("CHECKPOINT", {"attempt_id": attempt_id, "artifact_id": artifact["artifact_id"],
                                         "resume_level": plugin.resume_level, "bindings_hash": digest(value["bindings"])})
         return artifact["artifact_id"]
@@ -124,4 +146,5 @@ class SharedRecovery:
                                     "checkpoint_id": checkpoint_id, "resume_level": prepared["plugin"].resume_level})
         return AdmissionGate(self.store).run(retry, prepared["spec"], prepared["cell"], prepared["plugin"],
             lambda output: prepared["adapter"].command_builder(output, prepared["spec"], prepared["cell"], prepared["state"]),
-            budget, recovery_builder=prepared["adapter"].command_builder)
+            budget, recovery_builder=prepared["adapter"].command_builder,
+            checkpoint_handler=self.checkpoint_handler(retry))
