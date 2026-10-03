@@ -63,6 +63,15 @@ def load_benchmark_selection_binding(
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise BenchmarkConsumerError("cannot read BenchmarkSelection binding") from error
+    return validate_benchmark_selection_binding(payload, matrix=matrix)
+
+
+def validate_benchmark_selection_binding(
+    payload: object,
+    *,
+    matrix: RepresentationMatrix | None = None,
+) -> dict[str, object]:
+    """Apply the original frozen contract to an already admitted JSON value."""
     if not isinstance(payload, dict):
         raise BenchmarkConsumerError("BenchmarkSelection binding is not an object")
     identity_payload = dict(payload)
@@ -196,4 +205,5 @@ __all__ = [
     "FACTOR_GROUPS",
     "build_pirc17_ablation_configs",
     "load_benchmark_selection_binding",
+    "validate_benchmark_selection_binding",
 ]

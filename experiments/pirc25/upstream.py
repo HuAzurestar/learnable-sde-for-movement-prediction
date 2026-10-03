@@ -6,11 +6,16 @@ when requested, and frozen selections use their original validation routine.
 
 from __future__ import annotations
 
+from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
+
+from infrastructure.research_files import opened_regular_file
+from infrastructure.research_store import ResearchError
 
 
 class AdmissionError(ValueError):
@@ -56,19 +61,45 @@ PUBLIC_BINDINGS = (
 )
 
 
-def validate_binding(root: Path, binding: Binding) -> dict:
-    root = root.resolve()
-    path = (root / binding.path).resolve()
-    if Path(binding.path).is_absolute() or not path.is_relative_to(root):
+@contextmanager
+def _metadata_scope():
+    # Keep actual descriptors until every frozen validator and the final
+    # uncached identity checks finish. This is not a trajectory authorization.
+    try:
+        with ExitStack() as stack:
+            yield stack
+    except ResearchError as exc:
+        raise AdmissionError(str(exc)) from exc
+    except OSError as exc:
+        raise AdmissionError("MISSING_INPUT: upstream metadata at final verification") from exc
+
+
+def _read_metadata(root: Path, relative, object_id, stack) -> Any:
+    # Normalize .. without blessing a redirected root or ancestor.
+    root = Path(os.path.abspath(root))
+    path = Path(os.path.abspath(root / relative))
+    if Path(relative).is_absolute() or not path.is_relative_to(root):
         raise AdmissionError("UNAUTHORIZED_DATA: input path escapes root")
+    try:
+        stream, size, _ = stack.enter_context(opened_regular_file(root, path))
+        content = stream.read(size + 1)
+        if len(content) != size:
+            raise AdmissionError("CORRUPT_ARTIFACT: upstream size changed during read")
+        # Preserve the historical UTF-8 and canonical-value JSON identity.
+        # No arbitrary metadata quota: legitimate large JSON remains valid.
+        return json.loads(content.decode("utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AdmissionError(f"MISSING_INPUT: {object_id}") from exc
+    except UnicodeDecodeError as exc:
+        raise AdmissionError(f"CORRUPT_ARTIFACT: upstream UTF-8: {object_id}") from exc
+
+
+def _validate_binding(root, binding, stack):
     if binding.role != "metadata-only":
         raise AdmissionError("UNAUTHORIZED_DATA: data needs the exposure ledger")
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict) or canonical_hash(payload) != binding.sha256:
-            raise AdmissionError("CORRUPT_ARTIFACT: upstream hash mismatch")
-    except (OSError, json.JSONDecodeError) as exc:
-        raise AdmissionError(f"MISSING_INPUT: {binding.object_id}") from exc
+    payload = _read_metadata(root, binding.path, binding.object_id, stack)
+    if not isinstance(payload, dict) or canonical_hash(payload) != binding.sha256:
+        raise AdmissionError("CORRUPT_ARTIFACT: upstream hash mismatch")
     if payload.get("schema_version") != binding.schema_version:
         raise AdmissionError("CONTRACT_MISMATCH: upstream schema")
     status = payload.get("status", payload.get("overall_status", payload.get("scientific_role")))
@@ -81,6 +112,11 @@ def validate_binding(root: Path, binding: Binding) -> dict:
     return payload
 
 
+def validate_binding(root: Path, binding: Binding) -> dict:
+    with _metadata_scope() as stack:
+        return _validate_binding(root, binding, stack)
+
+
 def audit_inputs(root: Path, required: tuple[str, ...]) -> dict:
     """Return a hash-bound admission manifest without reading any trajectory."""
     from dataclasses import asdict
@@ -89,15 +125,20 @@ def audit_inputs(root: Path, required: tuple[str, ...]) -> dict:
     if len(set(required)) != len(required) or set(required) - registry.keys():
         raise AdmissionError("CONTRACT_MISMATCH: unknown or duplicate upstream ID")
     admitted = []
-    for object_id in required:
-        binding = registry[object_id]
-        validate_binding(root, binding)
-        if object_id == "terrain-selection":
-            from experiments.pirc22.consumer import load_benchmark_selection_binding
-            from experiments.pirc22.representations import load_representation_matrix
-            matrix = load_representation_matrix(root / "experiments/pirc22/representation_matrix.json")
-            load_benchmark_selection_binding(root / binding.path, matrix=matrix)
-        admitted.append(asdict(binding))
+    with _metadata_scope() as stack:
+        for object_id in required:
+            binding = registry[object_id]
+            payload = _validate_binding(root, binding, stack)
+            if object_id == "terrain-selection":
+                from experiments.pirc22.consumer import validate_benchmark_selection_binding
+                from experiments.pirc22.representations import validate_representation_matrix
+                matrix_path = Path("experiments/pirc22/representation_matrix.json")
+                matrix = validate_representation_matrix(
+                    _read_metadata(root, matrix_path, "terrain-matrix", stack),
+                    _read_metadata(root, matrix_path.with_suffix(".lock.json"), "terrain-lock", stack),
+                )
+                validate_benchmark_selection_binding(payload, matrix=matrix)
+            admitted.append(asdict(binding))
     manifest = {"schema_version": "pirc25-upstream-binding-v1", "objects": admitted,
                 "data_authorization": "none", "fit_scope": "train-only",
                 "feature_adapter": "pirc21-psde-adapter-v2",
