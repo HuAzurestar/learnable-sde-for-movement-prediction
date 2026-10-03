@@ -25,10 +25,13 @@ def opened_regular_file(root, path, *, expected_size=None):
     # Normalize ordinary relative/.. spellings without following symlinks.
     root, path = Path(os.path.abspath(root)), Path(os.path.abspath(path))
     root_information = root.lstat()
-    if not stat.S_ISDIR(root_information.st_mode) or root.resolve() != root:
+    if not stat.S_ISDIR(root_information.st_mode):
         raise ResearchError("UNAUTHORIZED_DATA", "authorized root or its parent was redirected")
     before = path.lstat()
-    if (not stat.S_ISDIR(root_information.st_mode) or not stat.S_ISREG(before.st_mode)
+    # The complete resolved source must retain the lexical root prefix. This
+    # also detects redirects of the root or ANY ancestor; separately resolving
+    # the root at the same boundary adds no protection. Do not cache this check.
+    if (not stat.S_ISREG(before.st_mode)
             or not path.resolve().is_relative_to(root)):
         raise ResearchError("UNAUTHORIZED_DATA", "source is not a regular file inside its authorized root")
     if expected_size is not None and before.st_size != expected_size:
@@ -53,7 +56,6 @@ def opened_regular_file(root, path, *, expected_size=None):
             if (not stat.S_ISREG(current.st_mode)
                     or not stat.S_ISREG(opened.st_mode)
                     or not stat.S_ISDIR(current_root.st_mode)
-                    or root.resolve() != root
                     or not path.resolve().is_relative_to(root)
                     or (current_root.st_dev, current_root.st_ino) != (root_information.st_dev, root_information.st_ino)):
                 raise ResearchError("UNAUTHORIZED_DATA", "source or authorized root changed at opened handle")
