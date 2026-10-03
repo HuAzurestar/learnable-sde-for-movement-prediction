@@ -65,6 +65,15 @@ class EvaluationExposureLedger:
             self.store._append("EXPOSURE_DENIED", {**request, "allowed": False})
             raise ResearchError("UNAUTHORIZED_DATA", "data purpose, protocol or grant mismatch")
 
+    def _require_read_expiry(self, grant, request):
+        try:
+            unexpired = datetime.fromisoformat(grant["expires_at"]) > datetime.now(timezone.utc)
+        except (KeyError, TypeError, ValueError):
+            unexpired = False
+        if not unexpired:
+            self.store.append("EXPOSURE_DENIED", {**request, "allowed": False})
+            raise ResearchError("UNAUTHORIZED_DATA", "data purpose, protocol or grant mismatch")
+
     def read(self, protocol_id: str, block_id: str, *, purpose: str,
              authorization_id: str, data_root: Path, consumer=None) -> bytes:
         with self.store._read_transaction():
@@ -107,8 +116,9 @@ class EvaluationExposureLedger:
                 raise
             self.store._append("READ_COMPLETED", request)
             self._require_read_authority(protocol, block, purpose, authorization_id, grant, request)
+            self.store._read_completion(
+                lambda: self._require_read_authority(protocol, block, purpose, authorization_id, grant, request),
+                lambda: self._require_read_expiry(grant, request))
         # Physical scope verification is I/O too; do not cache an earlier clock.
-        if datetime.fromisoformat(grant["expires_at"]) <= datetime.now(timezone.utc):
-            self.store.append("EXPOSURE_DENIED", {**request, "allowed": False})
-            raise ResearchError("UNAUTHORIZED_DATA", "data purpose, protocol or grant mismatch")
+        self._require_read_expiry(grant, request)
         return content

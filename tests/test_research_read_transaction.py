@@ -67,13 +67,18 @@ def test_corrupt_chain_during_byte_read_never_returns_content(tmp_path, monkeypa
 
 def test_each_read_rehashes_grant_manifest_inside_one_scope(tmp_path):
     store, artifact, grant = published(tmp_path)
-    with store._read_transaction():
-        assert store.read_artifact(artifact['artifact_id'], purpose='preview', authorization=grant) == b'{"value":2}'
-        path = store.path / 'manifests' / ('authorization-' + grant['authorization_id'] + '.json')
-        path.write_bytes(encode({**grant, 'purposes': []}))
-        with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
-            store.read_artifact(artifact['artifact_id'], purpose='preview', authorization=grant)
+    with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+        with store._read_transaction():
+            assert store.read_artifact(artifact['artifact_id'], purpose='preview', authorization=grant) == b'{"value":2}'
+            path = store.path / 'manifests' / ('authorization-' + grant['authorization_id'] + '.json')
+            path.write_bytes(encode({**grant, 'purposes': []}))
+            with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+                store.read_artifact(artifact['artifact_id'], purpose='preview', authorization=grant)
+        # Even if the consumer catches the second read's denial, the first
+        # protected bytes cannot leave an outer response with invalid authority.
     assert store.events()[-1]['event_kind'] == 'EXPOSURE_DENIED'
+    assert store._read_snapshot() is None
+    assert not hasattr(store._read_scope, 'completions')
 
 
 def test_event_flushed_before_failed_head_is_not_overwritten_in_same_scope(tmp_path, monkeypatch):

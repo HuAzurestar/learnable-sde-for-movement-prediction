@@ -1,6 +1,7 @@
 """Raw/provider/recovery reads cannot reuse permission after durable I/O."""
 
 from datetime import datetime, timezone
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -139,7 +140,8 @@ def fault_after_final_chain(store, grant, fault, reads, clock, monkeypatch):
 
 
 @pytest.mark.parametrize('purpose', ['preview', 'export', 'evaluate', 'resume'])
-def test_raw_read_rehashes_grant_after_real_final_physical_validation(tmp_path, monkeypatch, read_clock, purpose):
+@pytest.mark.parametrize('outer', [False, True])
+def test_raw_read_rehashes_grant_after_real_final_physical_validation(tmp_path, monkeypatch, read_clock, purpose, outer):
     store, artifact, grant, _ = raw_source(tmp_path)
     reads = []
     original = store._verified_artifact_content
@@ -152,10 +154,12 @@ def test_raw_read_rehashes_grant_after_real_final_physical_validation(tmp_path, 
     monkeypatch.setattr(store, '_verified_artifact_content', read)
     touched = fault_after_final_chain(store, grant, 'grant', reads, read_clock, monkeypatch)
     with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
-        store.read_artifact(artifact['artifact_id'], purpose=purpose, authorization=grant)
+        with store._read_transaction() if outer else nullcontext():
+            store.read_artifact(artifact['artifact_id'], purpose=purpose, authorization=grant)
     assert touched and len(reads) == 1
     assert store.events()[-1]['event_kind'] == 'EXPOSURE_DENIED'
     assert store._read_snapshot() is None
+    assert not hasattr(store._read_scope, 'completions')
 
 
 def provider_source(tmp_path, purpose):
@@ -212,7 +216,8 @@ def test_valid_provider_read_keeps_role_scope_bytes_and_frozen_evidence(tmp_path
 
 @pytest.mark.parametrize('purpose', ['fit', 'select', 'validate', 'evaluate'])
 @pytest.mark.parametrize('fault', ['grant', 'expiry'])
-def test_provider_revalidates_after_real_final_physical_validation(tmp_path, monkeypatch, read_clock, purpose, fault):
+@pytest.mark.parametrize('outer', [False, True])
+def test_provider_revalidates_after_real_final_physical_validation(tmp_path, monkeypatch, read_clock, purpose, fault, outer):
     store, ledger, grant, _ = provider_source(tmp_path, purpose)
     original = Path.read_bytes
     reads = []
@@ -226,11 +231,97 @@ def test_provider_revalidates_after_real_final_physical_validation(tmp_path, mon
     monkeypatch.setattr(Path, 'read_bytes', read)
     touched = fault_after_final_chain(store, grant, fault, reads, read_clock, monkeypatch)
     with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
-        ledger.read('reserved', 'test-block', purpose=purpose,
-                    authorization_id=grant['authorization_id'], data_root=tmp_path)
+        with store._read_transaction() if outer else nullcontext():
+            ledger.read('reserved', 'test-block', purpose=purpose,
+                        authorization_id=grant['authorization_id'], data_root=tmp_path)
     assert touched and len(reads) == 1
     assert store.events()[-1]['event_kind'] == 'EXPOSURE_DENIED'
     assert store._read_snapshot() is None
+    assert not hasattr(store._read_scope, 'completions')
+
+
+def test_last_expiry_checks_follow_all_nested_read_guard_io(tmp_path, monkeypatch, read_clock):
+    store, artifact, grant, content = raw_source(tmp_path)
+    second = {**grant, 'authorization_id': 'second', 'expires_at': '2199-01-01T00:00:00+00:00'}
+    store.authorize(second)
+    original_manifest, original_events = store._manifest, store._events
+    final_validation = []
+    touched = []
+
+    def physical():
+        result = original_events()
+        if store._read_snapshot() is None and len(final_validation) == 1:
+            final_validation.append(True)
+        return result
+
+    def metadata(object_id):
+        result = original_manifest(object_id)
+        if len(final_validation) == 2 and object_id == 'authorization-second':
+            touched.append(True)
+            read_clock[0] = True
+        return result
+
+    monkeypatch.setattr(store, '_events', physical)
+    monkeypatch.setattr(store, '_manifest', metadata)
+    with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+        with store._read_transaction():
+            assert store.read_artifact(artifact['artifact_id'], purpose='preview', authorization=grant) == content
+            assert store.read_artifact(artifact['artifact_id'], purpose='preview', authorization=second) == content
+            final_validation.append(True)
+    assert touched
+    assert store.events()[-1]['payload']['authorization_hash'] == digest(grant)
+    assert store.events()[-1]['event_kind'] == 'EXPOSURE_DENIED'
+    assert store._read_snapshot() is None
+    assert not hasattr(store._read_scope, 'completions')
+
+
+def test_valid_nested_reads_keep_two_physical_scans_and_release_guards(tmp_path, monkeypatch, read_clock):
+    store, artifact, grant, content = raw_source(tmp_path)
+    original = store._json
+    physical_reads = []
+
+    def observe(path):
+        if path.parent == store.path / 'events':
+            physical_reads.append(path)
+        return original(path)
+
+    monkeypatch.setattr(store, '_json', observe)
+    with store._read_transaction():
+        for purpose in ('preview', 'export'):
+            assert store.read_artifact(artifact['artifact_id'], purpose=purpose, authorization=grant) == content
+    count = len(physical_reads)
+    events = store.events()
+    assert count <= 2 * len(events)
+    assert [e['event_kind'] for e in events][-6:] == ['EXPOSURE_ALLOWED', 'READ_STARTED', 'READ_COMPLETED'] * 2
+    assert store._read_snapshot() is None
+    assert not hasattr(store._read_scope, 'completions')
+
+
+def test_final_guard_audit_write_failure_refuses_return_and_clears_state(tmp_path, monkeypatch, read_clock):
+    store, artifact, grant, _ = raw_source(tmp_path)
+    original_read, original_append = store._verified_artifact_content, store._append
+    reads, denials = [], []
+
+    def read(metadata):
+        result = original_read(metadata)
+        reads.append(True)
+        return result
+
+    def append(kind, *args, **kwargs):
+        if kind == 'EXPOSURE_DENIED':
+            denials.append(True)
+            raise OSError('final authority journal unavailable')
+        return original_append(kind, *args, **kwargs)
+
+    monkeypatch.setattr(store, '_verified_artifact_content', read)
+    monkeypatch.setattr(store, '_append', append)
+    touched = fault_after_final_chain(store, grant, 'grant', reads, read_clock, monkeypatch)
+    with pytest.raises(OSError, match='final authority journal unavailable'):
+        store.read_artifact(artifact['artifact_id'], purpose='preview', authorization=grant)
+    assert touched and denials and len(reads) == 1
+    assert store._read_snapshot() is None
+    assert not hasattr(store._read_scope, 'completions')
+    store.events()  # The read journal is still an intact physical chain.
 
 
 @pytest.mark.parametrize('level', ['exact', 'chunk'])

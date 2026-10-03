@@ -223,13 +223,40 @@ class ResearchStore:
         with self.lock():
             events = self._events()
             self._read_scope.snapshot = (os.getpid(), events)
+            self._read_scope.completions = []
+            completed = False
             try:
                 yield
+                completed = True
             finally:
                 del self._read_scope.snapshot
                 # Also detects physical corruption during I/O. No content leaves
                 # the outer request until this fresh, uncached validation passes.
-                self._events()
+                try:
+                    events = self._events()
+                    if completed and self._read_scope.completions:
+                        # Share only this freshly verified physical prefix, not
+                        # permission decisions. Every guard rehashes its actual
+                        # manifests under the same outer OS lock.
+                        self._read_scope.snapshot = (os.getpid(), events)
+                        try:
+                            checks = tuple(self._read_scope.completions)
+                            for authority, _ in checks:
+                                authority()
+                            # An earlier grant may expire during a later guard's
+                            # I/O. All pure expiry checks therefore follow ALL I/O.
+                            for _, expiry in checks:
+                                expiry()
+                        finally:
+                            del self._read_scope.snapshot
+                finally:
+                    del self._read_scope.completions
+
+    def _read_completion(self, authority, expiry):
+        """Register disclosure guards for the actual outer scope completion."""
+        if self._read_snapshot() is None:
+            raise ResearchError("CONTRACT_MISMATCH", "read completion needs an owned verified scope")
+        self._read_scope.completions.append((authority, expiry))
 
     @staticmethod
     def _json(path):
@@ -623,6 +650,9 @@ class ResearchStore:
         with self._read_transaction():
             metadata = self._manifest("artifact-" + artifact_id)
             self._require_artifact_read(metadata, purpose, authorization, request)
+            self._read_completion(
+                lambda: self._require_artifact_read(metadata, purpose, authorization, request),
+                lambda: self._require_artifact_expiry(authorization, request))
         self._require_artifact_expiry(authorization, request)
 
     def read_artifact(self, artifact_id: str, *, purpose: str, authorization: dict) -> bytes:
@@ -646,5 +676,8 @@ class ResearchStore:
                 raise
             self._append("READ_COMPLETED", request)
             self._require_artifact_read(metadata, purpose, authorization, request)
+            self._read_completion(
+                lambda: self._require_artifact_read(metadata, purpose, authorization, request),
+                lambda: self._require_artifact_expiry(authorization, request))
         self._require_artifact_expiry(authorization, request)
         return content
