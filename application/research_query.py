@@ -45,22 +45,22 @@ class ResearchQuery:
                     if event['event_kind'] in {'MANIFEST', 'ATTEMPT', 'RESERVE', 'SETTLE',
                                               'ARM_CLOSED', 'RECOVERY_HOLD'}), default=0)
 
-    def _metadata_response(self, assemble):
+    def _authorized_response(self, assemble, *, purpose='preview'):
         # This snapshot belongs only to this request and the current lock owner.
-        # It is not a permission cache: projection and final disclosure both
+        # It is not a permission cache: actual reads and final disclosure both
         # recheck the immutable grant and its current validity, journalling any
         # denial before a value can leave the query.
         with self.store._read_transaction():
-            grant = self._grant()
+            grant = self._grant(purpose)
             watermark = self._data_watermark()
             result = assemble(grant)
-            authorize_study(self.store, grant['study_id'], grant, 'preview')
+            authorize_study(self.store, grant['study_id'], grant, purpose)
             if self._data_watermark() != watermark:
                 raise ResearchError('INDEX_STALE', 'authority changed while assembling query snapshot; retry the request')
         # The outer scope revalidates the physical chain before releasing its
         # lock. That I/O may take time, so expiry must be checked afterwards,
         # with no further valid-path I/O before returning this frozen snapshot.
-        require_unexpired_disclosure(self.store, grant['study_id'], grant, 'preview')
+        require_unexpired_disclosure(self.store, grant['study_id'], grant, purpose)
         return result
 
     def _project_objects(self, kind, grant):
@@ -124,7 +124,7 @@ class ResearchQuery:
              seed=None, trainer=None, predictor=None, limit=50, cursor=None):
         if kind not in {"study", "run", "comparison"} or not 1 <= limit <= 200:
             raise ResearchError("CONTRACT_MISMATCH", "invalid query kind or page limit")
-        return self._metadata_response(lambda grant: self._list(kind, grant,
+        return self._authorized_response(lambda grant: self._list(kind, grant,
             arm_id=arm_id, state=state, model=model, version=version, horizon=horizon,
             seed=seed, trainer=trainer, predictor=predictor, limit=limit, cursor=cursor))
 
@@ -187,7 +187,7 @@ class ResearchQuery:
         return result
 
     def run(self, run_id):
-        return self._metadata_response(lambda grant: self._run(run_id, grant))
+        return self._authorized_response(lambda grant: self._run(run_id, grant))
 
     def _run(self, run_id, grant):
         value = self.store.manifest("run-" + identifier(run_id))
@@ -207,9 +207,8 @@ class ResearchQuery:
                 "selectors": row["selectors"], "comparison_dimensions": row["comparison_dimensions"], "budget": row["budget"]}
 
     def artifact(self, artifact_id, *, export=False):
-        with self.store._read_transaction():
-            grant = self._grant("export" if export else "preview")
-            return self._artifact(artifact_id, grant, export=export)
+        return self._authorized_response(lambda grant: self._artifact(artifact_id, grant, export=export),
+                                         purpose='export' if export else 'preview')
 
     def _artifact(self, artifact_id, grant, *, export=False):
         # One comparison is one study disclosure, not three repeated whole-chain
@@ -234,11 +233,9 @@ class ResearchQuery:
         return content, metadata["media_type"]
 
     def comparison(self, aggregate_hash):
-        with self.store._read_transaction():
-            return self._comparison(aggregate_hash)
+        return self._authorized_response(lambda grant: self._comparison(aggregate_hash, grant))
 
-    def _comparison(self, aggregate_hash):
-        grant = self._grant()
+    def _comparison(self, aggregate_hash, grant):
         package = self.store.manifest("comparison-" + identifier(aggregate_hash))
         if package["study_id"] != grant["study_id"] or not self._comparison_visible(package, grant):
             raise ResearchError("UNAUTHORIZED_DATA", "comparison outside session scope")
@@ -254,11 +251,13 @@ class ResearchQuery:
 
     def case(self, artifact_id):
         from application.research_cases import case_view
-        with self.store._read_transaction():
-            return case_view(self.store, artifact_id, self._grant())
+        return self._authorized_response(lambda grant: case_view(self.store, artifact_id, grant))
 
     def result_manifest(self, artifact_id):
-        content, media = self.artifact(artifact_id, export=True)
+        return self._authorized_response(lambda grant: self._result_manifest(artifact_id, grant), purpose='export')
+
+    def _result_manifest(self, artifact_id, grant):
+        content, media = self._artifact(artifact_id, grant, export=True)
         metadata = self.store.manifest("artifact-" + identifier(artifact_id))
         value = json.loads(content) if media == "application/json" else {}
         if not isinstance(value, dict):

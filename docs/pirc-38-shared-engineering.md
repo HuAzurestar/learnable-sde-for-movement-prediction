@@ -261,6 +261,17 @@ Mutation verbs are rejected. Matrix, attempts, failures, comparison values,
 per-case results, provenance and CSV exports are available. Unstarted cells show
 MISSING. Artifact scripts are never rendered and no remote training controls exist.
 
+Every public query assembles its response inside one verified, lock-held read
+scope. Preview and export remain separate purposes: entry permission is checked
+against the immutable grant and source lineage, each actual artifact read keeps
+its own authorization/read journal, and final disclosure rechecks the actual
+grant. Current expiry is checked after permission-journal writes and after the
+last physical chain verification, before returning metadata or result bytes.
+A failed journal, changed grant or expired permission cannot yield a successful
+response. Genuine manifest/attempt/budget/recovery-hold changes during assembly
+reject a mixed snapshot; disclosure journals alone do not invalidate pagination.
+No permission or arm-balance cache is shared between requests.
+
 Limits: default 50 objects/page, maximum 200; responses/previews ≤2 MiB; forecast
 previews ≤64 trajectories and ≤512 points each. Oversized content is explicitly
 rejected. Cursors bind filters and the data watermark. Empty, incomplete,
