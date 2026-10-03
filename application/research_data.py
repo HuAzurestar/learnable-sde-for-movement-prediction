@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import hashlib
+import os
 from pathlib import Path
 
 from infrastructure.research_store import ResearchError, ResearchStore, digest, identifier
@@ -112,7 +113,8 @@ class EvaluationExposureLedger:
             if not allowed:
                 raise ResearchError("UNAUTHORIZED_DATA", "data purpose, protocol or grant mismatch")
             self._require_read_authority(protocol, block, purpose, authorization_id, grant, request)
-            root = Path(data_root).resolve()
+            # Do not promote a root redirected during authorization I/O.
+            root = Path(os.path.abspath(data_root))
             path = root / block["path"]
             if Path(block["path"]).is_absolute() or not path.resolve().is_relative_to(root):
                 raise ResearchError("UNAUTHORIZED_DATA", "data path escapes authorized root")

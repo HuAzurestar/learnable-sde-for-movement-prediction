@@ -567,7 +567,9 @@ class ResearchStore:
         if type(size) is not int or size < 0 or metadata.get("sha256") != artifact_id:
             raise ResearchError("CORRUPT_ARTIFACT", "artifact frozen size or hash is invalid")
         from .research_files import opened_regular_file
-        root = (self.path / "artifacts").resolve()
+        # Keep the established pathname: resolving it here would bless a
+        # directory symlink installed after the disclosure journal as a root.
+        root = self.path / "artifacts"
         path = root / artifact_id
         try:
             with opened_regular_file(root, path, expected_size=size) as (stream, _, _):

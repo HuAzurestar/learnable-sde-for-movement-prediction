@@ -20,11 +20,14 @@ def _identity(information):
 
 @contextmanager
 def opened_regular_file(root, path, *, expected_size=None):
-    root, path = Path(root), Path(path)
+    # Normalize ordinary relative/.. spellings without following symlinks.
+    root, path = Path(os.path.abspath(root)), Path(os.path.abspath(path))
     root_information = root.lstat()
+    if not stat.S_ISDIR(root_information.st_mode) or root.resolve() != root:
+        raise ResearchError("UNAUTHORIZED_DATA", "authorized root or its parent was redirected")
     before = path.lstat()
     if (not stat.S_ISDIR(root_information.st_mode) or not stat.S_ISREG(before.st_mode)
-            or not path.resolve().is_relative_to(root.resolve())):
+            or not path.resolve().is_relative_to(root)):
         raise ResearchError("UNAUTHORIZED_DATA", "source is not a regular file inside its authorized root")
     if expected_size is not None and before.st_size != expected_size:
         raise ResearchError("CORRUPT_ARTIFACT", "source frozen size differs before read")
@@ -48,7 +51,8 @@ def opened_regular_file(root, path, *, expected_size=None):
             if (not stat.S_ISREG(current.st_mode)
                     or not stat.S_ISREG(opened.st_mode)
                     or not stat.S_ISDIR(current_root.st_mode)
-                    or not path.resolve().is_relative_to(root.resolve())
+                    or root.resolve() != root
+                    or not path.resolve().is_relative_to(root)
                     or (current_root.st_dev, current_root.st_ino) != (root_information.st_dev, root_information.st_ino)):
                 raise ResearchError("UNAUTHORIZED_DATA", "source or authorized root changed at opened handle")
             if (_identity(before) != _identity(opened) or _identity(current) != _identity(opened)

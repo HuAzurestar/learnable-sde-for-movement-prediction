@@ -121,7 +121,10 @@ class NativeSourceReads(unittest.TestCase):
                         read()
                     self.assertEqual(touched, [True])
                     self.assertEqual(reads, [], "denial happened only after unauthorized/replaced bytes were consumed")
-                    self.assertEqual(store.events()[-1]["event_kind"], "READ_FAILED")
+                    # Provider path admission precedes READ_STARTED. A root
+                    # redirected at EXPOSURE_ALLOWED is denied there already.
+                    self.assertEqual(store.events()[-1]["event_kind"],
+                        "EXPOSURE_ALLOWED" if entry == "provider" and scenario == "root_authority" else "READ_FAILED")
             finally:
                 before_read()
                 if source_root.is_symlink():
@@ -146,6 +149,8 @@ class NativeRootParents(unittest.TestCase):
             root.mkdir(parents=True)
             target = root / "block.bin"
             target.write_bytes(b"synthetic parent fixture")
+            if scenario == "normal_dotdot":
+                root = root / ".." / "data"
             outside = base / "outside"
             (outside / "data").mkdir(parents=True)
             (outside / "data" / target.name).write_bytes(target.read_bytes())
@@ -160,7 +165,7 @@ class NativeRootParents(unittest.TestCase):
                     if scenario == "initial":
                         redirect()
                     files = importlib.import_module("infrastructure.research_files")
-                    if scenario == "normal":
+                    if scenario in {"normal", "normal_dotdot"}:
                         with files.opened_regular_file(root, target) as (stream, _, _):
                             self.assertEqual(stream.read(24), b"synthetic parent fixture")
                         self.assertTrue(reads)
@@ -174,10 +179,10 @@ class NativeRootParents(unittest.TestCase):
                     parent.unlink()
 
 
-for scenario in ("normal", "initial", "open"):
+for scenario in ("normal", "normal_dotdot", "initial", "open"):
     def check(self, scenario=scenario):
         self.exercise(scenario)
-    if os.name == "nt" and scenario != "normal":
+    if os.name == "nt" and scenario not in {"normal", "normal_dotdot"}:
         check = unittest.skip("POSIX-native parent directory symlink")(check)
     setattr(NativeRootParents, "test_parent_" + scenario, check)
 
