@@ -84,8 +84,30 @@ fallback; PIRC-22 adoption requires the same immutable zero-final-eval selection
 content-addressed validation receipt, including the actual validation time.
 These are metadata only, never data grants or proof that a future read is safe.
 
-This API does not by itself close the parent takeover contract. Complete real
-accepted PIRC-19–22 field/license reconciliation and selected-cell execution,
+Actual registered-plugin admission requires `upstream_snapshot_hash`,
+`upstream_acceptance_hash` and an explicit absolute lexical `upstream_root`.
+The qualification package binds both hashes. Register the normalized snapshot
+definition and a `pirc25-upstream-acceptance-v1` operator catalog before freezing
+the plan. Its `source`, complete `entries`, `source_evidence.entries` and
+`source_evidence_hash` are retained; `register_acceptance_catalog` validates
+that content binding, not the honesty of off-platform human attestations.
+For formal or held-out input, preregistration `upstream_bindings[study_id]`
+binds `snapshot_hash`, `acceptance_catalog_hash` and explicit `pirc22_cutover`.
+Both upstream records must have been published before preregistration.
+Snapshot cells identify exact complete registered cell hashes and study roles;
+there is no implicit empty/no-terrain cutover or missing-cell fallback.
+
+`AdmissionGate` freshly resolves only the selected cell's dependencies before
+qualification/data reads or worker startup, ignoring older ready receipts.
+It publishes content-addressed validation plus `UPSTREAM_VALIDATION` and typed
+`UPSTREAM_REFUSED` metadata. Its immutable admission contains the definition,
+catalog and exact validation hash/time. Independent cells keep their own
+outcome; missing inputs do not alter dependency sets or scientific routes.
+Explicit legacy public `upstream_hash`/`upstream_ids` remain additional frozen
+checks when requested, never a substitute for the required new snapshot.
+
+This API/runtime integration does not by itself close the parent takeover
+contract. Complete real accepted PIRC-19–22 field/license reconciliation,
 independent Paper and UI rejection integration remain required. Do not treat
 the historical `audit_inputs` binding as that complete receipt or label this
 standalone API validation as final engineering/scientific acceptance.
@@ -99,7 +121,8 @@ fixture qualification.
 
 Other plugins declare an immutable spec `admission` object with `mode`
 (`fixture`, `pilot`, `formal`), `protocol_id`, `authorization_id`, `package_hash`,
-`upstream_ids` (explicit, possibly empty), `upstream_hash`, and a role-appropriate
+required snapshot/catalog references and metadata root described above,
+optional legacy `upstream_ids`/`upstream_hash`, and a role-appropriate
 read `purpose`. The grant covers study/protocol/block/visibility, `execute` and
 the read purpose, remains unexpired and supplies an absolute `data_root`.
 `data_binding(protocol)` binds source identities/content hashes/roles; the ledger

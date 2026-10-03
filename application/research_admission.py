@@ -185,14 +185,24 @@ class AdmissionGate:
                     or package["state_order"] != list(plugin.state_order) or package["units"] != list(plugin.units)
                     or package["resume_level"] != plugin.resume_level):
                 raise ResearchError("CONTRACT_MISMATCH", "package differs from selected execution plugin/input")
-            required = settings.get("upstream_ids")
-            if not isinstance(required, list):
-                raise ResearchError("MISSING_INPUT", "explicit upstream dependency list required")
-            upstream = audit_inputs(ROOT, tuple(required))
-            if (settings.get("upstream_hash") != upstream["manifest_hash"]
-                    or package.get("upstream_hash") != upstream["manifest_hash"]):
-                raise ResearchError("CONTRACT_MISMATCH", "frozen upstream binding changed")
-            documents = {"protocol": protocol, "authorization": grant, "package": package, "upstream": upstream}
+            from .research_upstream import prepare_upstream
+            needs_prereg = mode == "formal" or block["split_role"] in {"test", "final-eval"}
+            upstream_prereg = (self._document("preregistration", protocol.get("preregistration_hash"))
+                               if needs_prereg else None)
+            snapshot_evidence = prepare_upstream(self.store, spec, cell, package, upstream_prereg)
+            documents = {"protocol": protocol, "authorization": grant, "package": package,
+                         "upstream_snapshot": snapshot_evidence}
+            # Preserve explicitly requested legacy public recipe bindings as
+            # additional evidence. They never replace the mandatory snapshot.
+            if "upstream_hash" in settings or "upstream_hash" in package:
+                required = settings.get("upstream_ids")
+                if not isinstance(required, list):
+                    raise ResearchError("MISSING_INPUT", "explicit legacy upstream dependency list required")
+                upstream = audit_inputs(ROOT, tuple(required))
+                if (settings.get("upstream_hash") != upstream["manifest_hash"]
+                        or package.get("upstream_hash") != upstream["manifest_hash"]):
+                    raise ResearchError("CONTRACT_MISMATCH", "frozen upstream binding changed")
+                documents["upstream"] = upstream
             if model is not None:
                 documents.update(self._model_documents(model, settings, spec, grant))
             gate_evidence = {}

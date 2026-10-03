@@ -150,8 +150,19 @@ class UpstreamSnapshot:
     def definition(self):
         return _clone(self._definition)
 
-    def resolve(self, *, root, accepted_versions):
+    def resolve(self, *, root, accepted_versions, cell_id=None):
         root = Path(os.path.abspath(root))
+        selected_cells = self._manifest['cells']
+        selected_inputs = self._manifest['inputs']
+        if cell_id is not None:
+            selected_cells = [cell for cell in selected_cells if cell['cell_id'] == cell_id]
+            if len(selected_cells) != 1:
+                raise ResearchError('MISSING_ARTIFACT', 'selected cell absent from frozen upstream snapshot')
+            dependencies = selected_cells[0].get('upstream_ids', [])
+            if not isinstance(dependencies, list) or any(not isinstance(name, str) for name in dependencies):
+                raise ResearchError('IDENTITY_MISMATCH', 'invalid selected cell dependency list')
+            required = set(dependencies)
+            selected_inputs = [record for record in selected_inputs if record['object_id'] in required]
         if not isinstance(accepted_versions, (list, tuple)):
             raise ResearchError('CONTRACT_MISMATCH', 'explicit external frozen acceptance catalog required')
         catalog = {}
@@ -171,7 +182,7 @@ class UpstreamSnapshot:
             catalog[key] = _clone(entry)
         failures, checked, held = {}, {}, []
         with ExitStack() as stack:
-            for record in self._manifest['inputs']:
+            for record in selected_inputs:
                 object_id = record['object_id']
                 try:
                     _validate_input(record)
@@ -200,7 +211,7 @@ class UpstreamSnapshot:
         studies = {study['study_id']: study for study in self._manifest['studies']}
         inputs = {record['object_id']: record for record in self._manifest['inputs']}
         cell_results = []
-        for cell in self._manifest['cells']:
+        for cell in selected_cells:
             dependencies = cell.get('upstream_ids')
             errors = []
             if (not isinstance(dependencies, list) or any(not isinstance(name, str) for name in dependencies)

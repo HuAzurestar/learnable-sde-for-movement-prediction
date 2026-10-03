@@ -9,8 +9,10 @@ from application.research_registry import GLOBAL_LIMITS, RegistryEntry, implemen
 from application.research_admission import data_binding, package_binding, plugin_binding, command_binding
 from application.research_data import EvaluationExposureLedger
 from application.research_preregistration import PreregistrationGate, protocol_binding, source_identity
+from application.research_upstream import register_acceptance_catalog, study_binding
 from experiments.pirc25.affine import ROOT, code_hash
 from experiments.pirc25.upstream import audit_inputs
+from experiments.pirc25.snapshot import UpstreamSnapshot
 from infrastructure.research_store import digest, encode
 
 
@@ -38,8 +40,42 @@ def bind_fixture_execution(value, plugin, config=None, inputs=None):
 
 def admit_fixture(store, value, plugin, root, *, formal=False, package_visibility="synthetic",
                   execution_config=None, execution_inputs=None, recovery_command_builder=None,
-                  upstream_ids=()):
+                  upstream_ids=(), upstream_inputs=None, accepted_versions=None,
+                  upstream_dependencies=None, pirc22_cutover=None, upstream_visibility="synthetic"):
     bind_fixture_execution(value, plugin, execution_config, execution_inputs)
+    # Explicit engineering-only frozen metadata. These synthetic attestations
+    # never claim acceptance of real PIRC-19--22 inputs or grant data access.
+    if upstream_inputs is None:
+        upstream_inputs = []
+        for name in upstream_ids:
+            metadata = {"schema_version": "synthetic-upstream-metadata-v1", "status": "synthetic-control"}
+            metadata_path = root / ("synthetic-upstream-" + name + ".json")
+            metadata_path.write_bytes(encode(metadata))
+            upstream_inputs.append({"object_id": name, "issue": "synthetic-control",
+                "acceptance_commit": hashlib.sha1(b"synthetic operator acceptance control, not Git proof").hexdigest(),
+                "code_sha": hashlib.sha1(b"synthetic metadata code control").hexdigest(),
+                "schema_version": metadata["schema_version"], "artifact_id": "synthetic-" + name,
+                "artifact_hash": hashlib.sha256(encode(metadata)).hexdigest(), "artifact_size_bytes": len(encode(metadata)),
+                "path": metadata_path.name, "format": "json-metadata", "role": "metadata-only", "kind": "metadata",
+                "license": {"id": "synthetic-control", "scope": "metadata-only"}, "metadata_checks": metadata,
+                **{key: {"not_applicable": "synthetic metadata control, no research input"}
+                   for key in ("data_hash", "split_hash", "fold_hash", "feature_hash", "selection_hash")}})
+    if accepted_versions is None:
+        accepted_versions = [{"status": "accepted", "input": record} for record in upstream_inputs]
+    source_evidence = {"entries": accepted_versions, "kind": "explicit synthetic operator attestation"}
+    catalog = {"schema_version": "pirc25-upstream-acceptance-v1", "source": "synthetic test control only",
+               "visibility": upstream_visibility,
+               "entries": accepted_versions, "source_evidence": source_evidence,
+               "source_evidence_hash": digest(source_evidence)}
+    catalog_hash = register_acceptance_catalog(store, catalog, digest(catalog))
+    study = {"study_id": value["study_id"], "pirc22_cutover": pirc22_cutover or {"mode": "not_applicable"}}
+    snapshot = UpstreamSnapshot({"schema_version": "pirc25-upstream-snapshot-v1", "inputs": upstream_inputs,
+        "visibility": upstream_visibility,
+        "studies": [study], "cells": [{"cell_id": digest(cell), "study_id": value["study_id"],
+            "role": cell.get("study_role", "primary"),
+            "upstream_ids": (list(upstream_dependencies[cell["arm_id"]]) if upstream_dependencies is not None
+                             else [record["object_id"] for record in upstream_inputs])} for cell in value["cells"]]})
+    snapshot_hash = store.publish("upstream-snapshot-" + snapshot.snapshot_hash, snapshot.definition)
     content = b"explicit synthetic plugin input"
     (root / "plugin-input.bin").write_bytes(content)
     blocks = [{"block_id": block, "dataset_id": "synthetic", "release_id": "v1",
@@ -58,6 +94,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
                 "study_ids": [value["study_id"]], "protocol_bindings": [protocol_binding(protocol)],
                 "primary_metrics": ["error"], "selection_rule": "fixed synthetic adapters",
                 "stopping_rule": "fixed matrix", "qualification_checks": ["contract"],
+                "upstream_bindings": {value["study_id"]: study_binding(snapshot_hash, catalog_hash, study)},
                 "comparisons": [{"reference": value["arms"][0]["arm_id"],
                                  "candidates": [a["arm_id"] for a in value["arms"][1:]]}]}
         protocol["preregistration_hash"] = gate.register_preregistration(plan, digest(plan))
@@ -82,6 +119,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
         "protocol_hash": value["protocol_hash"], "output_hash": digest(payload), "payload": payload,
         "plugin_hash": plugin_binding(plugin), "command_hash": command_binding(plugin.command_builder),
         "recovery_command_hash": command_binding(recovery_command_builder or plugin.command_builder), "upstream_hash": upstream["manifest_hash"],
+        "upstream_snapshot_hash": snapshot_hash, "upstream_acceptance_hash": catalog_hash,
         "qualification": "qualified" if formal else "fixture"}
     if formal:
         package["preregistration_hash"] = protocol["preregistration_hash"]
@@ -97,6 +135,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
     reference = store.publish("package-" + digest(package), package)
     value["admission"] = {"mode": "formal" if formal else "fixture", "protocol_id": "inputs",
         "authorization_id": grant["authorization_id"], "package_hash": reference,
+        "upstream_snapshot_hash": snapshot_hash, "upstream_acceptance_hash": catalog_hash, "upstream_root": str(root),
         "upstream_ids": list(upstream_ids), "upstream_hash": upstream["manifest_hash"], "purpose": "evaluate" if formal else "fit"}
     return grant
 

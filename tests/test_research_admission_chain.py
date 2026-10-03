@@ -30,13 +30,18 @@ def fixture_command(output, value, cell):
             str(output), encode(result).decode()]
 
 
-def prepared(tmp_path, *, formal=False, two_arms=False, package_visibility="synthetic"):
+def prepared(tmp_path, *, formal=False, two_arms=False, package_visibility="synthetic", cell_overrides=None,
+             horizons=None):
     store = ResearchStore(tmp_path, "admitted", initialize=True)
     value = spec()
     value["cells"][0].update(plugin_id="admitted-fixture", capability="generic-rollout", visibility="synthetic")
+    value["cells"][0].update(cell_overrides or {})
     if two_arms:
         value["arms"].append({**value["arms"][0], "arm_id": "candidate", "model_family_id": "candidate"})
         value["cells"].append({**value["cells"][0], "arm_id": "candidate"})
+    if horizons:
+        value["cells"] = [{**cell, "horizon": horizon, "region": "whole"}
+                          for horizon in horizons for cell in value["cells"]]
     plugin = synthetic_plugin("admitted-fixture", frozenset({"generic-rollout"}),
         ("x", "y", "vx", "vy"), ("m", "m", "m/s", "m/s"), "restart-only", fixture_command)
     registry = CapabilityRegistry()
@@ -251,8 +256,7 @@ def test_r1_invalid_admission_never_starts_worker(tmp_path, mutation):
 
 
 def test_r1_worker_cannot_promote_fixture_qualification(tmp_path):
-    store, value, registry, _ = prepared(tmp_path)
-    value["cells"][0]["force_qualification"] = "qualified"
+    store, value, registry, _ = prepared(tmp_path, cell_overrides={"force_qualification": "qualified"})
     store.register(value, digest(value))
     with pytest.raises(ResearchError, match="UNQUALIFIED"):
         SharedRunner(store, registry).run_cell("synthetic", digest(value["cells"][0]), budget=BudgetSpec(10))
@@ -335,15 +339,9 @@ def test_formal_chain_roundtrip_and_resealed_tampering_rejected_by_tsde(tmp_path
     aggregator = Path(__file__).resolve().parents[2] / "TSDE-SDE/scripts/pirc25/aggregate.py"
     if not aggregator.is_file():
         pytest.skip("cross-repository check requires explicit sibling TSDE checkout")
-    store, value, registry, grant = prepared(tmp_path, formal=True, two_arms=True)
-    if horizons:
-        value["cells"] = [{**cell, "horizon": horizon, "region": "whole"}
-                          for horizon in horizons for cell in value["cells"]]
-        # This is still unfrozen fixture preparation. Keep the test's complete
-        # four-cell scientific matrix and explicitly plan it before register.
-        cell = value["cells"][0]
-        bind_fixture_execution(value, registry.resolve(cell["plugin_id"], cell["capability"],
-            version=cell["execution"]["component_version"]))
+    # Freeze the original complete two/four-cell matrix before upstream and
+    # preregistration, not after an operator plan is already published.
+    store, value, registry, grant = prepared(tmp_path, formal=True, two_arms=True, horizons=horizons)
     store.register(value, digest(value))
     for cell in value["cells"]:
         assert SharedRunner(store, registry).run_cell("synthetic", digest(cell), budget=BudgetSpec(10))["state"] == "SUCCEEDED"

@@ -39,10 +39,12 @@ def command(output, value, cell):
     return [*args[:-1], encode(result).decode()]
 
 
-def prepare(root, monkeypatch):
+def prepare(root, monkeypatch, *, definition=None):
     store = ResearchStore(root, "adjudication", initialize=True)
     value = spec()
     value["cells"][0].update(plugin_id="adjudication-fixture", capability="generic-rollout", visibility="synthetic")
+    if definition is not None:
+        value["cells"][0]["definition"] = definition
     value["arms"].append({**value["arms"][0], "arm_id": "candidate", "model_family_id": "candidate"})
     value["cells"].append({**value["cells"][0], "arm_id": "candidate"})
     original = PreregistrationGate.register_preregistration
@@ -123,8 +125,7 @@ def test_changed_policy_is_rejected_before_actual_input_read_or_worker(tmp_path,
 
 
 def test_worker_cannot_substitute_metric_estimator_definition(tmp_path, monkeypatch):
-    store, value, registry, _ = prepare(tmp_path, monkeypatch)
-    value["cells"][0]["definition"] = "post-hoc-estimator-v1"
+    store, value, registry, _ = prepare(tmp_path, monkeypatch, definition="post-hoc-estimator-v1")
     store.register(value, digest(value))
     with pytest.raises(ResearchError, match="metric definition"):
         SharedRunner(store, registry).run_cell("synthetic", digest(value["cells"][0]), budget=BudgetSpec(10))
