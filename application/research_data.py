@@ -135,6 +135,9 @@ class EvaluationExposureLedger:
                             raise ResearchError("CORRUPT_ARTIFACT", "data shrank during verification")
                         remaining -= len(chunk)
                         hasher.update(chunk)
+                        # Hashlib has consumed these bytes. Do not overlap
+                        # this buffer with the next same-sized allocation.
+                        del chunk
                     if stream.read(1) or hasher.hexdigest() != block["sha256"]:
                         raise ResearchError("CORRUPT_ARTIFACT", "data content differs from protocol")
                     verify_identity()
