@@ -16,6 +16,25 @@ from experiments.pirc25.snapshot import UpstreamSnapshot
 from infrastructure.research_store import digest, encode
 
 
+def reseal_substituted_upstream_spec(receipt):
+    """Forge only a disposable transport claim to reach older refusal gates.
+
+    Never publishes to the actual store or alters read/qualification/preregistration
+    evidence. This is adversarial test preparation, not an admission repair.
+    """
+    evidence = receipt["documents"]["upstream_snapshot"]
+    evidence["validation"]["consumer"]["spec_hash"] = digest(receipt["spec"])
+    evidence["validation_hash"] = digest(evidence["validation"])
+    publication = evidence["publication_events"]["validation"]
+    publication["payload"] = {"object_id": "upstream-validation-" + evidence["validation_hash"],
+                              "sha256": evidence["validation_hash"]}
+    publication["hash"] = digest({key: value for key, value in publication.items() if key != "hash"})
+    event = evidence["validation_event"]
+    event["payload"]["validation_hash"] = evidence["validation_hash"]
+    event["previous_hash"] = publication["hash"]
+    event["hash"] = digest({key: value for key, value in event.items() if key != "hash"})
+
+
 def synthetic_plugin(plugin_id, capabilities, state_order, units, resume_level, builder, *, version="1.0.0"):
     """Explicit tiny scalar/empty-forecast test recipe; not a research default."""
     entry = RegistryEntry(component_id=plugin_id, component_kind="execution-adapter", version=version,

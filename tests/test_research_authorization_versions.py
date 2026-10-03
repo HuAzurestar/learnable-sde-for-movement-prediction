@@ -4,6 +4,7 @@ import pytest
 
 from application.research_query import ResearchQuery
 from infrastructure.research_store import ResearchError, ResearchStore, digest
+from tests.research_admission_fixtures import reseal_substituted_upstream_spec
 from tests.test_research_artifact_read_bounds import published
 from tests.test_research_read_authorization import provider_source
 from tests.test_research_store import spec
@@ -200,6 +201,13 @@ def test_actual_formal_receipt_keeps_version_binding_in_independent_paper_valida
         receipt = row["admission"]
         receipt.update(spec=changed_spec, spec_hash=digest(changed_spec))
         receipt["documents"]["authorization"]["version"] = "v1"
+        # Reseal the new upstream consumer claim too, so the original actual
+        # versioned READ_COMPLETED still has to reject the substituted grant.
+        reseal_substituted_upstream_spec(receipt)
+        original = next(item["admission"] for item in bundle["cells"] if item["attempt_id"] == row["attempt_id"])
+        assert receipt["input_evidence"] == original["input_evidence"]
+        for key in ("preregistration", "preregistration_event", "qualification", "qualification_evidence"):
+            assert receipt["documents"][key] == original["documents"][key]
         receipt["admission_hash"] = digest({k: v for k, v in receipt.items() if k != "admission_hash"})
         row["admission_hash"] = receipt["admission_hash"]
     substituted["bundle_hash"] = digest({k: v for k, v in substituted.items() if k != "bundle_hash"})

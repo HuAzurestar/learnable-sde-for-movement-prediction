@@ -14,7 +14,7 @@ from application.research_evidence import export_evidence
 from application.research_preregistration import PreregistrationGate
 from experiments.pirc25.runner import SharedRunner
 from infrastructure.research_store import ResearchError, ResearchStore, digest, encode
-from tests.research_admission_fixtures import admit_fixture, synthetic_plugin
+from tests.research_admission_fixtures import admit_fixture, synthetic_plugin, reseal_substituted_upstream_spec
 from tests.test_research_admission_chain import fixture_command
 from tests.test_research_store import spec
 
@@ -107,6 +107,13 @@ def test_formal_policy_is_frozen_and_actual_export_retains_metric_definition(tmp
     for row in changed["cells"]:
         receipt = row["admission"]
         receipt.update(spec=new_spec, spec_hash=digest(new_spec))
+        # Also forge the disposable upstream consumer envelope; actual frozen
+        # plan/read/qualification evidence remains byte-for-byte unchanged.
+        reseal_substituted_upstream_spec(receipt)
+        original = next(item["admission"] for item in bundle["cells"] if item["attempt_id"] == row["attempt_id"])
+        assert receipt["input_evidence"] == original["input_evidence"]
+        for key in ("preregistration", "preregistration_event", "qualification", "qualification_evidence"):
+            assert receipt["documents"][key] == original["documents"][key]
         receipt["admission_hash"] = digest({k: v for k, v in receipt.items() if k != "admission_hash"})
         row["admission_hash"] = receipt["admission_hash"]
     changed["bundle_hash"] = digest({k: v for k, v in changed.items() if k != "bundle_hash"})
