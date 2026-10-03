@@ -279,15 +279,13 @@ class ResearchStore:
     def _json(path):
         try:
             from .research_files import opened_regular_file
+            from .research_json import read_json
             path = Path(path)
             # Authoritative metadata has the same lexical root and opened-file
             # boundary as artifacts. Do not follow replaced event/manifests
             # directories, even when their copied contents retain valid hashes.
-            with opened_regular_file(path.parent, path) as (stream, size, _):
-                content = stream.read(size + 1)
-                if len(content) != size:
-                    raise ResearchError("CORRUPT_ARTIFACT", "authoritative object size changed")
-            return json.loads(content)
+            with opened_regular_file(path.parent, path) as (stream, size, verify):
+                return read_json(stream, size, verify_identity=verify)
         except (OSError, ValueError) as exc:
             raise ResearchError("CORRUPT_ARTIFACT", "invalid authoritative object") from exc
 

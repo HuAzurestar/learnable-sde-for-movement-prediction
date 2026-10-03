@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from infrastructure.research_files import opened_regular_file
+from infrastructure.research_json import read_json
 from infrastructure.research_store import ResearchError
 
 
@@ -81,13 +82,10 @@ def _read_metadata(root: Path, relative, object_id, stack) -> Any:
     if Path(relative).is_absolute() or not path.is_relative_to(root):
         raise AdmissionError("UNAUTHORIZED_DATA: input path escapes root")
     try:
-        stream, size, _ = stack.enter_context(opened_regular_file(root, path))
-        content = stream.read(size + 1)
-        if len(content) != size:
-            raise AdmissionError("CORRUPT_ARTIFACT: upstream size changed during read")
+        stream, size, verify = stack.enter_context(opened_regular_file(root, path))
         # Preserve the historical UTF-8 and canonical-value JSON identity.
         # No arbitrary metadata quota: legitimate large JSON remains valid.
-        return json.loads(content.decode("utf-8"))
+        return read_json(stream, size, encoding="utf-8", verify_identity=verify)
     except (OSError, json.JSONDecodeError) as exc:
         raise AdmissionError(f"MISSING_INPUT: {object_id}") from exc
     except UnicodeDecodeError as exc:
