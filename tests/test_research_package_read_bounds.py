@@ -32,7 +32,7 @@ def managed_package(tmp_path_factory):
     return source[0], directory / "managed", result["comparison"]["aggregate_hash"]
 
 
-def observe_target(monkeypatch, target, *, grow_to=None):
+def observe_target(monkeypatch, target, *, grow_to=None, after_read=None):
     """Observe the real old Path.read_bytes and new descriptor-backed readers."""
     original_open, original_fdopen = Path.open, os.fdopen
     original_os_open = os.open
@@ -58,7 +58,10 @@ def observe_target(monkeypatch, target, *, grow_to=None):
                 with original_open(target, "r+b") as writer:
                     writer.truncate(grow_to)
             reads.append(size)
-            return self.actual.read(size)
+            content = self.actual.read(size)
+            if after_read is not None:
+                after_read()
+            return content
 
     def path_open(path, *args, **kwargs):
         stream = original_open(path, *args, **kwargs)
@@ -119,3 +122,131 @@ def test_unchanged_real_managed_package_is_imported_idempotently(managed_package
     first = accept_evidence_package(store, incoming, aggregate_hash)
     assert accept_evidence_package(store, incoming, aggregate_hash) == first
     assert store.manifest("comparison-" + aggregate_hash) == first
+
+
+@pytest.mark.parametrize("name,limit", FILES)
+def test_file_growing_at_actual_open_is_rejected_without_content_read(managed_package, tmp_path, monkeypatch, name, limit):
+    store, incoming, aggregate_hash, target = incoming_copy(managed_package, tmp_path, name)
+    reads = observe_target(monkeypatch, target)
+    original = os.open
+
+    def grow(path, *args, **kwargs):
+        if Path(path) == target:
+            with target.open("r+b") as writer:
+                writer.truncate(limit + 1)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", grow)
+    before = store.events()
+    with pytest.raises(ResearchError, match="RESOURCE_PLAN_REJECTED"):
+        accept_evidence_package(store, incoming, aggregate_hash)
+    assert reads == [] and target.stat().st_size == limit + 1
+    assert store.events() == before
+
+
+@pytest.mark.parametrize("name,limit", FILES)
+def test_replaced_path_at_actual_open_is_rejected_before_read(managed_package, tmp_path, monkeypatch, name, limit):
+    store, incoming, aggregate_hash, target = incoming_copy(managed_package, tmp_path, name)
+    replacement = tmp_path / "same-content-new-file"
+    shutil.copy2(target, replacement)
+    reads = observe_target(monkeypatch, target)
+    original = os.open
+
+    def replace(path, *args, **kwargs):
+        if Path(path) == target:
+            os.replace(replacement, target)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", replace)
+    before = store.events()
+    with pytest.raises(ResearchError, match="CORRUPT_ARTIFACT"):
+        accept_evidence_package(store, incoming, aggregate_hash)
+    assert reads == [] and not replacement.exists()
+    assert store.events() == before
+
+
+@pytest.mark.parametrize("name,limit", FILES)
+@pytest.mark.parametrize("fault", ["in-place", "replace"])
+def test_actual_post_read_mutation_cannot_publish_old_bytes_as_stable_package(managed_package, tmp_path, monkeypatch, name, limit, fault):
+    store, incoming, aggregate_hash, target = incoming_copy(managed_package, tmp_path, name)
+    original_open = Path.open
+    information = target.stat()
+    replacement = tmp_path / "same-content-new-file"
+    if fault == "replace":
+        shutil.copy2(target, replacement)
+
+    def change():
+        if fault == "replace":
+            os.replace(replacement, target)
+        else:
+            with original_open(target, "r+b") as writer:
+                writer.write(b"!")
+            os.utime(target, ns=(information.st_atime_ns, information.st_mtime_ns + 1_000_000))
+
+    reads = observe_target(monkeypatch, target, after_read=change)
+    before = store.events()
+    if fault == "replace" and os.name == "nt":
+        # The actual production descriptor denies delete sharing on Windows.
+        # Preserve that native refusal; it is not evidence of the POSIX
+        # post-replacement identity guard (covered by the native Linux probe).
+        with pytest.raises(PermissionError):
+            accept_evidence_package(store, incoming, aggregate_hash)
+        assert replacement.exists()
+        assert target.stat().st_ino == information.st_ino
+    else:
+        with pytest.raises(ResearchError, match="CORRUPT_ARTIFACT"):
+            accept_evidence_package(store, incoming, aggregate_hash)
+    assert reads and all(0 <= size <= limit + 1 for size in reads)
+    assert store.events() == before
+
+
+def test_actual_original_64_mib_quota_accepts_large_valid_manifest(managed_package, tmp_path, monkeypatch):
+    store, incoming, aggregate_hash, target = incoming_copy(managed_package, tmp_path, "manifest.json")
+    limit = 64 * 1024 * 1024
+    original = target.read_bytes()
+    target.write_bytes(original + b" " * (limit - len(original)))
+    reads = observe_target(monkeypatch, target)
+    imported = accept_evidence_package(store, incoming, aggregate_hash)
+    assert imported == store.manifest("comparison-" + aggregate_hash)
+    assert reads == [limit + 1] and target.stat().st_size == limit
+
+
+def test_nonregular_package_file_is_rejected_before_read(managed_package, tmp_path, monkeypatch):
+    store, incoming, aggregate_hash, target = incoming_copy(managed_package, tmp_path, "metrics.csv")
+    target.unlink()
+    target.mkdir()
+    reads = observe_target(monkeypatch, target)
+    before = store.events()
+    with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
+        accept_evidence_package(store, incoming, aggregate_hash)
+    assert reads == [] and store.events() == before
+
+
+@pytest.mark.parametrize("name,limit", FILES)
+def test_growth_between_actual_handle_stat_and_path_recheck_is_quota_error(managed_package, tmp_path, monkeypatch, name, limit):
+    store, incoming, aggregate_hash, target = incoming_copy(managed_package, tmp_path, name)
+    reads = observe_target(monkeypatch, target)
+    original_open, original_fstat = os.open, os.fstat
+    descriptors, touched = set(), []
+
+    def track(path, *args, **kwargs):
+        fd = original_open(path, *args, **kwargs)
+        if Path(path) == target:
+            descriptors.add(fd)
+        return fd
+
+    def grow_after_stat(fd):
+        information = original_fstat(fd)
+        if fd in descriptors and not touched:
+            with target.open("r+b") as writer:
+                writer.truncate(limit + 1)
+            touched.append(True)
+        return information
+
+    monkeypatch.setattr(os, "open", track)
+    monkeypatch.setattr(os, "fstat", grow_after_stat)
+    before = store.events()
+    with pytest.raises(ResearchError, match="RESOURCE_PLAN_REJECTED"):
+        accept_evidence_package(store, incoming, aggregate_hash)
+    assert reads == [] and touched == [True]
+    assert store.events() == before and target.stat().st_size == limit + 1
