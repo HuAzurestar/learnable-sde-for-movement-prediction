@@ -77,18 +77,32 @@ class SharedRecovery:
 
     def checkpoint_handler(self, attempt_id):
         def save(state, progress, receipt, deadline):
-            attempt, run, spec, cell, plugin = self._context(attempt_id)
-            if (attempt["state"] != "RUNNING" or receipt["attempt_id"] != attempt_id
-                    or receipt["cell_hash"] != digest(cell) or type(state) is not dict
-                    or state.get("step") != progress["completed_steps"]
-                    or progress["total_steps"] > receipt["resource_plan"]["counts"]["steps"]):
-                raise ResearchError("CONTRACT_MISMATCH", "checkpoint differs from the admitted running job")
-            artifact = self.checkpoint(attempt_id, state, admission_hash=receipt["admission_hash"],
-                progress=progress, deadline=deadline)
+            # Only this short owner save phase holds the writer lock; the
+            # waiting worker and its independent hard fuse remain outside it.
+            with self.store._read_transaction():
+                attempt, run, spec, cell, plugin = self._context(attempt_id)
+                if (attempt["state"] != "RUNNING" or receipt["attempt_id"] != attempt_id
+                        or receipt["cell_hash"] != digest(cell) or type(state) is not dict
+                        or state.get("step") != progress["completed_steps"]
+                        or progress["total_steps"] > receipt["resource_plan"]["counts"]["steps"]):
+                    raise ResearchError("CONTRACT_MISMATCH", "checkpoint differs from the admitted running job")
+                artifact = self.checkpoint(attempt_id, state, admission_hash=receipt["admission_hash"],
+                    progress=progress, deadline=deadline)
+            # The final uncached physical verification is owner I/O too.
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ResearchError("TIMEOUT", "checkpoint publication reached the hard deadline")
             return {"artifact_id": artifact, "resume_level": plugin.resume_level}
         return save
 
     def checkpoint(self, attempt_id, state: dict, *, admission_hash=None, progress=None, deadline=None):
+        with self.store._read_transaction():
+            artifact = self._checkpoint(attempt_id, state, admission_hash=admission_hash,
+                                        progress=progress, deadline=deadline)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise ResearchError("TIMEOUT", "checkpoint publication reached the hard deadline")
+        return artifact
+
+    def _checkpoint(self, attempt_id, state, *, admission_hash, progress, deadline):
         attempt, run, spec, cell, plugin = self._context(attempt_id)
         adapter = self.recovery.resolve(plugin.plugin_id, plugin.resume_level, plugin.registry_entry.version)
         required = {"step", "data_position", "method_state", "rng_state"}

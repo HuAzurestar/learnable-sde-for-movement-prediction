@@ -108,7 +108,7 @@ def _verified_computation(store, reference, *, receipt=None, aggregate=None):
     Owner integrity read only. It must not return private worker bytes to a
     browser; the query layer separately authorizes original-study artifacts.
     """
-    with store.lock():
+    with store._read_transaction():
         proof = store._manifest(reference["manifest_id"])
         request = store._manifest(reference["request_manifest_id"])
         if (proof.get("schema_version") != "pirc25-computation-receipt-v1" or
