@@ -277,7 +277,9 @@ Every public query assembles its response inside one verified, lock-held read
 scope. Preview and export remain separate purposes: entry permission is checked
 against the immutable grant and source lineage, each actual artifact read keeps
 its own authorization/read journal, and final disclosure rechecks the actual
-grant. Current expiry is checked after permission-journal writes and after the
+grant, including a fresh manifest rehash after the allowed journal is flushed.
+This post-journal check does not create another allowed write; denials remain
+durable. Current expiry is checked after permission-journal writes and after the
 last physical chain verification, before returning metadata or result bytes.
 A failed journal, changed grant or expired permission cannot yield a successful
 response. Genuine manifest/attempt/budget/recovery-hold changes during assembly

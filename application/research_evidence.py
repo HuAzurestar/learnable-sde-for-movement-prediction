@@ -44,6 +44,15 @@ def authorize_study(store, study_id, authorization, purpose):
     # Flushing the permission journal can itself cross the expiry boundary.
     # A successful pre-I/O check is not permission to read after that write.
     require_unexpired_disclosure(store, study_id, authorization, purpose)
+    verify_study_disclosure(store, study_id, authorization, purpose)
+
+
+def verify_study_disclosure(store, study_id, authorization, purpose):
+    """Fresh post-journal authority without reopening an ALLOWED-write loop."""
+    if not _study_disclosure_allowed(store, study_id, authorization, purpose):
+        store.append("DISCLOSURE_DENIED", {"study_id": study_id, "purpose": purpose,
+            "authorization_hash": digest(authorization)})
+        raise ResearchError("UNAUTHORIZED_DATA", "grant changed during disclosure verification")
 
 
 def require_unexpired_disclosure(store, study_id, authorization, purpose):
@@ -154,10 +163,7 @@ def _fresh_export_authority(store, bundle, authorization):
     # integrity window. Denial must still be durable, and failure propagates.
     for index, grant in enumerate(grants):
         study_id = bundle["study_id"] if index == 0 else grant["study_id"]
-        if not _study_disclosure_allowed(store, study_id, grant, "export"):
-            store.append("DISCLOSURE_DENIED", {"study_id": study_id, "purpose": "export",
-                "authorization_hash": digest(grant)})
-            raise ResearchError("UNAUTHORIZED_DATA", "export grant changed during disclosure verification")
+        verify_study_disclosure(store, study_id, grant, "export")
     _require_current_export_grants(store, grants)
     return grants
 
