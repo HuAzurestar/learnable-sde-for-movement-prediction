@@ -179,6 +179,58 @@ def _inject_stale_control_pipe(monkeypatch):
     monkeypatch.setattr(supervision.subprocess, "Popen", popen)
 
 
+@pytest.mark.parametrize("settlement_fails", [False, True])
+def test_control_release_timeout_retains_actual_stop_evidence(tmp_path, monkeypatch, settlement_fails):
+    import errno
+    import application.research_supervisor as supervision
+    original_popen = supervision.subprocess.Popen
+    releases = []
+    class DelayedRelease:
+        def __init__(self, stream):
+            self.stream = stream
+        def write(self, value):
+            return self.stream.write(value)
+        def flush(self):
+            # The real native watchdog stops the unreleased contained worker.
+            time.sleep(0.3)
+            releases.append(True)
+            raise OSError(errno.EPIPE, "synthetic release after native hard stop")
+        def close(self):
+            try:
+                self.stream.close()
+            except OSError:
+                pass
+    def popen(*args, **kwargs):
+        process = original_popen(*args, **kwargs)
+        process.stdin = DelayedRelease(process.stdin)
+        return process
+    monkeypatch.setattr(supervision.subprocess, "Popen", popen)
+    store, attempts = registered(tmp_path)
+    supervisor = ResearchSupervisor(store)
+    if settlement_fails:
+        def settle(*args, **kwargs):
+            raise ResearchError("CORRUPT_EVENT_LOG", "synthetic authority rejection")
+        monkeypatch.setattr(supervisor.budget, "settle", settle)
+        with pytest.raises(ResearchError, match="synthetic authority"):
+            supervisor.run(attempts[0], lambda output: [sys.executable, "-c", "pass"], BudgetSpec(0.2))
+    else:
+        result = supervisor.run(attempts[0], lambda output: [sys.executable, "-c", "pass"], BudgetSpec(0.2))
+        assert result["state"] == "TIMEOUT" and result["exit_code"] != 0
+    assert releases == [True]
+    events = store.events()
+    stops = [event for event in events if event["event_kind"] == "WORKER_TREE_STOPPED"]
+    assert len(stops) == 1, "confirmed stop disappeared when the control release expired"
+    if settlement_fails:
+        assert not any(event["event_kind"] == "SETTLE" for event in events)
+        assert store.attempts()[attempts[0]]["state"] == "RUNNING"
+        monkeypatch.undo()
+        reservation = next(event["payload"] for event in events if event["event_kind"] == "RESERVE")
+        recovered = supervisor.budget.recover_unknown(reservation["reservation_id"], stop_evidence_hash=stops[0]["hash"])
+        assert recovered["charged_ms"] == 200 and recovered["settled"]
+    else:
+        assert supervisor.budget.balance("affine")["committed_ms"] >= 200
+
+
 @pytest.mark.parametrize("stop_confirmed,slow_worker,diagnostic_unavailable",
     [(True, True, False), (False, False, False), (False, True, False), (True, True, True)])
 def test_stale_control_pipe_close_cannot_mask_deadline_settlement(tmp_path, monkeypatch,
