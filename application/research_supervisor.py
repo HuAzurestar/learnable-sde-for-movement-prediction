@@ -176,6 +176,12 @@ class ResearchSupervisor:
                     if self.budget.balance(run["arm_id"])["closed"]:
                         outcome, error_code = "BUDGET_EXHAUSTED", "BUDGET_EXHAUSTED"
                         break
+                    # Authority I/O may cross the soft or hard threshold. Do
+                    # not defer the80% request using its pre-read timestamp.
+                    now = self.monotonic()
+                    if expired.is_set() or now >= deadline:
+                        outcome, error_code = "TIMEOUT", "TIMEOUT"
+                        break
                     if now - start >= 15 and (not heartbeat.exists() or time.time() - heartbeat.stat().st_mtime > 15):
                         outcome, error_code = "INTERRUPTED", "HEARTBEAT_LOST"
                         break
@@ -185,10 +191,20 @@ class ResearchSupervisor:
                             "remaining_seconds": max(0, deadline - now), "request_id": request_id, "supported": channel is not None})
                         warned = True
                     collect_checkpoint()
+                    now = self.monotonic()
                     if now - last_logged >= 5:
                         self.store.append("HEARTBEAT", {"attempt_id": attempt_id, "monotonic_elapsed_ms": math.ceil((now - start) * 1000)})
                         last_logged = now
-                    time.sleep(min(0.025, max(0, deadline - now)))
+                    remaining = deadline - self.monotonic()
+                    if expired.is_set() or remaining <= 0:
+                        outcome, error_code = "TIMEOUT", "TIMEOUT"
+                        break
+                    # Keep the same poll cadence, but wake on actual wrapper
+                    # exit rather than idling while its checkpoint margin dies.
+                    try:
+                        process.wait(timeout=min(0.025, remaining))
+                    except subprocess.TimeoutExpired:
+                        pass
                 completed_code = process.poll()
                 collect_checkpoint()
                 # A successful wrapper is not proof its descendants exited.
