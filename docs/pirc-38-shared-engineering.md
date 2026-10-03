@@ -103,6 +103,14 @@ It publishes content-addressed validation plus `UPSTREAM_VALIDATION` and typed
 `UPSTREAM_REFUSED` metadata. Its immutable admission contains the definition,
 catalog and exact validation hash/time. Independent cells keep their own
 outcome; missing inputs do not alter dependency sets or scientific routes.
+Snapshot/catalog `visibility` defaults to `restricted`, not public metadata;
+explicit narrower input labels also propagate. Both registered study lineage
+and detached admission evidence contribute to result/export/query visibility.
+Metadata-only licensing does not permit a synthetic/public-only grant to
+disclose restricted source evidence; normal fresh purpose/expiry/scope checks
+still apply. An explicit source-wide label is inherited only when the input
+has no narrower label. Whole catalogs retained in evidence are conservatively
+covered too, not silently disclosed because this cell uses fewer inputs.
 Explicit legacy public `upstream_hash`/`upstream_ids` remain additional frozen
 checks when requested, never a substitute for the required new snapshot.
 

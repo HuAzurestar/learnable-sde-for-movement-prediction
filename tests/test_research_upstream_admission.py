@@ -230,3 +230,36 @@ def test_restricted_upstream_metadata_cannot_be_declassified_by_synthetic_cells(
     (tmp_path / "upstream-visibility-observed.json").write_bytes(encode(observed))
     assert metadata["visibility"] == "restricted", observed
     assert all(observed[name]["error"] == "UNAUTHORIZED_DATA" for name in actions), observed
+
+
+def test_explicit_restricted_metadata_disclosure_grant_is_not_blocked(tmp_path):
+    from application.research_evidence import export_evidence
+    from application.research_query import ResearchQuery
+    store, value, registry, grant = prepared(tmp_path, formal=True, upstream_visibility="restricted")
+    store.register(value, digest(value))
+    outcome = SharedRunner(store, registry).run_cell("synthetic", digest(value["cells"][0]), budget=BudgetSpec(10))
+    allowed = {**grant, "authorization_id": "explicit-metadata-visible", "visibilities": ["synthetic", "restricted"]}
+    store.authorize(allowed)
+    assert store.read_artifact(outcome["artifact_id"], purpose="preview", authorization=allowed)
+    bundle = export_evidence(store, "synthetic", allowed)
+    assert bundle["visibility"] == "restricted"
+    assert bundle["cells"][0]["admission"]["documents"]["upstream_snapshot"]["acceptance_catalog"]["visibility"] == "restricted"
+    assert ResearchQuery(store, allowed["authorization_id"]).list("study")["items"]
+
+
+@pytest.mark.parametrize("source", ["snapshot", "catalog", "input", "accepted-input", "unknown-label"])
+def test_upstream_metadata_visibility_is_conservative(source):
+    from infrastructure.research_visibility import upstream_metadata_visibility
+    snapshot = {"inputs": [{"visibility": "synthetic"}], "visibility": "synthetic"}
+    catalog = {"entries": [{"input": {"visibility": "synthetic"}}], "visibility": "synthetic"}
+    if source == "snapshot":
+        snapshot.pop("visibility")
+    elif source == "catalog":
+        catalog.pop("visibility")
+    elif source == "input":
+        snapshot["inputs"][0]["visibility"] = "restricted"
+    elif source == "accepted-input":
+        catalog["entries"][0]["input"]["visibility"] = "restricted"
+    else:
+        catalog["visibility"] = {"unknown": "not a disclosure class"}
+    assert upstream_metadata_visibility(snapshot, catalog) == "restricted"

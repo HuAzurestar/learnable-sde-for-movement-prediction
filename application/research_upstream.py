@@ -13,6 +13,8 @@ def validate_acceptance_catalog(value):
     if (not isinstance(value, dict) or value.get("schema_version") != "pirc25-upstream-acceptance-v1"
             or not isinstance(value.get("source"), str) or not value["source"].strip()
             or not isinstance(value.get("entries"), list)
+            or any(not isinstance(entry, dict) or not isinstance(entry.get("input"), dict)
+                   for entry in value["entries"])
             or not isinstance(value.get("source_evidence"), dict)
             or digest(value["source_evidence"]) != value.get("source_evidence_hash")
             or value["source_evidence"].get("entries") != value["entries"]):

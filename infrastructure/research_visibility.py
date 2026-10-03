@@ -14,6 +14,24 @@ def combine_visibility(values):
     return "public" if "public" in labels else "synthetic"
 
 
+def upstream_metadata_visibility(snapshot, catalog):
+    # Metadata-only licensing is not public disclosure permission. The receipt
+    # retains the whole definition/catalog, including unrelated input metadata;
+    # every explicit narrower input label must remain conservative too.
+    if (not isinstance(snapshot, dict) or not isinstance(catalog, dict)
+            or not isinstance(snapshot.get("inputs"), list) or not isinstance(catalog.get("entries"), list)
+            or any(not isinstance(record, dict) for record in snapshot["inputs"])
+            or any(not isinstance(entry, dict) or not isinstance(entry.get("input"), dict)
+                   for entry in catalog["entries"])):
+        raise ResearchError("CONTRACT_MISMATCH", "source upstream metadata lineage malformed")
+    snapshot_label = snapshot.get("visibility", "restricted")
+    catalog_label = catalog.get("visibility", "restricted")
+    labels = [snapshot_label, catalog_label]
+    labels.extend(record.get("visibility", snapshot_label) for record in snapshot.get("inputs", []))
+    labels.extend(entry.get("input", {}).get("visibility", catalog_label) for entry in catalog.get("entries", []))
+    return combine_visibility([label if isinstance(label, str) else "restricted" for label in labels])
+
+
 def admission_visibility(manifest, receipt):
     documents = receipt.get("documents", {})
     labels = [receipt.get("cell", {}).get("visibility", "restricted")]
@@ -24,6 +42,9 @@ def admission_visibility(manifest, receipt):
         for item in documents.get(name, []):
             labels.append(item["artifact"].get("visibility", "restricted"))
             labels.append(manifest("artifact-" + item["artifact"]["artifact_id"])["visibility"])
+    if "upstream_snapshot" in documents:
+        upstream = documents["upstream_snapshot"]
+        labels.append(upstream_metadata_visibility(upstream["snapshot"], upstream["acceptance_catalog"]))
     return combine_visibility(labels)
 
 
@@ -32,6 +53,16 @@ def study_visibility(manifest, spec):
     labels = [cell.get("visibility", "restricted") for cell in spec["cells"]]
     settings = spec.get("admission")
     if settings:
+        if "upstream_snapshot_hash" in settings or "upstream_acceptance_hash" in settings:
+            snapshot_hash, catalog_hash = settings.get("upstream_snapshot_hash"), settings.get("upstream_acceptance_hash")
+            if not snapshot_hash or not catalog_hash:
+                labels.append("restricted")
+            else:
+                snapshot = manifest("upstream-snapshot-" + snapshot_hash)
+                catalog = manifest("upstream-acceptance-" + catalog_hash)
+                if digest(snapshot) != snapshot_hash or digest(catalog) != catalog_hash:
+                    raise ResearchError("CONTRACT_MISMATCH", "source upstream metadata binding differs")
+                labels.append(upstream_metadata_visibility(snapshot, catalog))
         reference = settings.get("package_hash")
         seen = set()
         while reference:
