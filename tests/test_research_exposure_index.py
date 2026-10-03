@@ -4,6 +4,8 @@ An empty query is never permission or evidence of an untouched test block.
 """
 import json
 import sqlite3
+import subprocess
+import sys
 
 import pytest
 
@@ -13,8 +15,10 @@ from infrastructure.research_store import ResearchError, digest
 from tests.test_research_input_gates import final_eval, freeze_evidence, authorize
 
 
-def actual_reads(tmp_path):
+def actual_reads(tmp_path, *, source_block=None):
     store, content, protocol = final_eval(tmp_path, None)
+    if source_block is not None:
+        protocol['blocks'][0]['source_block_id'] = source_block
     protocol, _, _ = freeze_evidence(store, protocol)
     ledger = EvaluationExposureLedger(store)
     ledger.register_protocol(protocol, digest(protocol))
@@ -99,6 +103,107 @@ def test_scoped_query_refuses_forged_selected_event_payload(tmp_path):
         connection.execute("UPDATE exposure_events SET event_json='{}'")
     with pytest.raises(ResearchError, match='INDEX_STALE'):
         index.exposures(block_id='test-block')
+
+
+def test_scoped_query_refuses_forged_block_membership_even_with_original_event_json(tmp_path):
+    store, _ = actual_reads(tmp_path)
+    index = ResearchIndex(store)
+    index.rebuild()
+    data_start = next(e for e in store.events() if e['event_kind'] == 'READ_STARTED'
+                      and 'artifact_id' not in e['payload'])
+    with sqlite3.connect(index.path) as connection:
+        connection.execute('INSERT INTO exposure_blocks VALUES (?, ?)', ('other-block', data_start['sequence']))
+    with pytest.raises(ResearchError, match='INDEX_STALE'):
+        index.exposures(block_id='other-block')
+
+
+def test_source_block_alias_is_indexed_without_changing_original_event(tmp_path):
+    store, _ = actual_reads(tmp_path, source_block='original-source')
+    index = ResearchIndex(store)
+    index.rebuild()
+    expected = [e for e in store.events() if e['event_kind'].startswith('READ_')
+                and 'artifact_id' not in e['payload']]
+    assert index.exposures(block_id='original-source')['items'] == expected
+    checks = index.exposures(block_id='original-source', include_checks=True)['items']
+    assert [e['event_kind'] for e in checks] == ['EXPOSURE_ALLOWED', 'READ_STARTED', 'READ_COMPLETED']
+
+
+def test_version_one_list_remains_readable_but_exposure_query_requires_rebuild(tmp_path):
+    store, _ = actual_reads(tmp_path)
+    index = ResearchIndex(store)
+    index.rebuild()
+    with sqlite3.connect(index.path) as connection:
+        connection.executescript('DROP TABLE exposure_blocks; DROP TABLE exposure_events; PRAGMA user_version=1;')
+    assert index.list(kind='protocol')['items'][0]['object_id'] == 'protocol-reserved'
+    with pytest.raises(ResearchError, match='INDEX_STALE'):
+        index.exposures(block_id='test-block')
+    index.rebuild()
+    assert len(index.exposures(block_id='test-block')['items']) == 4
+
+
+@pytest.mark.parametrize('arguments', [{'limit': 0}, {'limit': 201}, {'limit': True}, {'after': -1},
+                                      {'before': 0}, {'include_checks': 1}])
+def test_scope_query_rejects_invalid_bounds(tmp_path, arguments):
+    store, _ = actual_reads(tmp_path)
+    with pytest.raises(ResearchError, match='CONTRACT_MISMATCH'):
+        ResearchIndex(store).exposures(block_id='test-block', **arguments)
+
+
+def test_independent_cli_queries_original_events_and_reports_lag_without_opening_data(tmp_path):
+    store, _ = actual_reads(tmp_path)
+    index = ResearchIndex(store)
+    index.rebuild()
+    original = store.events()
+    command = [sys.executable, '-B', '-m', 'experiments.pirc25', '--root', str(store.path.parent),
+               '--store-id', store.store_id, 'audit-exposures', '--block', 'test-block', '--limit', '1']
+    completed = subprocess.run(command, capture_output=True, text=True, timeout=20)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    result = json.loads(completed.stdout)
+    expected = next(e for e in original if e['event_kind'] == 'READ_STARTED')
+    assert result['items'] == [expected]
+    assert result['next_cursor'] == expected['sequence']
+    assert result['permission_decision'] == 'not-provided'
+    assert store.events() == original, 'metadata query must not launch or journal a data read'
+    store.append('NOTE', {'fixture': 'make projection stale'})
+    failed = subprocess.run(command, capture_output=True, text=True, timeout=20)
+    assert failed.returncode == 1
+    assert json.loads(failed.stdout)['error']['code'] == 'INDEX_STALE'
+
+
+def test_current_artifact_scope_mutation_cannot_be_hidden_by_old_sqlite(tmp_path):
+    store, artifact = actual_reads(tmp_path)
+    index = ResearchIndex(store)
+    index.rebuild()
+    path = store.path / ('manifests/artifact-' + artifact['artifact_id'] + '.json')
+    damaged = json.loads(path.read_bytes())
+    damaged['block_ids'] = ['forged-block']
+    path.write_text(json.dumps(damaged), encoding='utf-8')
+    with pytest.raises(ResearchError, match='CORRUPT_ARTIFACT'):
+        index.exposures(block_id='other-block')
+
+
+def test_old_scope_cursor_is_not_relabelled_after_rebuild(tmp_path):
+    store, _ = actual_reads(tmp_path)
+    index = ResearchIndex(store)
+    index.rebuild()
+    original = index.exposures(block_id='test-block', limit=1)
+    store.append('NOTE', {'fixture': 'new snapshot'})
+    index.rebuild()
+    with pytest.raises(ResearchError, match='CURSOR_STALE'):
+        index.exposures(block_id='test-block', after=original['next_cursor'], watermark=original['watermark'])
+
+
+def test_selected_artifact_scope_checks_do_not_rescan_physical_chain_per_row(tmp_path, monkeypatch):
+    store, _ = actual_reads(tmp_path)
+    index = ResearchIndex(store)
+    index.rebuild()
+    original, calls = store._events, []
+    def observed():
+        calls.append(True)
+        return original()
+    monkeypatch.setattr(store, '_events', observed)
+    assert len(index.exposures(block_id='test-block')['items']) == 4
+    assert len(calls) == 1
 
 
 def test_rebuild_verifies_one_actual_chain_and_hashes_legacy_artifact_scope(tmp_path, monkeypatch):

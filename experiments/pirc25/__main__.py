@@ -29,6 +29,13 @@ def main(argv=None):
     listing.add_argument("--kind", default="study", choices=["study", "run", "artifact"])
     listing.add_argument("--limit", type=int, default=50)
     commands.add_parser("rebuild-index")
+    exposures = commands.add_parser('audit-exposures', help='paged local exposure metadata, never a permission decision')
+    exposures.add_argument('--block', required=True)
+    exposures.add_argument('--limit', type=int, default=50)
+    exposures.add_argument('--after', type=int, default=0)
+    exposures.add_argument('--before', type=int)
+    exposures.add_argument('--watermark', type=int)
+    exposures.add_argument('--include-checks', action='store_true')
     show = commands.add_parser("show", help="registration metadata only; use authorized export/serve for results")
     show.add_argument("object_id")
     run = commands.add_parser("run")
@@ -93,6 +100,9 @@ def main(argv=None):
             result = {"watermark": ResearchIndex(store).rebuild()}
         elif args.command == "list":
             result = ResearchIndex(store).list(kind=args.kind, limit=args.limit)
+        elif args.command == 'audit-exposures':
+            result = ResearchIndex(store).exposures(block_id=args.block, limit=args.limit, after=args.after,
+                before=args.before, watermark=args.watermark, include_checks=args.include_checks)
         elif args.command == "show":
             # Fail closed for bundles and any future result-bearing manifest
             # kind. A past export grant is not a grant for this invocation.

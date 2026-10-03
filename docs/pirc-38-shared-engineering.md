@@ -219,6 +219,24 @@ Broken authoritative history fails closed. Explicit `quarantine-tail --reason ..
 preserves invalid bytes and the old head, records recovery, and holds all budgets
 for external reconciliation. It does not invent lost cost or reset a budget.
 
+Rebuilding writes disposable SQLite schema2, with unique exposure event IDs and
+a `(block_id, sequence)` primary-key index. Schema1 registration-list queries
+remain supported; exposure queries require an explicit rebuild. From the same
+local root, use `python -B -m experiments.pirc25 --root <runtime-root> --store-id <store-id> audit-exposures --block <block-id> --limit 50`.
+`--after <sequence>`, `--before <sequence>` and `--watermark <watermark>` page
+the frozen sequence range; `--include-checks` includes allow/deny checks as well
+as started/completed/failed reads. Missing, corrupt or lagging projections return
+`INDEX_STALE`; a cursor from a different rebuilt version returns `CURSOR_STALE`.
+
+This command displays local audit metadata only, never trajectory/result bytes
+or an access token. Scope comes from declared block/source-block IDs and real
+hash-verified artifact manifests, not a grant. Selected original events and scope
+are rechecked against physical authority; the SQLite projection is not permission.
+An empty page does not certify an untouched block. Content aliases, external
+exposure history and blind-test authorization still use the preregistration/data
+gate. A SQLite range-query plan does not prove the complete O(B log E) read-check
+contract, including those aliases and fresh physical verification.
+
 `BudgetSpec` enforces smoke ≤900 s, pilot ≤1800 s, job ≤7200 s and arm cumulative
 ≤86400 slot-seconds. Reservations/settlements are idempotent and cannot oversubscribe
 the arm. Deadline/lost-worker outcomes close the affected arm. Unknown cost retains
