@@ -117,10 +117,8 @@ def main(argv=None):
             if any((parent / ".git").exists() for parent in (output.parent, *output.parents)):
                 raise ResearchError("UNAUTHORIZED_DATA", "export must stay outside Git")
             content = encode(bundle)
-            if output.exists() and output.read_bytes() != content:
-                raise ResearchError("IDENTITY_CONFLICT", "export exists with different content")
             output.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write(output, content,
+            atomic_write(output, content, immutable=True,
                 before_replace=lambda: authorize_evidence_publication(store, bundle, grant))
             result = {"bundle_hash": bundle["bundle_hash"]}
         elif args.command == "import-evidence":

@@ -113,7 +113,15 @@ is durably denied before publication or return. Read/disclosure journals remain
 durable and do not invalidate an otherwise unchanged export. The CLI also
 reauthenticates its frozen bundle after target staging fsync and before atomic
 rename. A refused target publication removes only its own staging file; an
-existing target and already authorized private bundle are preserved.
+existing target and already authorized private bundle are preserved. External
+export publication is atomic and no-clobber: Windows uses non-overwriting
+rename, POSIX uses a hard link from the fully flushed same-directory staging
+file. Unsupported filesystem operations fail closed, never fall back to
+overwriting replace. A conflicting target is rejected; identical content is
+compared through one size-checked regular file handle with a read bounded by
+the expected bytes plus one, then export authority is rechecked after that I/O.
+Idempotent retries also sync the directory. Ordinary locked authority-store
+writes retain their existing replace semantics.
 
 ## Independent reproduction
 

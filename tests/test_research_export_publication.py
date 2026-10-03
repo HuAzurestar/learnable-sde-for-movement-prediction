@@ -29,6 +29,7 @@ def test_actual_cli_existing_target_comparison_uses_bounded_open_handle_reads(
     output = tmp_path / 'existing.json'
     output.write_bytes(old)
     original_open = Path.open
+    original_fdopen = store_module.os.fdopen
     reads = []
 
     class Reader:
@@ -55,6 +56,12 @@ def test_actual_cli_existing_target_comparison_uses_bounded_open_handle_reads(
         return Reader(stream) if path == output and mode == 'rb' else stream
 
     monkeypatch.setattr(Path, 'open', opened)
+    def fdopened(fd, *args, **kwargs):
+        # Production's opened-handle comparator must actually exercise the
+        # bound; retain the original Path.open hook for the failing baseline.
+        stream = original_fdopen(fd, *args, **kwargs)
+        return Reader(stream)
+    monkeypatch.setattr(store_module.os, 'fdopen', fdopened)
     status = main(arguments(store, output))
     response = json.loads(capsys.readouterr().out)
     assert status == (0 if existing == 'identical' else 1)
@@ -63,6 +70,8 @@ def test_actual_cli_existing_target_comparison_uses_bounded_open_handle_reads(
     with original_open(output, 'rb') as stream:
         assert stream.read(len(old) + 1) == old
     assert all(0 <= size <= len(expected) + 1 for size in reads), reads
+    if existing != 'oversized':
+        assert reads, 'target equality must compare actual bytes, not only size'
     assert not list(output.parent.glob('.' + output.name + '.*.staging'))
 
 

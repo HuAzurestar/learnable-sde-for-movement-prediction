@@ -59,12 +59,50 @@ def _sync_directory(path: Path):
             os.close(fd)
 
 
-def atomic_write(path: Path, content: bytes, *, before_replace=None):
+def _matches_file_content(path: Path, content: bytes) -> bool:
+    """Compare a regular target using one bounded, non-following file handle.
+
+    Size checks are against the opened file, not a pre-open pathname stat. A
+    growing file cannot turn this into an unbounded read. Nonblocking/no-follow
+    flags also prevent a raced POSIX FIFO or symlink from becoming a read.
+    """
+    try:
+        if not stat.S_ISREG(path.lstat().st_mode):
+            return False
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "rb") as stream:
+            before = os.fstat(stream.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_size != len(content):
+                return False
+            equal = stream.read(len(content) + 1) == content
+            after = os.fstat(stream.fileno())
+            current = path.lstat()
+            identity = lambda info: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+            return equal and identity(before) == identity(after) == identity(current)
+    except FileNotFoundError:
+        return False
+
+
+def _publish_no_replace(temporary: Path, path: Path):
+    # Windows rename refuses an existing destination; POSIX rename overwrites.
+    # Hard-link publication is atomic/no-clobber on POSIX. Staging is beside
+    # the target, on the same filesystem; unsupported operations fail closed.
+    if os.name == "nt":
+        os.rename(temporary, path)
+    else:
+        os.link(temporary, path)
+
+
+def atomic_write(path: Path, content: bytes, *, before_replace=None, immutable=False):
     """Flush staging, optionally recheck disclosure, then atomically publish.
 
     Authority-store callers hold their lock and use the ordinary two-argument
     form. External evidence publication may supply a guard after fsync; a
     failed guard preserves any existing target and removes only this staging.
+    Immutable external exports never replace another publisher's target;
+    identical content is accepted only after a bounded read and a fresh guard.
     """
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.staging")
     try:
@@ -74,7 +112,16 @@ def atomic_write(path: Path, content: bytes, *, before_replace=None):
             os.fsync(stream.fileno())
         if before_replace is not None:
             before_replace()
-        os.replace(temporary, path)
+        if immutable:
+            try:
+                _publish_no_replace(temporary, path)
+            except FileExistsError:
+                if not _matches_file_content(path, content):
+                    raise ResearchError("IDENTITY_CONFLICT", "export exists with different content") from None
+                if before_replace is not None:
+                    before_replace()
+        else:
+            os.replace(temporary, path)
         _sync_directory(path.parent)
     finally:
         temporary.unlink(missing_ok=True)
