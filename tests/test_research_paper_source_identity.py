@@ -74,24 +74,9 @@ def test_parent_symlink_is_rejected_before_source_read(tmp_path, monkeypatch):
 def test_source_read_is_bounded_even_after_size_precheck(tmp_path, monkeypatch):
     root, _ = replica(tmp_path)
     target = root / "scripts/pirc25/__init__.py"
-    original = Path.open
-    reads = []
-    class BoundedStream:
-        def __init__(self, stream):
-            self.stream = stream
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            return self.stream.__exit__(*args)
-        def __getattr__(self, name):
-            return getattr(self.stream, name)
-        def read(self, size=-1):
-            assert 0 <= size <= MAX_INPUT_BYTES + 1, "paper source read is not byte bounded"
-            reads.append(size)
-            return self.stream.read(size)
-    def guarded(path, *args, **kwargs):
-        stream = original(path, *args, **kwargs)
-        return BoundedStream(stream) if path == target else stream
-    monkeypatch.setattr(Path, "open", guarded)
+    from tests.research_file_observation import observe_file
+    def before_read(stream, size):
+        assert 0 <= size <= MAX_INPUT_BYTES + 1, "paper source read is not byte bounded"
+    reads, _ = observe_file(monkeypatch, target, before_read=before_read)
     paper_identity(root)
     assert reads

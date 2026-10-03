@@ -10,6 +10,8 @@ import hashlib
 import importlib
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
 from types import ModuleType, SimpleNamespace
@@ -18,9 +20,9 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
-for name in ("application", "infrastructure"):
+for name in ("application", "infrastructure", "experiments", "experiments.pirc25"):
     package = ModuleType(name)
-    package.__path__ = [str(ROOT / name)]
+    package.__path__ = [str(ROOT.joinpath(*name.split(".")))]
     sys.modules[name] = package
 sys.path.insert(0, str(ROOT))
 STORE = importlib.import_module("infrastructure.research_store")
@@ -241,6 +243,83 @@ for entry in ("manifest", "event"):
         if os.name == "nt" and scenario in {"symlink", "root_initial", "root_open"}:
             check = unittest.skip("POSIX-native metadata file/directory symlink")(check)
         setattr(NativeMetadataReads, "test_" + entry + "_" + scenario, check)
+
+
+class NativeCodeSourceReads(unittest.TestCase):
+    def exercise(self, entry, scenario):
+        with tempfile.TemporaryDirectory(prefix="pirc38-code-read-") as directory:
+            base = Path(directory).resolve()
+            root = base / "source"
+            root.mkdir()
+            if entry == "runtime":
+                module = importlib.import_module("experiments.pirc25.affine")
+                for name in ("config.py", "numerics.py", "registry.py"):
+                    (root / name).write_bytes(b"# synthetic source\n")
+                target = root / "config.py"
+                reader = module.code_hash
+            else:
+                module = importlib.import_module("application.research_computation")
+                target = root / "scripts/pirc25/__init__.py"
+                target.parent.mkdir(parents=True)
+                target.write_bytes(b"# synthetic source\n")
+                for args in (("init", "--quiet"), ("add", "scripts"),
+                        ("commit", "--quiet", "-m", "synthetic source")):
+                    subprocess.run(["git", "-C", str(root), "-c", "user.name=PIRC-fixture",
+                        "-c", "user.email=fixture@example.invalid", *args], check=True,
+                        capture_output=True, timeout=10)
+                reader = lambda: module.paper_identity(root)
+            outside = base / "outside"
+            outside.mkdir()
+            external = outside / target.relative_to(root)
+            external.parent.mkdir(parents=True, exist_ok=True)
+            external.write_bytes(target.read_bytes())
+            if scenario.startswith("root_"):
+                shutil.copytree(root, outside, dirs_exist_ok=True)
+            touched = []
+            def change():
+                self.assertFalse(touched)
+                touched.append(True)
+                if scenario == "replace":
+                    os.replace(external, target)
+                elif scenario == "symlink":
+                    target.unlink()
+                    target.symlink_to(external)
+                else:
+                    root.rename(base / "original")
+                    root.symlink_to(outside, target_is_directory=True)
+            try:
+                if scenario == "root_initial":
+                    change()
+                with ExitStack() as patches:
+                    observer = SimpleNamespace(setattr=lambda obj, name, value:
+                        patches.enter_context(patch.object(obj, name, value)))
+                    if entry == "runtime":
+                        observer.setattr(module, "ROOT", root)
+                    observed = external if entry == "paper" and scenario == "root_initial" else target
+                    reads, _ = observe_file(observer, observed,
+                        before_open=change if scenario not in {"normal", "root_initial"} else None)
+                    if scenario == "normal":
+                        self.assertTrue(reader())
+                        self.assertTrue(reads, "source check did not reach the actual reader")
+                    else:
+                        with self.assertRaisesRegex(STORE.ResearchError, "UNAUTHORIZED_DATA|CORRUPT_ARTIFACT"):
+                            reader()
+                        self.assertEqual(touched, [True])
+                        self.assertEqual(reads, [], "identity consumed replaced/outside code bytes")
+            finally:
+                if root.is_symlink():
+                    root.unlink()
+
+
+for entry in ("runtime", "paper"):
+    for scenario in ("normal", "replace", "symlink", "root_initial", "root_open"):
+        def check(self, entry=entry, scenario=scenario):
+            self.exercise(entry, scenario)
+        if entry == "paper" and not shutil.which("git"):
+            check = unittest.skip("actual paper identity needs native Git; use the Git validation image")(check)
+        elif os.name == "nt" and scenario not in {"normal", "replace"}:
+            check = unittest.skip("POSIX-native code source/root link")(check)
+        setattr(NativeCodeSourceReads, "test_" + entry + "_" + scenario, check)
 
 
 if __name__ == "__main__":

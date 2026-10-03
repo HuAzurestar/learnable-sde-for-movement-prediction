@@ -39,7 +39,7 @@ def observe_file(monkeypatch, target, *, before_open=None, before_read=None, aft
 
     def path_open(path, *args, **kwargs):
         mode = args[0] if args else kwargs.get("mode", "r")
-        selected = path == target and mode == "rb"
+        selected = path == target and mode in {"rb", "r"}
         if selected and before_open is not None:
             before_open()
         actual = original_path_open(path, *args, **kwargs)
