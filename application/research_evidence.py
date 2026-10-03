@@ -372,8 +372,11 @@ def _package_file_bytes(root, name, limit):
             raise ResearchError("UNAUTHORIZED_DATA", "evidence package handle is not a regular file")
         if opened.st_size > limit:
             raise ResearchError("RESOURCE_PLAN_REJECTED", "evidence package file exceeds byte quota")
+        current = path.lstat()
+        if current.st_size > limit:
+            raise ResearchError("RESOURCE_PLAN_REJECTED", "evidence package file exceeds byte quota")
         if (not path.resolve().is_relative_to(root)
-                or identity(before) != identity(opened) or identity(path.lstat()) != identity(opened)):
+                or identity(before) != identity(opened) or identity(current) != identity(opened)):
             raise ResearchError("CORRUPT_ARTIFACT", "evidence package file changed before read")
         # Bound allocation to the actually admitted size, not just the larger
         # quota. One extra byte detects growth even after the handle check.
