@@ -1,7 +1,6 @@
 """Raw/provider/recovery reads cannot reuse permission after durable I/O."""
 
 from datetime import datetime, timezone
-import hashlib
 from pathlib import Path
 
 import pytest
@@ -173,7 +172,7 @@ def test_valid_provider_read_keeps_role_scope_bytes_and_frozen_evidence(tmp_path
 
 
 @pytest.mark.parametrize('level', ['exact', 'chunk'])
-@pytest.mark.parametrize('phase', ['READ_STARTED', 'grant:READ_STARTED'])
+@pytest.mark.parametrize('phase', ['READ_STARTED', 'grant:READ_STARTED', 'source-metadata', 'grant:source-metadata'])
 def test_actual_recovery_prepare_refuses_state_after_raw_read_permission_changes(tmp_path, monkeypatch, read_clock, level, phase):
     store, recovery, attempt, grant = recovery_setup(tmp_path, level)
     reservation = BudgetLedger(store).reserve(attempt, BudgetSpec(10))
@@ -184,6 +183,20 @@ def test_actual_recovery_prepare_refuses_state_after_raw_read_permission_changes
     BudgetLedger(store).settle(reservation['reservation_id'], 6000, outcome='FAILED')
     store.transition(attempt, 'FAILED', error_code='TRANSIENT')
     touched = fault_after_journal(store, grant, phase, read_clock, monkeypatch)
+    original_manifest = store.manifest
+
+    def metadata(object_id):
+        result = original_manifest(object_id)
+        if phase.endswith('source-metadata') and object_id == 'artifact-' + checkpoint:
+            touched.append(True)
+            if phase.startswith('grant:'):
+                path = store.path / 'manifests' / ('authorization-' + grant['authorization_id'] + '.json')
+                path.write_bytes(encode({**grant, 'purposes': []}))
+            else:
+                read_clock[0] = True
+        return result
+
+    monkeypatch.setattr(store, 'manifest', metadata)
     with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
         recovery.prepare(attempt, checkpoint, authorization=grant)
     assert touched
