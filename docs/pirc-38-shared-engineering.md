@@ -289,6 +289,11 @@ Formal mode requires a frozen comparison plan and qualified inputs.
 
 TSDE atomically publishes `aggregate.json`, `metrics.csv`, `PaperEvidenceIndex.json`
 and a hash manifest. PSDE imports these exact files, bound to its exported matrix.
+Incoming package reads keep the original 64 MiB core-file, 1 MiB computation
+receipt and 2 MiB figure/index quotas. Regular opened handles are checked against
+the inside-root path and the admitted file identity; actual reads are bounded by
+that size plus one byte. Growth, replacement or in-place modification is rejected
+before parsing/import, rather than allocating the entire changed file first.
 The UI displays the frozen aggregate and downloads the original CSV; it does not
 implement another statistics calculation. Raw trajectories never enter TSDE.
 
