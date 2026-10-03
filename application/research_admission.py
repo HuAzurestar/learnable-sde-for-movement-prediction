@@ -189,7 +189,8 @@ class AdmissionGate:
             needs_prereg = mode == "formal" or block["split_role"] in {"test", "final-eval"}
             upstream_prereg = (self._document("preregistration", protocol.get("preregistration_hash"))
                                if needs_prereg else None)
-            snapshot_evidence = prepare_upstream(self.store, spec, cell, package, upstream_prereg)
+            snapshot_evidence = prepare_upstream(self.store, spec, cell, package, upstream_prereg,
+                                                attempt_id=attempt_id, run_id=run["run_id"])
             documents = {"protocol": protocol, "authorization": grant, "package": package,
                          "upstream_snapshot": snapshot_evidence}
             # Preserve explicitly requested legacy public recipe bindings as

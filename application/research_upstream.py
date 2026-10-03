@@ -46,18 +46,19 @@ def _document(store, kind, reference):
     return value
 
 
-def prepare_upstream(store, spec, cell, package, prereg=None):
+def prepare_upstream(store, spec, cell, package, prereg=None, *, attempt_id, run_id):
     try:
-        return _prepare_upstream(store, spec, cell, package, prereg)
+        return _prepare_upstream(store, spec, cell, package, prereg, attempt_id=attempt_id, run_id=run_id)
     except ResearchError as exc:
         settings = spec["admission"]
         store.append("UPSTREAM_REFUSED", {"study_id": spec["study_id"], "cell_hash": digest(cell),
+            "attempt_id": attempt_id, "run_id": run_id,
             "snapshot_hash": settings.get("upstream_snapshot_hash"),
             "acceptance_catalog_hash": settings.get("upstream_acceptance_hash"), "error_code": exc.code})
         raise
 
 
-def _prepare_upstream(store, spec, cell, package, prereg=None):
+def _prepare_upstream(store, spec, cell, package, prereg=None, *, attempt_id, run_id):
     from experiments.pirc25.snapshot import UpstreamSnapshot
 
     settings = spec["admission"]
@@ -99,14 +100,33 @@ def _prepare_upstream(store, spec, cell, package, prereg=None):
     # input is not an excuse to relabel or block this cell.
     validation = snapshot.resolve(root=root, accepted_versions=catalog["entries"], cell_id=digest(cell))
     validation["acceptance_catalog_hash"] = catalog_hash
+    validation["consumer"] = {"attempt_id": attempt_id, "run_id": run_id,
+                              "study_id": spec["study_id"], "cell_hash": digest(cell), "spec_hash": digest(spec)}
     validation_hash = digest(validation)
     store.publish("upstream-validation-" + validation_hash, validation)
     selected = validation["cells"][0]
-    store.append("UPSTREAM_VALIDATION", {"study_id": spec["study_id"], "cell_hash": digest(cell),
+    validation_event = store.append("UPSTREAM_VALIDATION", {"study_id": spec["study_id"], "cell_hash": digest(cell),
+        "attempt_id": attempt_id, "run_id": run_id,
         "snapshot_hash": snapshot_hash, "acceptance_catalog_hash": catalog_hash,
         "validation_hash": validation_hash, "status": selected["status"],
         "rejected_inputs": selected["rejected_inputs"]})
     if selected["status"] != "ready":
         raise ResearchError(selected["rejected_inputs"][0]["code"], "selected frozen upstream cell rejected")
+    # Attach observed immutable event objects, never manufactured timestamps or
+    # sequence defaults. The Paper consumer verifies their cross-object order
+    # without importing a provider or reopening protected source data.
+    objects = {"snapshot": "upstream-snapshot-" + snapshot_hash,
+               "acceptance_catalog": "upstream-acceptance-" + catalog_hash,
+               "validation": "upstream-validation-" + validation_hash}
+    with store._read_transaction():
+        for name, expected in (("snapshot", definition), ("acceptance_catalog", catalog), ("validation", validation)):
+            if store.manifest(objects[name]) != expected:
+                raise ResearchError("IDENTITY_MISMATCH", "upstream evidence changed before admission")
+        events = {event["payload"]["object_id"]: event for event in store.events()
+                  if event["event_kind"] == "MANIFEST" and event["payload"].get("object_id") in objects.values()}
+        if any(object_id not in events for object_id in objects.values()):
+            raise ResearchError("MISSING_ARTIFACT", "upstream publication event missing")
+        publications = {name: events[object_id] for name, object_id in objects.items()}
     return {"snapshot": definition, "acceptance_catalog": catalog,
-            "validation": validation, "validation_hash": validation_hash}
+            "validation": validation, "validation_hash": validation_hash,
+            "publication_events": publications, "validation_event": validation_event}

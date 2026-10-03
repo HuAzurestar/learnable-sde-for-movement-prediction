@@ -101,7 +101,14 @@ there is no implicit empty/no-terrain cutover or missing-cell fallback.
 qualification/data reads or worker startup, ignoring older ready receipts.
 It publishes content-addressed validation plus `UPSTREAM_VALIDATION` and typed
 `UPSTREAM_REFUSED` metadata. Its immutable admission contains the definition,
-catalog and exact validation hash/time. Independent cells keep their own
+catalog and exact validation hash/time, bound to the actual spec/cell/attempt/run.
+It also attaches original observed snapshot/catalog/validation publication
+events and the validation event. The independent Paper checker verifies the
+selected accepted records, exact physical size/header declarations, immutable
+cutover and observed publication-before-plan / validation-before-read order.
+This is recorded metadata verification, never reopening original files or
+authenticating off-platform acceptance. Missing evidence is refused, not
+reconstructed after exposure. Independent cells keep their own
 outcome; missing inputs do not alter dependency sets or scientific routes.
 Snapshot/catalog `visibility` defaults to `restricted`, not public metadata;
 explicit narrower input labels also propagate. Both registered study lineage
@@ -115,8 +122,9 @@ Explicit legacy public `upstream_hash`/`upstream_ids` remain additional frozen
 checks when requested, never a substitute for the required new snapshot.
 
 This API/runtime integration does not by itself close the parent takeover
-contract. Complete real accepted PIRC-19–22 field/license reconciliation,
-independent Paper and UI rejection integration remain required. Do not treat
+contract. Complete real accepted PIRC-19–22 field/license/BenchmarkSelection
+consumer reconciliation and UI rejection integration remain required. Independent
+Paper validation does not prove real acceptance or the truth of source attestations. Do not treat
 the historical `audit_inputs` binding as that complete receipt or label this
 standalone API validation as final engineering/scientific acceptance.
 

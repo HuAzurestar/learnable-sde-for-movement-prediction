@@ -41,7 +41,7 @@ def bind_fixture_execution(value, plugin, config=None, inputs=None):
 def admit_fixture(store, value, plugin, root, *, formal=False, package_visibility="synthetic",
                   execution_config=None, execution_inputs=None, recovery_command_builder=None,
                   upstream_ids=(), upstream_inputs=None, accepted_versions=None,
-                  upstream_dependencies=None, pirc22_cutover=None, upstream_visibility="synthetic"):
+                  upstream_dependencies=None, pirc22_cutover=None, upstream_visibility="synthetic", legacy_upstream=True):
     bind_fixture_execution(value, plugin, execution_config, execution_inputs)
     # Explicit engineering-only frozen metadata. These synthetic attestations
     # never claim acceptance of real PIRC-19--22 inputs or grant data access.
@@ -121,6 +121,8 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
         "recovery_command_hash": command_binding(recovery_command_builder or plugin.command_builder), "upstream_hash": upstream["manifest_hash"],
         "upstream_snapshot_hash": snapshot_hash, "upstream_acceptance_hash": catalog_hash,
         "qualification": "qualified" if formal else "fixture"}
+    if not legacy_upstream:
+        package.pop("upstream_hash")
     if formal:
         package["preregistration_hash"] = protocol["preregistration_hash"]
         check = {"check_id": "contract", "outcome": "passed", "package_binding": package_binding(package),
@@ -137,6 +139,9 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
         "authorization_id": grant["authorization_id"], "package_hash": reference,
         "upstream_snapshot_hash": snapshot_hash, "upstream_acceptance_hash": catalog_hash, "upstream_root": str(root),
         "upstream_ids": list(upstream_ids), "upstream_hash": upstream["manifest_hash"], "purpose": "evaluate" if formal else "fit"}
+    if not legacy_upstream:
+        value["admission"].pop("upstream_ids")
+        value["admission"].pop("upstream_hash")
     return grant
 
 
