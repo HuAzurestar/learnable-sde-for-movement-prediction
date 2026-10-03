@@ -87,7 +87,8 @@ class AdmissionGate:
         """Model consumption permission is mandatory independently of run mode."""
         model_grant = grant
         if model.get("study_id") != spec["study_id"]:
-            model_grant = self.store.manifest("authorization-" + settings["model_authorization_id"])
+            model_grant = self.store.authorization(settings["model_authorization_id"],
+                version=settings.get("model_authorization_version"))
             if spec["study_id"] not in model_grant.get("consumer_study_ids", []):
                 raise ResearchError("UNAUTHORIZED_DATA", "frozen model grant does not authorize this consumer study")
         if (model_grant.get("study_id") != model.get("study_id")
@@ -160,7 +161,7 @@ class AdmissionGate:
             if len(selected) != 1:
                 raise ResearchError("MISSING_INPUT", "cell block absent from frozen protocol")
             block = selected[0]
-            grant = self.store.manifest("authorization-" + settings["authorization_id"])
+            grant = self.store.authorization(settings["authorization_id"], version=settings.get("authorization_version"))
             if (grant["study_id"] != spec["study_id"] or grant.get("protocol_hash") != spec["protocol_hash"]
                     or "execute" not in grant["purposes"] or cell["block_id"] not in grant["block_ids"]
                     or cell.get("visibility", "restricted") not in grant["visibilities"]
@@ -225,7 +226,7 @@ class AdmissionGate:
             # The same read gate streams real content before invoking a plugin;
             # retain its exposure receipt, not an unused whole input allocation.
             EvaluationExposureLedger(self.store).verify(protocol["protocol_id"], cell["block_id"], purpose=purpose,
-                authorization_id=grant["authorization_id"], data_root=Path(root),
+                authorization_id=grant["authorization_id"], authorization_version=grant.get("version"), data_root=Path(root),
                 consumer={"attempt_id": attempt_id, "run_id": attempt["run_id"], "entrypoint": "shared-admission"})
             reads = [event for event in self.store.events() if event["event_kind"] == "READ_COMPLETED"
                      and event["payload"].get("attempt_id") == attempt_id]

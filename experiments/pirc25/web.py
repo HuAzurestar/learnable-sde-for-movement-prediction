@@ -12,8 +12,8 @@ from application.research_query import ResearchQuery, MAX_RESPONSE
 from infrastructure.research_store import ResearchError
 
 
-def make_server(store, authorization_id, *, port=0):
-    query = ResearchQuery(store, authorization_id)
+def make_server(store, authorization_id, *, port=0, authorization_version=None):
+    query = ResearchQuery(store, authorization_id, authorization_version=authorization_version)
     token = secrets.token_urlsafe(32)
 
     class Handler(BaseHTTPRequestHandler):
@@ -53,7 +53,7 @@ def make_server(store, authorization_id, *, port=0):
             try:
                 parameters = parse_qs(parsed.query)
                 if path in {"/api/studies", "/api/runs", "/api/comparisons"}:
-                    if "study_id" in parameters and parameters["study_id"] != [store.manifest("authorization-" + authorization_id)["study_id"]]:
+                    if "study_id" in parameters and parameters["study_id"] != [store.authorization(authorization_id, version=authorization_version)["study_id"]]:
                         raise ResearchError("UNAUTHORIZED_DATA", "requested study is outside session scope")
                     kind = {"/api/studies": "study", "/api/runs": "run", "/api/comparisons": "comparison"}[path]
                     value = query.list(kind, arm_id=parameters.get("arm_id", [None])[0], state=parameters.get("state", [None])[0],
@@ -94,8 +94,8 @@ def make_server(store, authorization_id, *, port=0):
     return server
 
 
-def serve(store, authorization_id, port=0):
-    server = make_server(store, authorization_id, port=port)
+def serve(store, authorization_id, port=0, *, authorization_version=None):
+    server = make_server(store, authorization_id, port=port, authorization_version=authorization_version)
     print(f"http://127.0.0.1:{server.server_port}/#session={server.session_token}", flush=True)
     try:
         server.serve_forever()

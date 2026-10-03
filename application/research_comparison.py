@@ -49,10 +49,11 @@ class ComparisonRunner:
             raise ResearchError("CONTRACT_MISMATCH", "incomplete statistical worker output") from exc
 
     def run(self, study_id, input_aggregate_hash, *, authorization_id, budget=BudgetSpec(),
-            max_operations=MAX_OPERATIONS, formal=None, parent_attempt_id=None, reason=None, output=None):
+            max_operations=MAX_OPERATIONS, formal=None, parent_attempt_id=None, reason=None, output=None,
+            authorization_version=None):
         study_id, input_aggregate_hash = identifier(study_id), identifier(input_aggregate_hash)
         budget.validate()
-        grant = self.store.manifest("authorization-" + identifier(authorization_id))
+        grant = self.store.authorization(authorization_id, version=authorization_version)
         authorize_study(self.store, study_id, grant, "export")
         source = self.store.manifest("comparison-" + input_aggregate_hash)
         if source["study_id"] != study_id:

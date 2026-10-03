@@ -31,7 +31,7 @@ def evidence_visibility(store, spec, cells):
 
 def _study_disclosure_allowed(store, study_id, authorization, purpose):
     try:
-        grant = store.manifest("authorization-" + authorization["authorization_id"])
+        grant = store.authorization(authorization["authorization_id"], version=authorization.get("version"))
         return (grant == authorization and grant["study_id"] == study_id
                 and purpose in grant["purposes"]
                 and datetime.fromisoformat(grant["expires_at"]) > datetime.now(timezone.utc))

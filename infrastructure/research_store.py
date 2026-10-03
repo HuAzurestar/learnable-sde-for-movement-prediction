@@ -50,6 +50,23 @@ def identifier(value: str) -> str:
     return value
 
 
+def authorization_key(authorization_id, version=None):
+    """A missing selector refers only to the original unversioned grant."""
+    authorization_id = identifier(authorization_id)
+    if version is None:
+        return "authorization-" + authorization_id
+    version = identifier(version)
+    # A separate namespace avoids ambiguity with arbitrary legacy IDs,
+    # including IDs that already contain separators or version-looking text.
+    return "grant-" + digest([authorization_id, version])
+
+
+def authorization_key_for_grant(grant):
+    if "version" in grant:
+        identifier(grant["version"])
+    return authorization_key(grant["authorization_id"], grant.get("version"))
+
+
 def _sync_directory(path: Path):
     if os.name != "nt":
         fd = os.open(path, os.O_RDONLY)
@@ -537,7 +554,14 @@ class ResearchStore:
                 raise ValueError("expired")
         except (KeyError, ValueError, TypeError) as exc:
             raise ResearchError("UNAUTHORIZED_DATA", "authorization expired or missing expiry") from exc
-        self.publish("authorization-" + authorization["authorization_id"], authorization)
+        self.publish(authorization_key_for_grant(authorization), authorization)
+
+    def authorization(self, authorization_id, *, version=None):
+        key = authorization_key(authorization_id, version)
+        grant = self.manifest(key)
+        if authorization_key_for_grant(grant) != key:
+            raise ResearchError("CONTRACT_MISMATCH", "authorization version binding differs")
+        return grant
 
     def artifact(self, content: bytes, *, role: str, visibility: str, block_ids: list[str], study_id: str,
                  media_type="application/json") -> dict:
@@ -589,7 +613,7 @@ class ResearchStore:
         if not isinstance(authorization, dict):
             return False
         try:
-            grant_id = "authorization-" + identifier(authorization.get("authorization_id"))
+            grant_id = authorization_key_for_grant(authorization)
             grant = self._manifest(grant_id)
             allowed = (self._manifest("artifact-" + metadata["artifact_id"]) == metadata
                        and grant == authorization and metadata["study_id"] == grant["study_id"]

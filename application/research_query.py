@@ -15,12 +15,13 @@ MAX_RESPONSE = 2 * 1024 * 1024
 
 
 class ResearchQuery:
-    def __init__(self, store, authorization_id):
+    def __init__(self, store, authorization_id, *, authorization_version=None):
         self.store = store
         self.authorization_id = identifier(authorization_id)
+        self.authorization_version = identifier(authorization_version) if authorization_version is not None else None
 
     def _grant(self, purpose="preview"):
-        grant = self.store.manifest("authorization-" + self.authorization_id)
+        grant = self.store.authorization(self.authorization_id, version=self.authorization_version)
         authorize_study(self.store, grant["study_id"], grant, purpose)
         spec = self.store.manifest("study-" + grant["study_id"])["spec"]
         if not {c["block_id"] for c in spec["cells"]} <= set(grant["block_ids"]):

@@ -128,10 +128,10 @@ class CaseGraphRunner:
         self.store = store
 
     def run(self, source_id, *, authorization_id, budget=BudgetSpec(), max_operations=MAX_OPERATIONS,
-            parent_attempt_id=None, reason=None):
+            parent_attempt_id=None, reason=None, authorization_version=None):
         budget.validate()
         with self.store._read_transaction():
-            grant = self.store._manifest('authorization-' + identifier(authorization_id))
+            grant = self.store.authorization(authorization_id, version=authorization_version)
             source, metadata, original, content = read_case_source(self.store, source_id, grant)
             plan = case_plan(source, max_operations)
             if plan is None:

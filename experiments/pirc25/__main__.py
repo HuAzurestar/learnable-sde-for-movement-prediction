@@ -74,6 +74,8 @@ def main(argv=None):
     server = commands.add_parser("serve")
     server.add_argument("--authorization-id", required=True)
     server.add_argument("--port", type=int, default=0)
+    for authorized_command in (export, comparison, case, server):
+        authorized_command.add_argument("--authorization-version", help="exact immutable version; omit only for a legacy unversioned grant")
     args = parser.parse_args(argv)
     if not args.root:
         parser.error("--root or SDE_RUNTIME_ROOT is required; no implicit store")
@@ -107,11 +109,11 @@ def main(argv=None):
         elif args.command == "authorize":
             grant = json.loads(args.grant.read_text(encoding="utf-8"))
             store.authorize(grant)
-            result = {"authorization_id": grant["authorization_id"]}
+            result = {"authorization_id": grant["authorization_id"], "authorization_version": grant.get("version")}
         elif args.command == "export":
             from application.research_evidence import export_evidence, authorize_evidence_publication
             from infrastructure.research_store import atomic_write, encode
-            grant = store.manifest("authorization-" + args.authorization_id)
+            grant = store.authorization(args.authorization_id, version=args.authorization_version)
             bundle = export_evidence(store, args.study, grant)
             output = args.output.resolve()
             if any((parent / ".git").exists() for parent in (output.parent, *output.parents)):
@@ -127,17 +129,18 @@ def main(argv=None):
         elif args.command == "compare":
             from application.research_comparison import ComparisonRunner
             result = ComparisonRunner(store, args.paper_root).run(args.study, args.aggregate_hash,
-                authorization_id=args.authorization_id, budget=BudgetSpec(args.seconds),
+                authorization_id=args.authorization_id, authorization_version=args.authorization_version, budget=BudgetSpec(args.seconds),
                 max_operations=args.max_operations, formal=args.formal,
                 parent_attempt_id=args.parent_attempt, reason=args.reason, output=args.output)
         elif args.command == 'render-case':
             from application.research_cases import CaseGraphRunner
             result = CaseGraphRunner(store).run(args.artifact_id, authorization_id=args.authorization_id,
+                authorization_version=args.authorization_version,
                 budget=BudgetSpec(args.seconds), max_operations=args.max_operations,
                 parent_attempt_id=args.parent_attempt, reason=args.reason)
         elif args.command == "serve":
             from .web import serve
-            serve(store, args.authorization_id, args.port)
+            serve(store, args.authorization_id, args.port, authorization_version=args.authorization_version)
             return 0
         else:
             spec = store.manifest("study-" + args.study)["spec"]

@@ -143,6 +143,25 @@ The receipt binds both Git HEADs, source/protocol/fixture/aggregate hashes and
 command exit codes. Two seeds over the same block remain one independent block.
 No private trajectory, protected evaluation data or actual research pilot is read.
 
+### Immutable authorization versions
+
+New grants may declare a nonempty string `version`. The immutable primary key
+is `(authorization_id, version)`: multiple versions can coexist, and changing
+the contents of an existing version is refused. Select a specific grant with
+`store.authorization(id, version="v2")`, provider/query/managed comparison/case
+`authorization_version="v2"`, or CLI `--authorization-version v2` on export,
+compare, render-case and serve. An admission spec freezes `authorization_version`
+and, for a foreign model, `model_authorization_version` alongside the respective
+IDs. Read events retain the selected version and complete grant hash; offline
+paper admission checks the same binding.
+
+Omitting the selector addresses only the original unversioned grant. Legacy
+manifests and receipts retain their original bytes and hashes. A missing explicit
+version is refused, without falling back to a legacy grant or another version.
+Publishing a new version does not revoke earlier versions: each retains its
+own scope and expiry. Local UI sessions stay bound to the version selected when
+the service was started; request parameters cannot replace that selection.
+
 Optional browser verification needs Playwright 1.55 and Microsoft Edge. Use an
 isolated environment for browser dependencies (older Playwright 1.45 may crash
 on current Edge download teardown):

@@ -7,7 +7,7 @@ import hashlib
 import os
 from pathlib import Path
 
-from infrastructure.research_store import ResearchError, ResearchStore, digest, identifier
+from infrastructure.research_store import ResearchError, ResearchStore, digest, identifier, authorization_key
 from infrastructure.research_files import opened_regular_file
 from .research_preregistration import PreregistrationGate, source_identity
 
@@ -33,10 +33,10 @@ class EvaluationExposureLedger:
                 raise ResearchError("CONTRACT_MISMATCH", "data identity incomplete")
         self.store.publish("protocol-" + protocol["protocol_id"], protocol)
 
-    def _read_authority(self, protocol, block, purpose, authorization_id, expected=None):
+    def _read_authority(self, protocol, block, purpose, authorization_id, expected=None, authorization_version=None):
         evidence, grant = {}, {}
         try:
-            grant_id = "authorization-" + identifier(authorization_id)
+            grant_id = authorization_key(authorization_id, authorization_version)
             protocol_id = "protocol-" + protocol["protocol_id"]
             grant = self.store._manifest(grant_id)
             purposes = {"train": {"fit"}, "selection": {"select"}, "validation": {"validate"},
@@ -62,7 +62,8 @@ class EvaluationExposureLedger:
         return bool(allowed), evidence, grant
 
     def _require_read_authority(self, protocol, block, purpose, authorization_id, grant, request):
-        allowed, _, _ = self._read_authority(protocol, block, purpose, authorization_id, expected=grant)
+        allowed, _, _ = self._read_authority(protocol, block, purpose, authorization_id, expected=grant,
+            authorization_version=grant.get("version"))
         if not allowed:
             self.store._append("EXPOSURE_DENIED", {**request, "allowed": False})
             raise ResearchError("UNAUTHORIZED_DATA", "data purpose, protocol or grant mismatch")
@@ -77,17 +78,17 @@ class EvaluationExposureLedger:
             raise ResearchError("UNAUTHORIZED_DATA", "data purpose, protocol or grant mismatch")
 
     def read(self, protocol_id: str, block_id: str, *, purpose: str,
-             authorization_id: str, data_root: Path, consumer=None) -> bytes:
+             authorization_id: str, data_root: Path, consumer=None, authorization_version=None) -> bytes:
         return self._read(protocol_id, block_id, purpose=purpose, authorization_id=authorization_id,
-                          data_root=data_root, consumer=consumer, materialize=True)
+                          data_root=data_root, consumer=consumer, materialize=True, authorization_version=authorization_version)
 
     def verify(self, protocol_id: str, block_id: str, *, purpose: str,
-               authorization_id: str, data_root: Path, consumer=None) -> dict:
+               authorization_id: str, data_root: Path, consumer=None, authorization_version=None) -> dict:
         """Verify actual admitted bytes without retaining an unused whole input."""
         return self._read(protocol_id, block_id, purpose=purpose, authorization_id=authorization_id,
-                          data_root=data_root, consumer=consumer, materialize=False)
+                          data_root=data_root, consumer=consumer, materialize=False, authorization_version=authorization_version)
 
-    def _read(self, protocol_id, block_id, *, purpose, authorization_id, data_root, consumer, materialize):
+    def _read(self, protocol_id, block_id, *, purpose, authorization_id, data_root, consumer, materialize, authorization_version):
         with self.store._read_transaction():
             protocol = self.store._manifest("protocol-" + identifier(protocol_id))
             selected = [b for b in protocol["blocks"] if b["block_id"] == block_id]
@@ -102,13 +103,15 @@ class EvaluationExposureLedger:
                 run = self.store._manifest("run-" + attempt["run_id"])
                 if run["study_id"] != protocol["study_id"] or run["cell"]["block_id"] != block_id:
                     raise ResearchError("CONTRACT_MISMATCH", "data consumer study/block mismatch")
-            allowed, evidence, grant = self._read_authority(protocol, block, purpose, authorization_id)
+            allowed, evidence, grant = self._read_authority(protocol, block, purpose, authorization_id,
+                authorization_version=authorization_version)
             request = {"study_id": protocol["study_id"], "protocol_hash": digest(protocol),
                        "block_id": block_id, "dataset_id": block["dataset_id"],
                        "release_id": block["release_id"], "purpose": purpose,
                        **source_identity(block), **evidence,
                        **{key: consumer[key] for key in ("attempt_id", "run_id", "entrypoint") if key in consumer},
-                       "authorization_id": authorization_id, "allowed": bool(allowed)}
+                       "authorization_id": authorization_id, "authorization_version": authorization_version,
+                       "authorization_hash": digest(grant), "allowed": bool(allowed)}
             self.store._append("EXPOSURE_ALLOWED" if allowed else "EXPOSURE_DENIED", request)
             if not allowed:
                 raise ResearchError("UNAUTHORIZED_DATA", "data purpose, protocol or grant mismatch")
