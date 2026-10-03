@@ -1,6 +1,7 @@
 """Saved case data and graphics use the real read and supervised job boundaries."""
 
 import json
+from copy import deepcopy
 from pathlib import Path
 import sys
 
@@ -222,3 +223,88 @@ def test_case_worker_actual_reads_use_its_smaller_source_cap(tmp_path, monkeypat
     monkeypatch.setattr(Path, 'open', guarded)
     case_worker.main()
     assert reads and (tmp_path / 'result.json').is_file()
+
+
+@pytest.mark.parametrize('quota', ['paths', 'points'])
+def test_read_only_case_preview_preserves_too_large_error_contract(tmp_path, quota):
+    store, _, _, result, grant = case_source(tmp_path)
+    if quota == 'paths':
+        result['forecast']['samples'] *= 33
+    else:
+        result['forecast']['horizons'] = list(range(1, 514))
+        result['forecast']['samples'] = [[[0, 1]] * 513] * 2
+    artifact = store.artifact(encode(result), role='result', visibility='synthetic',
+                             study_id=grant['study_id'], block_ids=['fixture-1'])
+    with pytest.raises(ResearchError, match='TOO_LARGE'):
+        ResearchQuery(store, grant['authorization_id']).case(artifact['artifact_id'])
+    assert not any(e['event_kind'] in {'RESERVE', 'WORKER_STARTED'} for e in store.events())
+
+
+def test_legal_saved_preview_is_readable_when_full_graph_allocation_is_too_large(tmp_path):
+    from application.research_cases import CaseGraphRunner
+    from application.research_case_figures import case_plan
+    store, _, _, result, grant = case_source(tmp_path, four_state=True)
+    result['forecast']['horizons'] = list(range(1, 129))
+    result['forecast']['samples'] = [[[0, 1, 2, 3]] * 128 for _ in range(64)]
+    result['forecast']['preview'].update(n_samples=64, sample_ids=list(range(64)))
+    artifact = store.artifact(encode(result), role='result', visibility='synthetic',
+                             study_id=grant['study_id'], block_ids=['fixture-1'])
+    with pytest.raises(ResearchError, match='RESOURCE_PLAN_REJECTED'):
+        case_plan(result)
+    with pytest.raises(ResearchError, match='RESOURCE_PLAN_REJECTED'):
+        CaseGraphRunner(store).run(artifact['artifact_id'], authorization_id=grant['authorization_id'])
+    viewed = ResearchQuery(store, grant['authorization_id']).case(artifact['artifact_id'])
+    assert viewed['result'] == result and viewed['figure_status'] == 'UNAVAILABLE'
+    assert not any(e['event_kind'] in {'RESERVE', 'WORKER_STARTED'} for e in store.events())
+
+
+@pytest.mark.parametrize('mutation', ['foreign-source', 'wrong-ordinal', 'wrong-public-id'])
+def test_managed_case_package_rejects_tampered_source_and_figure_bindings(tmp_path, mutation):
+    from application.research_cases import CaseGraphRunner, verified_case_job
+    store, _, artifact, result, grant = case_source(tmp_path)
+    produced = CaseGraphRunner(store).run(artifact['artifact_id'], authorization_id=grant['authorization_id'], budget=BudgetSpec(20))
+    assert produced['state'] == 'SUCCEEDED', produced
+    package = deepcopy(produced['case'])
+    if mutation == 'foreign-source':
+        package['computation_ref']['source_artifact_id'] = digest('foreign source')
+    elif mutation == 'wrong-ordinal':
+        package['figure_index']['figures'][1]['horizon_index'] = 1
+    else:
+        package['figures'][0]['artifact_id'] = digest('foreign figure')
+    with pytest.raises(ResearchError, match='CORRUPT_ARTIFACT'):
+        verified_case_job(store, package, result)
+
+
+def test_corrupt_successful_case_job_is_not_reused_or_silently_recomputed(tmp_path):
+    from application.research_cases import CaseGraphRunner
+    store, _, artifact, _, grant = case_source(tmp_path)
+    runner = CaseGraphRunner(store)
+    made = runner.run(artifact['artifact_id'], authorization_id=grant['authorization_id'], budget=BudgetSpec(20))
+    assert made['state'] == 'SUCCEEDED', made
+    before_starts = sum(e['event_kind'] == 'WORKER_STARTED' for e in store.events())
+    before_cost = BudgetLedger(store).balance('affine')['committed_ms']
+    (store.path / 'artifacts' / made['artifact_id']).write_bytes(b'corrupt synthetic case job output')
+    with pytest.raises(ResearchError, match='CORRUPT_ARTIFACT'):
+        runner.run(artifact['artifact_id'], authorization_id=grant['authorization_id'])
+    with pytest.raises(ResearchError, match='CORRUPT_ARTIFACT'):
+        ResearchQuery(store, grant['authorization_id']).case(artifact['artifact_id'])
+    assert sum(e['event_kind'] == 'WORKER_STARTED' for e in store.events()) == before_starts
+    assert BudgetLedger(store).balance('affine')['committed_ms'] == before_cost
+
+
+def test_closed_source_arm_blocks_graph_jobs_but_not_read_only_saved_values(tmp_path):
+    from application.research_cases import CaseGraphRunner
+    store, value, artifact, result, grant = case_source(tmp_path)
+    spending = {**value, 'study_id': 'case-spending'}
+    store.register(spending, digest(spending))
+    attempt = store.new_attempt(store.register_run(spending['study_id'], spending['cells'][0]))
+    ledger = BudgetLedger(store)
+    reservation = ledger.reserve(attempt, BudgetSpec(1))
+    store.transition(attempt, 'RUNNING')
+    ledger.settle(reservation['reservation_id'], 1000, outcome='TIMEOUT')
+    store.transition(attempt, 'TIMEOUT', error_code='SYNTHETIC_TIMEOUT')
+    with pytest.raises(ResearchError, match='BUDGET_EXHAUSTED'):
+        CaseGraphRunner(store).run(artifact['artifact_id'], authorization_id=grant['authorization_id'])
+    assert ResearchQuery(store, grant['authorization_id']).case(artifact['artifact_id'])['result'] == result
+    assert ledger.balance('affine')['closed'] and ledger.balance('affine')['committed_ms'] == 1000
+    assert not any(e['event_kind'] == 'WORKER_STARTED' for e in store.events())
