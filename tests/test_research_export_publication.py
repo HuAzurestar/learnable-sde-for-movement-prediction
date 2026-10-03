@@ -302,7 +302,7 @@ def test_native_publication_probe_remains_executable():
     completed = subprocess.run([sys.executable, '-B', str(script)], capture_output=True, text=True, timeout=15)
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert 'Production SHA256:' in completed.stdout
-    assert 'Ran 7 tests' in completed.stderr
+    assert 'Ran 8 tests' in completed.stderr
 
 
 @pytest.mark.parametrize('immutable', [False, True] if store_module.os.name == 'nt' else [False])

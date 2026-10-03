@@ -124,6 +124,8 @@ Idempotent retries also sync the directory. Ordinary locked authority-store
 writes retain their existing replace semantics.
 Staging cleanup requires successful exclusive creation by the current writer;
 a preexisting staging-name collision is retained, not deleted as failed output.
+Successful moves relinquish the staging pathname before directory sync, so a
+later writer reusing the freed name cannot be deleted by the earlier cleanup.
 
 ## Independent reproduction
 

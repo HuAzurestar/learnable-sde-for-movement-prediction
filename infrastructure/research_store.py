@@ -91,8 +91,10 @@ def _publish_no_replace(temporary: Path, path: Path):
     # the target, on the same filesystem; unsupported operations fail closed.
     if os.name == "nt":
         os.rename(temporary, path)
+        return False  # The staging pathname is no longer owned by this writer.
     else:
         os.link(temporary, path)
+        return True  # The fully flushed staging link still needs cleanup.
 
 
 def atomic_write(path: Path, content: bytes, *, before_replace=None, immutable=False):
@@ -116,7 +118,7 @@ def atomic_write(path: Path, content: bytes, *, before_replace=None, immutable=F
             before_replace()
         if immutable:
             try:
-                _publish_no_replace(temporary, path)
+                created = _publish_no_replace(temporary, path)
             except FileExistsError:
                 if not _matches_file_content(path, content):
                     raise ResearchError("IDENTITY_CONFLICT", "export exists with different content") from None
@@ -124,6 +126,7 @@ def atomic_write(path: Path, content: bytes, *, before_replace=None, immutable=F
                     before_replace()
         else:
             os.replace(temporary, path)
+            created = False
         _sync_directory(path.parent)
     finally:
         if created:

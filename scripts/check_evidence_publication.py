@@ -94,6 +94,29 @@ class NativePublication(unittest.TestCase):
             self.assertEqual(self.target.read_bytes(), b'original target')
             self.assertEqual(foreign.read_bytes(), b'foreign staging')
 
+    def test_moved_staging_name_can_be_reused_without_first_writer_cleanup(self):
+        # Linux link does not free the staging name. Default replace moves on
+        # both platforms; Windows immutable rename also moves.
+        original_sync = STORE._sync_directory
+        modes = (False, True) if os.name == 'nt' else (False,)
+        for immutable in modes:
+            suffix = str(immutable)
+            target = self.target.with_name('export-' + suffix + '.json')
+            staging = target.with_name('.' + target.name + '.' + suffix + '.staging')
+
+            def sync(path):
+                original_sync(path)
+                self.assertFalse(staging.exists())
+                with staging.open('xb') as stream:
+                    stream.write(b'new owner of the freed staging name')
+
+            with self.subTest(immutable=immutable), patch.object(
+                    STORE.uuid, 'uuid4', return_value=SimpleNamespace(hex=suffix)), patch.object(
+                    STORE, '_sync_directory', sync):
+                STORE.atomic_write(target, self.content, immutable=immutable)
+            self.assertEqual(staging.read_bytes(), b'new owner of the freed staging name')
+            self.assertEqual(target.read_bytes(), self.content)
+
     @unittest.skipIf(os.name == 'nt', 'native POSIX FIFO race')
     def test_regular_file_swapped_for_fifo_cannot_block_comparison(self):
         self.target.write_bytes(self.content)
