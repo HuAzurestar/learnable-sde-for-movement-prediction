@@ -64,6 +64,13 @@ def main(argv=None):
     comparison.add_argument("--parent-attempt")
     comparison.add_argument("--reason")
     comparison.add_argument("--output", type=Path)
+    case = commands.add_parser('render-case', help='offline supervised graphics from saved authorized paths')
+    case.add_argument('artifact_id')
+    case.add_argument('--authorization-id', required=True)
+    case.add_argument('--seconds', type=float, default=7200)
+    case.add_argument('--max-operations', type=int, default=20_000_000)
+    case.add_argument('--parent-attempt')
+    case.add_argument('--reason')
     server = commands.add_parser("serve")
     server.add_argument("--authorization-id", required=True)
     server.add_argument("--port", type=int, default=0)
@@ -124,6 +131,11 @@ def main(argv=None):
                 authorization_id=args.authorization_id, budget=BudgetSpec(args.seconds),
                 max_operations=args.max_operations, formal=args.formal,
                 parent_attempt_id=args.parent_attempt, reason=args.reason, output=args.output)
+        elif args.command == 'render-case':
+            from application.research_cases import CaseGraphRunner
+            result = CaseGraphRunner(store).run(args.artifact_id, authorization_id=args.authorization_id,
+                budget=BudgetSpec(args.seconds), max_operations=args.max_operations,
+                parent_attempt_id=args.parent_attempt, reason=args.reason)
         elif args.command == "serve":
             from .web import serve
             serve(store, args.authorization_id, args.port)

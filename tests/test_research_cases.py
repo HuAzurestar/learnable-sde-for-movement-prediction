@@ -1,6 +1,8 @@
 """Saved case data and graphics use the real read and supervised job boundaries."""
 
 import json
+from pathlib import Path
+import sys
 
 import pytest
 
@@ -173,3 +175,50 @@ def test_case_job_caps_cannot_be_relaxed_even_before_source_read(tmp_path):
     with pytest.raises(ResearchError):
         CaseGraphRunner(store).run(artifact['artifact_id'], authorization_id=grant['authorization_id'], budget=BudgetSpec(7201))
     assert store.events() == before
+
+
+def test_case_plan_bounds_escaped_metadata_and_encoded_package(tmp_path):
+    from application.research_case_figures import case_plan, render_case_package
+    _, _, artifact, result, _ = case_source(tmp_path)
+    result['forecast']['samples'] = [result['forecast']['samples'][0] for _ in range(63)]
+    result['forecast']['preview'].update(n_samples=63, sample_ids=['&' * 180 + str(i) for i in range(63)],
+                                       case_selection_rule='&' * 200, generation_version='&' * 200)
+    plan = case_plan(result)
+    package = render_case_package(result, artifact['artifact_id'], {'fixture': 'reference'})
+    assert len(encode(package)) <= plan['planned_output_bytes'], 'XML escaping and JSON envelope exceed preflight graph bound'
+
+
+@pytest.mark.parametrize('name', ['request', 'source'])
+def test_case_worker_actual_reads_use_its_smaller_source_cap(tmp_path, monkeypatch, name):
+    from application.research_case_figures import case_plan, MAX_SOURCE_BYTES
+    from experiments.pirc25 import case_worker
+    _, _, artifact, result, _ = case_source(tmp_path / 'store')
+    paths = {key: tmp_path / (key + '.json') for key in ('request', 'source')}
+    paths['source'].write_bytes(encode(result))
+    paths['request'].write_bytes(encode({'schema_version': 'pirc25-case-graph-request-v1',
+        'source_artifact_id': artifact['artifact_id'], 'runtime_code_hash': 'fixture-code',
+        'resource_plan': case_plan(result), 'computation_ref': {'fixture': 'reference'}}))
+    monkeypatch.setattr(sys, 'argv', ['case_worker', str(paths['request']), str(paths['source']), str(tmp_path / 'result.json')])
+    monkeypatch.setattr(case_worker, 'code_hash', lambda: 'fixture-code')
+    original, reads = Path.open, []
+
+    class GuardedStream:
+        def __init__(self, stream):
+            self.stream = stream
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+        def __getattr__(self, key):
+            return getattr(self.stream, key)
+        def read(self, size=-1):
+            assert 0 <= size <= MAX_SOURCE_BYTES + 1, 'case worker reads beyond its admitted 2 MiB cap'
+            reads.append(size)
+            return self.stream.read(size)
+
+    def guarded(path, *args, **kwargs):
+        stream = original(path, *args, **kwargs)
+        return GuardedStream(stream) if path == paths[name] else stream
+    monkeypatch.setattr(Path, 'open', guarded)
+    case_worker.main()
+    assert reads and (tmp_path / 'result.json').is_file()

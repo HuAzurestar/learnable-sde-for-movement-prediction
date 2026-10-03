@@ -64,6 +64,8 @@ def make_server(store, authorization_id, *, port=0):
                     value = query.run(path.removeprefix("/api/runs/"))
                 elif path.startswith("/api/comparisons/"):
                     value = query.comparison(path.removeprefix("/api/comparisons/"))
+                elif path.startswith('/api/cases/'):
+                    value = query.case(path.removeprefix('/api/cases/'))
                 elif path.startswith("/api/artifacts/"):
                     if parameters.get("manifest") == ["1"]:
                         value = query.result_manifest(path.removeprefix("/api/artifacts/"))

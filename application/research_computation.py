@@ -151,32 +151,33 @@ def _verified_computation(store, reference, *, receipt=None, aggregate=None):
                 result["aggregate"]["source_bundle_hash"] != reference["source_bundle_hash"] or
                 (aggregate is not None and aggregate != result["aggregate"])):
             raise ResearchError("CORRUPT_ARTIFACT", "imported adjudication is not the managed worker output")
-        events = store._events()
-        reserves = [e for e in events if e["event_kind"] == "RESERVE" and
-                    e["payload"].get("reservation_id") == reference["reservation_id"]]
-        starts = [e for e in events if e["event_kind"] == "WORKER_STARTED" and
-                  e["payload"].get("reservation_id") == reference["reservation_id"]]
-        settles = [e for e in events if e["event_kind"] == "SETTLE" and
-                   e["payload"].get("reservation_id") == reference["reservation_id"]]
-        if len(reserves) != 1 or len(starts) != 1 or len(settles) != 1:
-            raise ResearchError("CORRUPT_ARTIFACT", "computation reserve/worker/settle chain missing")
-        reserved, started, settled = reserves[0], starts[0], settles[0]
-        charge = settled["payload"]
-        if (not reserved["sequence"] < started["sequence"] < settled["sequence"] or
-                any(e["payload"].get("attempt_id") != reference["attempt_id"] for e in (reserved, started, settled)) or
-                charge.get("outcome") != "SUCCEEDED" or not charge.get("settled") or
-                type(charge.get("monotonic_elapsed_ms")) is not int or
-                charge["monotonic_elapsed_ms"] != charge["charged_ms"] or
-                charge["charged_ms"] <= 0 or charge["arm_id"] != run["arm_id"] or
-                charge["charged_ms"] > reserved["payload"]["reserved_ms"] or
-                any(e["payload"].get("run_id") != run["run_id"] or
-                    e["payload"].get("study_id") != run["study_id"] or
-                    e["payload"].get("arm_id") != run["arm_id"] for e in (reserved, settled)) or
-                proof["settlement_event_hash"] != settled["hash"] or
-                proof["cost"] != {"arm_id": run["arm_id"], "charged_ms": charge["charged_ms"],
-                    "unit": "slot-ms", "scope": "whole-shared-computation-job", "basis": "measured-monotonic"}):
-            raise ResearchError("CORRUPT_ARTIFACT", "computation measured cost/settlement changed")
+        _verify_job_cost(store, reference, run, proof)
         return proof, result
+
+
+def _verify_job_cost(store, reference, run, proof):
+    """Shared comparison/case job proof. Caller holds the authority lock."""
+    events = store._events()
+    chains = [[e for e in events if e['event_kind'] == kind and
+               e['payload'].get('reservation_id') == reference['reservation_id']]
+              for kind in ('RESERVE', 'WORKER_STARTED', 'SETTLE')]
+    if any(len(chain) != 1 for chain in chains):
+        raise ResearchError('CORRUPT_ARTIFACT', 'computation reserve/worker/settle chain missing')
+    reserved, started, settled = [chain[0] for chain in chains]
+    charge = settled['payload']
+    if (not reserved['sequence'] < started['sequence'] < settled['sequence'] or
+            any(e['payload'].get('attempt_id') != reference['attempt_id'] for e in (reserved, started, settled)) or
+            charge.get('outcome') != 'SUCCEEDED' or not charge.get('settled') or
+            type(charge.get('monotonic_elapsed_ms')) is not int or
+            charge['monotonic_elapsed_ms'] != charge['charged_ms'] or
+            charge['charged_ms'] <= 0 or charge['arm_id'] != run['arm_id'] or
+            charge['charged_ms'] > reserved['payload']['reserved_ms'] or
+            any(e['payload'].get('run_id') != run['run_id'] or e['payload'].get('study_id') != run['study_id'] or
+                e['payload'].get('arm_id') != run['arm_id'] for e in (reserved, settled)) or
+            proof['settlement_event_hash'] != settled['hash'] or
+            proof['cost'] != {'arm_id': run['arm_id'], 'charged_ms': charge['charged_ms'],
+                             'unit': 'slot-ms', 'scope': 'whole-shared-computation-job', 'basis': 'measured-monotonic'}):
+        raise ResearchError('CORRUPT_ARTIFACT', 'computation measured cost/settlement changed')
 
 
 def verified_computation(store, reference, *, receipt=None, aggregate=None):

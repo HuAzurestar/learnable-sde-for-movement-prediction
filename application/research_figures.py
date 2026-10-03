@@ -12,7 +12,7 @@ NS = "http://www.w3.org/2000/svg"
 MAX_FIGURE_BYTES = 2 * 1024 * 1024
 
 
-def validate_figure_svg(content):
+def validate_figure_svg(content, *, expected_kind=None):
     try:
         if not isinstance(content, bytes) or len(content) > MAX_FIGURE_BYTES:
             raise ValueError("figure byte quota")
@@ -22,8 +22,19 @@ def validate_figure_svg(content):
         root = ET.fromstring(source)
         if root.tag != f"{{{NS}}}svg":
             raise ValueError("figure must be an SVG")
+        metadata = root.findall("{" + NS + "}metadata")
+        if len(metadata) != 1:
+            raise ValueError("figure needs one provenance record")
+        record = json.loads(metadata[0].text)
+        encode(record)
+        if (not isinstance(record, dict) or record.get("schema_version") != "pirc25-figure-provenance-v1" or
+                (expected_kind is not None and record.get('kind') != expected_kind)):
+            raise ValueError("figure provenance schema")
         attributes = {"svg": {"role", "aria-label", "viewBox"}, "metadata": set(),
                       "text": {"x", "y", "font-size"}, "rect": {"x", "y", "width", "height", "fill"}}
+        if record.get('kind') == 'case':
+            attributes['polyline'] = {'points', 'fill', 'stroke', 'stroke-opacity'}
+        paths = 0
         for i, node in enumerate(root.iter()):
             if i > 100_000 or not node.tag.startswith("{" + NS + "}"):
                 raise ValueError("figure node/namespace quota")
@@ -34,20 +45,23 @@ def validate_figure_svg(content):
                 raise ValueError("nested figure nodes are not allowed")
             if tag == "rect" and node.get("fill") != "#287c9c":
                 raise ValueError("unsupported figure paint")
+            if tag == 'polyline':
+                paths += 1
+                pairs = node.get('points', '').split()
+                if (paths > 128 or not 1 <= len(pairs) <= 512 or node.get('fill') != 'none' or
+                        node.get('stroke') != '#287c9c' or node.get('stroke-opacity') != '.4'):
+                    raise ValueError('case path quota/paint differs')
+                for pair in pairs:
+                    numbers = pair.split(',')
+                    if len(numbers) != 2 or any(not math.isfinite(float(n)) or abs(float(n)) > 1e9 for n in numbers):
+                        raise ValueError('case path coordinates differ')
             for key, value in node.attrib.items():
                 if key in {"x", "y", "width", "height", "font-size", "viewBox"}:
                     numbers = value.split()
                     if len(numbers) != (4 if key == "viewBox" else 1) or any(
                             not math.isfinite(float(number)) or abs(float(number)) > 1e9 for number in numbers):
                         raise ValueError("invalid figure coordinates")
-        metadata = root.findall("{" + NS + "}metadata")
-        if len(metadata) != 1:
-            raise ValueError("figure needs one provenance record")
-        value = json.loads(metadata[0].text)
-        encode(value)
-        if not isinstance(value, dict) or value.get("schema_version") != "pirc25-figure-provenance-v1":
-            raise ValueError("figure provenance schema")
-        return value
+        return record
     except (ValueError, TypeError, AttributeError, ET.ParseError, UnicodeError) as exc:
         raise ResearchError("CONTRACT_MISMATCH", "unsafe or incomplete frozen SVG") from exc
 

@@ -182,7 +182,7 @@ class ResearchQuery:
         # study checks. Every actual read below still revalidates the immutable
         # grant (including expiry) and journals its own exposure/read events.
         metadata = self.store.manifest("artifact-" + identifier(artifact_id))
-        svg = metadata["media_type"] == "image/svg+xml" and metadata["role"] == "comparison-figure"
+        svg = metadata["media_type"] == "image/svg+xml" and metadata["role"] in {"comparison-figure", "case-figure"}
         if metadata["media_type"] not in {"application/json", "text/csv"} and not svg:
             raise ResearchError("UNAUTHORIZED_DATA", "artifact media type is not safe for this read service")
         if metadata["study_id"] != grant["study_id"] or metadata["size_bytes"] > MAX_RESPONSE:
@@ -191,7 +191,7 @@ class ResearchQuery:
         content = self.store.read_artifact(artifact_id, purpose="export" if export else "preview", authorization=grant)
         if svg:
             from application.research_figures import validate_figure_svg
-            validate_figure_svg(content)
+            validate_figure_svg(content, expected_kind='case' if metadata['role'] == 'case-figure' else 'comparison')
         if metadata["media_type"] == "application/json" and not export:
             value = json.loads(content)
             samples = value.get("forecast", {}).get("samples") if isinstance(value, dict) else None
@@ -217,6 +217,11 @@ class ResearchQuery:
             index, _ = self._artifact(package["figure-index"], grant)
             result["figure_index"] = json.loads(index)
         return result
+
+    def case(self, artifact_id):
+        from application.research_cases import case_view
+        with self.store._read_transaction():
+            return case_view(self.store, artifact_id, self._grant())
 
     def result_manifest(self, artifact_id):
         content, media = self.artifact(artifact_id, export=True)
