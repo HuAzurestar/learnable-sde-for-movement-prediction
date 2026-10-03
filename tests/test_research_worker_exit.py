@@ -1,10 +1,13 @@
 """Real child completion must wake the wrapper, not await heartbeat sleep."""
 
 from pathlib import Path
+import os
 import subprocess
 import sys
 
 import pytest
+
+from infrastructure.process_tree import ProcessTree
 
 
 @pytest.mark.parametrize("exit_code", [0, 85])
@@ -42,7 +45,10 @@ print('ACTUAL_CHILD_EXIT', exit_code, flush=True)
     heartbeat = tmp_path / "heartbeat.json"
     process = subprocess.Popen([sys.executable, "-c", driver, str(infrastructure),
                                 str(heartbeat), str(exit_code)], stdin=subprocess.PIPE,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               start_new_session=os.name != "nt",
+                               creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+    tree = ProcessTree(process)
     try:
         process.stdin.write(b"GO\n")
         process.stdin.flush()
@@ -52,8 +58,9 @@ print('ACTUAL_CHILD_EXIT', exit_code, flush=True)
         assert stdout.strip() == f"ACTUAL_CHILD_EXIT {exit_code}".encode()
         assert heartbeat.is_file(), "actual heartbeat and child release were not reached"
     finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait(timeout=5)
+        tree.terminate()
+        assert tree.wait_stopped(), "actual diagnostic process tree stop was not confirmed"
+        process.wait(timeout=5)
+        tree.close()
         for stream in (process.stdin, process.stdout, process.stderr):
             stream.close()

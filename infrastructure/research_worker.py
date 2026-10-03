@@ -46,7 +46,14 @@ def main():
             stop()
             return 124
         Path(heartbeat).write_text(json.dumps({"monotonic": time.monotonic(), "pid": child.pid}))
-        time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+        # Child exit must wake the wrapper immediately, including checkpoint
+        # exit 85. A heartbeat sleep needlessly consumes its remaining margin.
+        # Keep the same heartbeat cadence and absolute, independently fused
+        # deadline; a timeout merely means the next heartbeat is due.
+        try:
+            child.wait(timeout=min(0.1, max(0, deadline - time.monotonic())))
+        except subprocess.TimeoutExpired:
+            pass
     watchdog.cancel()
     # Do not explicitly close the self-containing job before returning: that
     # would terminate this wrapper without preserving the child's exit code.
