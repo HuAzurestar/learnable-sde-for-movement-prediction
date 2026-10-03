@@ -212,25 +212,31 @@ class ResearchSupervisor:
                         encode(result)
                         if not isinstance(result, dict):
                             raise ResearchError("CONTRACT_MISMATCH", "worker result must be an object")
-                        if result_validator is not None:
-                            result_validator(result)
-                        # Supervisor-owned admission bindings added by the
-                        # validator must be part of the published artifact.
-                        content = encode(result)
-                        if len(content) > maximum_result_bytes:
-                            raise ResearchError("RESOURCE_PLAN_REJECTED", "final result including owner provenance exceeds admitted byte quota")
-                        from infrastructure.research_visibility import study_visibility, admission_visibility, combine_visibility
-                        spec = self.store.manifest("study-" + run["study_id"])["spec"]
-                        visibility = study_visibility(self.store.manifest, spec)
-                        if result.get("admission_hash"):
-                            receipt = self.store.manifest("admission-" + result["admission_hash"])
-                            visibility = combine_visibility([visibility, admission_visibility(self.store.manifest, receipt)])
+                        # The tree is already confirmed stopped. Reuse only
+                        # this short owner phase's verified prefix, then verify
+                        # the actual final journal before independent settlement.
+                        with self.store._read_transaction():
+                            if result_validator is not None:
+                                result_validator(result)
+                            # Supervisor-owned admission bindings added by the
+                            # validator must be part of the published artifact.
+                            content = encode(result)
+                            if len(content) > maximum_result_bytes:
+                                raise ResearchError("RESOURCE_PLAN_REJECTED", "final result including owner provenance exceeds admitted byte quota")
+                            from infrastructure.research_visibility import study_visibility, admission_visibility, combine_visibility
+                            spec = self.store.manifest("study-" + run["study_id"])["spec"]
+                            visibility = study_visibility(self.store.manifest, spec)
+                            if result.get("admission_hash"):
+                                receipt = self.store.manifest("admission-" + result["admission_hash"])
+                                visibility = combine_visibility([visibility, admission_visibility(self.store.manifest, receipt)])
+                            if past_deadline():
+                                outcome, error_code = "TIMEOUT", "TIMEOUT"
+                            else:
+                                artifact = self.store.artifact(content, role="result", visibility=visibility,
+                                    block_ids=[run["cell"]["block_id"]], study_id=run["study_id"])
+                                outcome, artifact_id, error_code = "SUCCEEDED", artifact["artifact_id"], None
                         if past_deadline():
-                            outcome, error_code = "TIMEOUT", "TIMEOUT"
-                        else:
-                            artifact = self.store.artifact(content, role="result", visibility=visibility,
-                                block_ids=[run["cell"]["block_id"]], study_id=run["study_id"])
-                            outcome, artifact_id, error_code = "SUCCEEDED", artifact["artifact_id"], None
+                            outcome, artifact_id, error_code = "TIMEOUT", None, "TIMEOUT"
         except BaseException as exc:
             # Even if recording is unavailable, containment cleanup always runs.
             if isinstance(exc, Exception) and past_deadline():
