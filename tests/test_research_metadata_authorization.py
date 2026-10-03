@@ -143,3 +143,78 @@ def test_actual_http_metadata_expiry_is_403_without_private_response(tmp_path, p
         assert response['error']['code'] == 'UNAUTHORIZED_DATA'
         assert run.encode() not in content
         assert store.events()[-1]['event_kind'] == 'DISCLOSURE_DENIED'
+
+
+@pytest.mark.parametrize('view', ['study', 'run', 'comparison', 'run-detail'])
+def test_expiry_in_final_physical_validation_cannot_disclose_metadata(metadata, permission_clock,
+                                                                    monkeypatch, view):
+    store, _, query, run, _ = metadata
+    original_objects, original_events = query._objects, store._events
+    assembled, expired_checks = [], []
+
+    def assembled_objects(*args, **kwargs):
+        result = original_objects(*args, **kwargs)
+        assembled.append(True)
+        return result
+
+    def expire_at_physical_check():
+        result = original_events()
+        if assembled and store._read_snapshot() is None:
+            expired_checks.append(True)
+            permission_clock[0] = True
+        return result
+
+    monkeypatch.setattr(query, '_objects', assembled_objects)
+    monkeypatch.setattr(store, '_events', expire_at_physical_check)
+    with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+        query.run(run) if view == 'run-detail' else query.list(view)
+    assert expired_checks
+    assert store.events()[-1]['event_kind'] == 'DISCLOSURE_DENIED'
+
+
+def test_expiry_in_preprojection_journal_denies_before_private_index_read(metadata, permission_clock,
+                                                                       monkeypatch):
+    store, _, query, _, _ = metadata
+    original_append, original_project = store.append, query._project_objects
+    allowed, projections = [], []
+
+    def expire_after_permission_journal(kind, *args, **kwargs):
+        result = original_append(kind, *args, **kwargs)
+        if kind == 'DISCLOSURE_ALLOWED':
+            allowed.append(True)
+            if len(allowed) == 2:
+                permission_clock[0] = True
+        return result
+
+    def project(*args, **kwargs):
+        projections.append(True)
+        return original_project(*args, **kwargs)
+
+    monkeypatch.setattr(store, 'append', expire_after_permission_journal)
+    monkeypatch.setattr(query, '_project_objects', project)
+    with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+        query.list('run')
+    assert len(allowed) == 2
+    assert not projections, 'expired permission journal was followed by a private metadata read'
+    assert store.events()[-1]['event_kind'] == 'DISCLOSURE_DENIED'
+
+
+def test_expiry_in_final_permission_journal_cannot_disclose_metadata(metadata, permission_clock,
+                                                                  monkeypatch):
+    store, _, query, _, _ = metadata
+    original_append = store.append
+    allowed = []
+
+    def expire_after_permission_journal(kind, *args, **kwargs):
+        result = original_append(kind, *args, **kwargs)
+        if kind == 'DISCLOSURE_ALLOWED':
+            allowed.append(True)
+            if len(allowed) == 3:
+                permission_clock[0] = True
+        return result
+
+    monkeypatch.setattr(store, 'append', expire_after_permission_journal)
+    with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+        query.list('run')
+    assert len(allowed) == 3
+    assert store.events()[-1]['event_kind'] == 'DISCLOSURE_DENIED'

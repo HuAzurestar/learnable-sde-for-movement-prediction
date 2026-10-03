@@ -37,7 +37,27 @@ class ResearchQuery:
         # Another read's disclosure journal is not a data change, but must not
         # land between these index operations and invalidate their watermark.
         with self.store._read_transaction():
+            authorize_study(self.store, grant['study_id'], grant, 'preview')
             return self._project_objects(kind, grant)
+
+    def _data_watermark(self):
+        return max((event['sequence'] for event in self.store.events()
+                    if event['event_kind'] in {'MANIFEST', 'ATTEMPT', 'RESERVE', 'SETTLE',
+                                              'ARM_CLOSED', 'RECOVERY_HOLD'}), default=0)
+
+    def _metadata_response(self, assemble):
+        # This snapshot belongs only to this request and the current lock owner.
+        # It is not a permission cache: projection and final disclosure both
+        # recheck the immutable grant and its current validity, journalling any
+        # denial before a value can leave the query.
+        with self.store._read_transaction():
+            grant = self._grant()
+            watermark = self._data_watermark()
+            result = assemble(grant)
+            authorize_study(self.store, grant['study_id'], grant, 'preview')
+            if self._data_watermark() != watermark:
+                raise ResearchError('INDEX_STALE', 'authority changed while assembling query snapshot; retry the request')
+            return result
 
     def _project_objects(self, kind, grant):
         index = ResearchIndex(self.store)
@@ -100,12 +120,13 @@ class ResearchQuery:
              seed=None, trainer=None, predictor=None, limit=50, cursor=None):
         if kind not in {"study", "run", "comparison"} or not 1 <= limit <= 200:
             raise ResearchError("CONTRACT_MISMATCH", "invalid query kind or page limit")
-        grant = self._grant()
-        def data_watermark():
-            return max((e["sequence"] for e in self.store.events()
-                        if e["event_kind"] in {"MANIFEST", "ATTEMPT", "RESERVE", "SETTLE", "ARM_CLOSED", "RECOVERY_HOLD"}), default=0)
+        return self._metadata_response(lambda grant: self._list(kind, grant,
+            arm_id=arm_id, state=state, model=model, version=version, horizon=horizon,
+            seed=seed, trainer=trainer, predictor=predictor, limit=limit, cursor=cursor))
 
-        snapshot_start = data_watermark()
+    def _list(self, kind, grant, *, arm_id, state, model, version, horizon,
+              seed, trainer, predictor, limit, cursor):
+        snapshot_start = self._data_watermark()
         filters = {"model": model, "version": version, "horizon": horizon, "seed": seed,
                    "trainer": trainer, "predictor": predictor}
         selector = digest([kind, grant["study_id"], arm_id, state, filters])
@@ -137,7 +158,7 @@ class ResearchQuery:
         rows = [r for r in rows if (arm_id is None or r["manifest"].get("arm_id") == arm_id)
                 and (state is None or r.get("state") == state)]
         # Disclosure logging must not invalidate its own continuation cursor.
-        watermark = data_watermark()
+        watermark = self._data_watermark()
         if watermark != snapshot_start:
             raise ResearchError("INDEX_STALE", "authority changed while assembling query snapshot; retry the request")
         after = ""
@@ -162,7 +183,9 @@ class ResearchQuery:
         return result
 
     def run(self, run_id):
-        grant = self._grant()
+        return self._metadata_response(lambda grant: self._run(run_id, grant))
+
+    def _run(self, run_id, grant):
         value = self.store.manifest("run-" + identifier(run_id))
         if value["study_id"] != grant["study_id"]:
             raise ResearchError("UNAUTHORIZED_DATA", "run is outside session scope")
