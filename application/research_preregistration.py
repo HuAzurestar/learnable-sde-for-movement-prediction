@@ -123,20 +123,19 @@ class PreregistrationGate:
                     if all(record[key] == value for key, value in identity.items())]
         if len(matching) != 1 or matching[0]["status"] == "unknown":
             raise ResearchError("UNAUTHORIZED_DATA", "historical coverage unknown or mismatched")
-        events = self.store._events()
-        frozen = next(event for event in events if event["event_kind"] == "MANIFEST" and
-                      event["payload"]["object_id"] == "preregistration-" + protocol["preregistration_hash"])
+        frozen = self.store._manifest_event("preregistration-" + protocol["preregistration_hash"])
         if prereg["test_mode"] == "blind":
             if matching[0]["status"] != "unexposed":
                 raise ResearchError("UNAUTHORIZED_DATA", "previously exposed data cannot be blind test")
-            for event in events:
+            for event in self.store._manifest_events("exposure-history-"):
                 payload = event["payload"]
-                if event["event_kind"] == "MANIFEST" and payload["object_id"].startswith("exposure-history-"):
-                    prior = self.store._manifest(payload["object_id"])
-                    validate_history(prior)
-                    if any(same_source(record, identity) and record["status"] in {"exposed", "unknown"}
-                           for record in prior["source_evidence"]["records"]):
-                        raise ResearchError("UNAUTHORIZED_DATA", "prior imported exposure cannot be reset")
+                prior = self.store._manifest(payload["object_id"])
+                validate_history(prior)
+                if any(same_source(record, identity) and record["status"] in {"exposed", "unknown"}
+                       for record in prior["source_evidence"]["records"]):
+                    raise ResearchError("UNAUTHORIZED_DATA", "prior imported exposure cannot be reset")
+            for event in self.store._prior_read_events(identity, frozen["sequence"]):
+                payload = event["payload"]
                 if event["event_kind"] in {"READ_STARTED", "READ_COMPLETED", "READ_FAILED"}:
                     # Legacy reads without a content identity cannot prove a
                     # renamed window from that dataset is an untouched block.

@@ -232,6 +232,32 @@ class ResearchStore:
         # A forked process cannot inherit permission to bypass its parent's lock.
         return snapshot if snapshot is not None and snapshot[0] == os.getpid() else None
 
+    def _event_lookup(self):
+        from .research_event_lookup import VerifiedEventLookup
+        snapshot = self._read_snapshot()
+        if snapshot is None or snapshot[1] is None:
+            # No permission to reuse a prefix outside the owned OS lock scope.
+            return VerifiedEventLookup(self._events())
+        cached = getattr(self._read_scope, "event_lookup", None)
+        if cached is None or cached[0] is not snapshot[1]:
+            cached = (snapshot[1], VerifiedEventLookup(snapshot[1]))
+            self._read_scope.event_lookup = cached
+        return cached[1]
+
+    def _discard_event_lookup(self):
+        if hasattr(self._read_scope, "event_lookup"):
+            del self._read_scope.event_lookup
+
+    def _manifest_event(self, object_id, *, last=False):
+        event = self._event_lookup().get(("manifest", object_id), last=last)
+        return json.loads(encode(event)) if event is not None else None
+
+    def _manifest_events(self, prefix):
+        return json.loads(encode(self._event_lookup().manifests(prefix)))
+
+    def _prior_read_events(self, identity, before):
+        return json.loads(encode(self._event_lookup().prior_reads(identity, before)))
+
     @contextmanager
     def _read_transaction(self):
         if self._read_snapshot() is not None:
@@ -247,6 +273,7 @@ class ResearchStore:
                 completed = True
             finally:
                 del self._read_scope.snapshot
+                self._discard_event_lookup()
                 # Also detects physical corruption during I/O. No content leaves
                 # the outer request until this fresh, uncached validation passes.
                 try:
@@ -266,6 +293,7 @@ class ResearchStore:
                                 expiry()
                         finally:
                             del self._read_scope.snapshot
+                            self._discard_event_lookup()
                 finally:
                     del self._read_scope.completions
 
@@ -334,6 +362,7 @@ class ResearchStore:
                 # Forensic recovery may replace the verified prefix. Keep the
                 # outer OS lock, but never append against the old read snapshot.
                 self._read_scope.snapshot = (os.getpid(), None)
+                self._discard_event_lookup()
             paths = sorted((self.path / "events").glob("*.json"))
             prefix = []
             previous = "0" * 64
@@ -364,15 +393,15 @@ class ResearchStore:
             return hold
 
     def _append(self, kind: str, payload: dict, event_id: str | None = None) -> dict:
-        events = self._events()
+        lookup = self._event_lookup()
         event_id = identifier(event_id or uuid.uuid4().hex)
-        for event in events:
-            if event["event_id"] == event_id:
-                if event["event_kind"] != kind or event["payload"] != payload:
-                    raise ResearchError("IDENTITY_CONFLICT", "event replay changed content")
-                return event
-        body = {"event_id": event_id, "sequence": len(events) + 1,
-                "previous_hash": events[-1]["hash"] if events else "0" * 64,
+        existing = lookup.get(("event", event_id))
+        if existing is not None:
+            if existing["event_kind"] != kind or existing["payload"] != payload:
+                raise ResearchError("IDENTITY_CONFLICT", "event replay changed content")
+            return json.loads(encode(existing))
+        body = {"event_id": event_id, "sequence": lookup.size + 1,
+                "previous_hash": lookup.last_hash,
                 "event_kind": kind, "payload": payload, "created_at": utc_now(),
                 "writer_epoch": self.writer_epoch}
         event = {**body, "hash": digest(body)}
@@ -383,11 +412,19 @@ class ResearchStore:
                 # Rename may have succeeded before a directory-sync failure.
                 # Keep the lock, but physically reread before any later append.
                 self._read_scope.snapshot = (os.getpid(), None)
+                self._discard_event_lookup()
             raise
         snapshot = self._read_snapshot()
         if snapshot is not None and snapshot[1] is not None:
             # The event is durable even if publishing head.json fails afterwards.
-            snapshot[1].append(json.loads(encode(event)))
+            try:
+                detached = json.loads(encode(event))
+                snapshot[1].append(detached)
+                lookup.append(detached)
+            except BaseException:
+                self._read_scope.snapshot = (os.getpid(), None)
+                self._discard_event_lookup()
+                raise
         atomic_write(self.path / "head.json", encode({"sequence": event["sequence"], "hash": event["hash"]}))
         return event
 
@@ -413,12 +450,11 @@ class ResearchStore:
 
     def _manifest(self, object_id: str) -> dict:
         identifier(object_id)
-        matches = [event for event in self._events() if event["event_kind"] == "MANIFEST"
-                   and event["payload"]["object_id"] == object_id]
-        if not matches:
+        event = self._manifest_event(object_id, last=True)
+        if event is None:
             raise ResearchError("MISSING_INPUT", "object not published")
         value = self._json(self.path / "manifests" / f"{object_id}.json")
-        if digest(value) != matches[-1]["payload"]["sha256"]:
+        if digest(value) != event["payload"]["sha256"]:
             raise ResearchError("CORRUPT_ARTIFACT", "manifest hash mismatch")
         return value
 
