@@ -10,8 +10,8 @@ from application.research_budget import BudgetLedger, BudgetSpec
 from application.research_evidence import export_evidence
 from experiments.pirc25.__main__ import main
 import infrastructure.research_store as store_module
-from infrastructure.research_store import digest, encode
-from tests.test_research_export_authorization import source
+from infrastructure.research_store import ResearchError, digest, encode
+from tests.test_research_export_authorization import source, foreign_source, permission_clock
 
 
 def arguments(store, output):
@@ -188,3 +188,94 @@ def test_actual_cli_new_and_repeated_export_remain_identical(source, tmp_path, c
     assert all(json.loads(line)['bundle_hash'] == json.loads(expected)['bundle_hash']
                for line in capsys.readouterr().out.splitlines())
     assert not list(output.parent.glob('.' + output.name + '.*.staging'))
+
+
+@pytest.mark.parametrize('foreign', [False, True])
+def test_actual_cli_identical_target_read_cannot_outlive_export_permission(
+        request, tmp_path, monkeypatch, capsys, permission_clock, foreign):
+    fixture = request.getfixturevalue('foreign_source' if foreign else 'source')
+    store, value, grant = fixture[:3]
+    expected = encode(export_evidence(store, value['study_id'], grant))
+    output = tmp_path / 'identical-expiry.json'
+    output.write_bytes(expected)
+    original = store_module._matches_file_content
+    touched = []
+
+    def compare(path, content):
+        result = original(path, content)
+        assert path == output and result
+        touched.append(True)
+        permission_clock[0] = True
+        return result
+
+    monkeypatch.setattr(store_module, '_matches_file_content', compare)
+    args = arguments(store, output)
+    args[args.index('--authorization-id') + 1] = grant['authorization_id']
+    assert main(args) == 1
+    response = json.loads(capsys.readouterr().out)
+    assert response['error']['code'] == 'UNAUTHORIZED_DATA'
+    assert touched and output.read_bytes() == expected
+    denial = store.events()[-1]
+    assert denial['event_kind'] == 'DISCLOSURE_DENIED'
+    assert denial['payload']['study_id'] == ('model-study' if foreign else value['study_id'])
+    assert denial['payload']['purpose'] == 'export'
+    assert not list(output.parent.glob('.' + output.name + '.*.staging'))
+
+
+@pytest.mark.parametrize('failure', ['fsync', 'publish', 'directory-sync'])
+def test_actual_cli_publication_io_failure_preserves_complete_target_and_retry(
+        source, tmp_path, monkeypatch, capsys, failure):
+    store, value, grant, _ = source
+    expected = encode(export_evidence(store, value['study_id'], grant))
+    output = tmp_path / 'failed.json'
+    original_write = store_module.atomic_write
+    operation = {'fsync': 'fsync', 'publish': '_publish_no_replace',
+                 'directory-sync': '_sync_directory'}[failure]
+    touched = []
+
+    def write(path, *args, **kwargs):
+        if path != output:
+            return original_write(path, *args, **kwargs)
+        with monkeypatch.context() as context:
+            owner = store_module.os if failure == 'fsync' else store_module
+            original = getattr(owner, operation)
+
+            def failed(*op_args, **op_kwargs):
+                if failure == 'directory-sync' and op_args[0] != output.parent:
+                    return original(*op_args, **op_kwargs)
+                # Exercise the real flush or real directory sync first. A
+                # publish fault must happen before any target exists.
+                if failure != 'publish':
+                    original(*op_args, **op_kwargs)
+                touched.append(True)
+                raise OSError('owned synthetic export I/O fault')
+
+            context.setattr(owner, operation, failed)
+            return original_write(path, *args, **kwargs)
+
+    monkeypatch.setattr(store_module, 'atomic_write', write)
+    assert main(arguments(store, output)) == 1
+    assert json.loads(capsys.readouterr().out)['error']['code'] == 'RUNTIME_ERROR'
+    assert touched
+    if failure == 'directory-sync':
+        assert output.read_bytes() == expected
+    else:
+        assert not output.exists()
+    assert not list(output.parent.glob('.' + output.name + '.*.staging'))
+    monkeypatch.setattr(store_module, 'atomic_write', original_write)
+    assert main(arguments(store, output)) == 0
+    assert output.read_bytes() == expected
+
+
+def test_identical_export_retry_does_not_replace_existing_inode(source, tmp_path, capsys):
+    store, value, grant, _ = source
+    output = tmp_path / 'identity.json'
+    expected = encode(export_evidence(store, value['study_id'], grant))
+    output.write_bytes(expected)
+    original = output.stat()
+    assert main(arguments(store, output)) == 0
+    assert output.read_bytes() == expected
+    final = output.stat()
+    assert (final.st_dev, final.st_ino, final.st_mtime_ns) == (
+        original.st_dev, original.st_ino, original.st_mtime_ns)
+    assert json.loads(capsys.readouterr().out)['bundle_hash'] == json.loads(expected)['bundle_hash']
