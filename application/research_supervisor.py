@@ -60,6 +60,7 @@ class ResearchSupervisor:
         from infrastructure.research_control import CheckpointExchange, ControlError, ENVIRONMENT
         channel = CheckpointExchange(work, attempt_id, deadline, maximum_result_bytes) if checkpoint_handler is not None else None
         saved_checkpoint = None
+        budget_stop_requested = False
         wrapper = Path(__file__).resolve().parents[1] / "infrastructure/research_worker.py"
         process, tree, deadline_monitor = None, None, None
         expired = threading.Event()
@@ -100,15 +101,15 @@ class ResearchSupervisor:
                     "confirmation": "native-job-or-process-group-no-running-descendants"})
                 tree_stop_recorded = True
         def collect_checkpoint():
-            nonlocal saved_checkpoint
-            if channel is None or saved_checkpoint is not None or past_deadline():
-                return
+            nonlocal saved_checkpoint, budget_stop_requested
+            if budget_stop_requested or channel is None or saved_checkpoint is not None or past_deadline():
+                return False
             try:
                 frame = channel.response()
             except ControlError as exc:
                 raise ResearchError("CONTRACT_MISMATCH", str(exc)) from exc
             if frame is None or past_deadline():
-                return
+                return False
             progress = frame["progress"]
             if (type(progress) is not dict or set(progress) != {"completed_steps", "total_steps", "throughput_per_second", "eta_seconds"}
                     or type(progress["completed_steps"]) is not int or type(progress["total_steps"]) is not int
@@ -121,23 +122,33 @@ class ResearchSupervisor:
             # saved journal. ACK must stay outside the scope: otherwise the
             # worker could accept a checkpoint before final corruption is seen.
             with self.store._read_transaction():
+                def check_current_budget():
+                    nonlocal budget_stop_requested
+                    budget_stop_requested |= self.budget.balance(run["arm_id"])["closed"]
+                check_current_budget()
+                # Hold/closure can change during actual publication. Recheck
+                # after the final uncached physical pass, before any ACK.
+                self.store._read_completion(check_current_budget, lambda: None)
+                if budget_stop_requested:
+                    return True
                 reference = checkpoint_handler(frame["state"], progress, deadline)
                 if past_deadline():
-                    return
+                    return True
                 if type(reference) is not dict or set(reference) != {"artifact_id", "resume_level"}:
                     raise ResearchError("CONTRACT_MISMATCH", "owner checkpoint receipt is invalid")
                 metadata = self.store.manifest("artifact-" + reference["artifact_id"])
                 if metadata["role"] != "checkpoint" or metadata["study_id"] != run["study_id"]:
                     raise ResearchError("CONTRACT_MISMATCH", "owner checkpoint artifact scope differs")
                 if past_deadline():
-                    return
+                    return True
                 candidate = {**reference, "progress": progress, "elapsed_ms": math.ceil((self.monotonic() - start) * 1000)}
                 self.store.append("CHECKPOINT_SAVED", {"attempt_id": attempt_id, "request_id": channel.request_id, **candidate})
-            if past_deadline():
-                return
+            if budget_stop_requested or past_deadline():
+                return True
             channel.acknowledge(reference["artifact_id"])
             if not past_deadline():
                 saved_checkpoint = candidate
+            return True
         self.store.transition(attempt_id, "RUNNING")
         try:
             with (work / "worker.log").open("xb") as log:
@@ -173,7 +184,14 @@ class ResearchSupervisor:
                     if expired.is_set() or now >= deadline:
                         outcome, error_code = "TIMEOUT", "TIMEOUT"
                         break
-                    if self.budget.balance(run["arm_id"])["closed"]:
+                    # A ready response checks current budget in its short fresh
+                    # save scope. With no response, retain the ordinary fresh
+                    # poll; no budget decision is borrowed by another iteration.
+                    budget_checked = collect_checkpoint()
+                    if past_deadline():
+                        outcome, error_code = "TIMEOUT", "TIMEOUT"
+                        break
+                    if budget_stop_requested or (not budget_checked and self.budget.balance(run["arm_id"])["closed"]):
                         outcome, error_code = "BUDGET_EXHAUSTED", "BUDGET_EXHAUSTED"
                         break
                     # Authority I/O may cross the soft or hard threshold. Do
@@ -191,6 +209,9 @@ class ResearchSupervisor:
                             "remaining_seconds": max(0, deadline - now), "request_id": request_id, "supported": channel is not None})
                         warned = True
                     collect_checkpoint()
+                    if budget_stop_requested:
+                        outcome, error_code = "BUDGET_EXHAUSTED", "BUDGET_EXHAUSTED"
+                        break
                     now = self.monotonic()
                     if now - last_logged >= 5:
                         self.store.append("HEARTBEAT", {"attempt_id": attempt_id, "monotonic_elapsed_ms": math.ceil((now - start) * 1000)})
@@ -207,6 +228,8 @@ class ResearchSupervisor:
                         pass
                 completed_code = process.poll()
                 collect_checkpoint()
+                if budget_stop_requested:
+                    outcome, error_code = "BUDGET_EXHAUSTED", "BUDGET_EXHAUSTED"
                 # A successful wrapper is not proof its descendants exited.
                 # Stop and confirm them before any owner-side result handling.
                 stop_tree()
@@ -214,6 +237,8 @@ class ResearchSupervisor:
                 if completed_code is not None:
                     if past_deadline() or completed_code == 124:
                         outcome, error_code = "TIMEOUT", "TIMEOUT"
+                    elif budget_stop_requested:
+                        outcome, error_code = "BUDGET_EXHAUSTED", "BUDGET_EXHAUSTED"
                     elif completed_code == 85 and saved_checkpoint is not None:
                         outcome, error_code = "FAILED", "CHECKPOINT_SAVED"
                     elif completed_code == 0 and result_path.is_file():
