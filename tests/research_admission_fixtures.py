@@ -37,7 +37,8 @@ def bind_fixture_execution(value, plugin, config=None, inputs=None):
 
 
 def admit_fixture(store, value, plugin, root, *, formal=False, package_visibility="synthetic",
-                  execution_config=None, execution_inputs=None, recovery_command_builder=None):
+                  execution_config=None, execution_inputs=None, recovery_command_builder=None,
+                  upstream_ids=()):
     bind_fixture_execution(value, plugin, execution_config, execution_inputs)
     content = b"explicit synthetic plugin input"
     (root / "plugin-input.bin").write_bytes(content)
@@ -71,7 +72,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
         "purposes": ["fit", "execute", "evaluate", "preview", "export", "resume"],
         "visibilities": sorted({"synthetic", package_visibility}), "block_ids": [b["block_id"] for b in blocks]}
     store.authorize(grant)
-    upstream = audit_inputs(ROOT, ())
+    upstream = audit_inputs(ROOT, tuple(upstream_ids))
     payload = {"synthetic_adapter": plugin.plugin_id}
     package = {"schema_version": "pirc25-package-v1", "kind": "PropagationResult",
         "study_id": value["study_id"], "visibility": package_visibility,
@@ -96,7 +97,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
     reference = store.publish("package-" + digest(package), package)
     value["admission"] = {"mode": "formal" if formal else "fixture", "protocol_id": "inputs",
         "authorization_id": grant["authorization_id"], "package_hash": reference,
-        "upstream_ids": [], "upstream_hash": upstream["manifest_hash"], "purpose": "evaluate" if formal else "fit"}
+        "upstream_ids": list(upstream_ids), "upstream_hash": upstream["manifest_hash"], "purpose": "evaluate" if formal else "fit"}
     return grant
 
 
