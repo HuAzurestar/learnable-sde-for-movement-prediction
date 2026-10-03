@@ -53,7 +53,9 @@ class BudgetLedger:
 
     def reserve(self, attempt_id: str, budget: BudgetSpec, *, worker_slot=0):
         budget.validate()
-        with self.store.lock():
+        # Reuse only a verified prefix under the same short writer lock. The
+        # final uncached physical pass precedes returning a funded reservation.
+        with self.store._read_transaction():
             if (self.store.path / "recovery-hold.json").exists():
                 raise ResearchError("RECOVERY_REQUIRED", "authoritative recovery holds all budgets for reconciliation")
             attempts = self.store._attempts()
@@ -92,7 +94,7 @@ class BudgetLedger:
             return data
 
     def settle(self, reservation_id: str, elapsed_ms: int | None, *, outcome: str):
-        with self.store.lock():
+        with self.store._read_transaction():
             return self._settle(reservation_id, elapsed_ms, outcome=outcome)
 
     def _settle(self, reservation_id: str, elapsed_ms: int | None, *, outcome: str):
@@ -122,7 +124,7 @@ class BudgetLedger:
         An operator must attest whole-tree stop for any possibly launched attempt.
         The OS probe is an additional veto, not a replacement for that evidence.
         """
-        with self.store.lock():
+        with self.store._read_transaction():
             reservations, _ = self._state()
             if reservation_id not in reservations:
                 raise ResearchError("MISSING_INPUT", "reservation missing")

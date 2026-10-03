@@ -38,7 +38,9 @@ class ResearchQueue:
             "resource": resource, "dispatch_id": uuid.uuid4().hex}, "queue-" + reservation["reservation_id"])
 
     def claim(self, reservation_id):
-        with self.store.lock():
+        # Each claim gets a new physically verified scope, not a worker-lifetime
+        # lock or a cached budget. Duplicate/FIFO/rotation decisions stay atomic.
+        with self.store._read_transaction():
             if (self.store.path / "recovery-hold.json").exists():
                 raise ResearchError("RECOVERY_REQUIRED", "queue held for authoritative reconciliation")
             reservations, closed = BudgetLedger(self.store)._state()
