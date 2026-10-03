@@ -17,6 +17,7 @@ from infrastructure.research_store import ResearchError, digest, encode
 from tests.research_admission_fixtures import attach_foreign_model
 from tests.test_research_admission_chain import prepared
 from tests.test_research_evidence import setup
+from tests.test_research_metadata_authorization import corrupt_grant_after_final_physical
 
 
 @pytest.fixture
@@ -55,6 +56,44 @@ def source(tmp_path):
 def bundles(store):
     return [event for event in store.events() if event['event_kind'] == 'MANIFEST'
             and event['payload']['object_id'].startswith('bundle-')]
+
+
+@pytest.mark.parametrize('operation', ['export-empty-matrix', 'external-publication-guard'])
+def test_grant_change_after_actual_final_physical_blocks_metadata_only_export(tmp_path, monkeypatch, operation):
+    store, value, grant = setup(tmp_path)
+    ready = []
+    if operation == 'export-empty-matrix':
+        original = store.publish
+
+        def publish(object_id, payload):
+            result = original(object_id, payload)
+            if object_id.startswith('bundle-'):
+                ready.append(True)
+            return result
+
+        monkeypatch.setattr(store, 'publish', publish)
+    else:
+        bundle = export_evidence(store, value['study_id'], grant)
+        original = store._manifest
+
+        def metadata(object_id):
+            result = original(object_id)
+            if object_id == 'bundle-' + bundle['bundle_hash']:
+                ready.append(True)
+            return result
+
+        monkeypatch.setattr(store, '_manifest', metadata)
+    touched = corrupt_grant_after_final_physical(store, grant, ready, monkeypatch)
+    with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+        if operation == 'export-empty-matrix':
+            export_evidence(store, value['study_id'], grant)
+        else:
+            evidence_module.authorize_evidence_publication(store, bundle, grant)
+    assert ready and touched
+    assert store.events()[-1]['event_kind'] == 'DISCLOSURE_DENIED'
+    assert len(bundles(store)) == 1  # Preserve the authorized private candidate.
+    assert not store.attempts()
+    assert store._read_snapshot() is None
 
 
 def test_valid_export_preserves_matrix_metrics_cost_and_idempotent_source(source, permission_clock):

@@ -49,6 +49,71 @@ def permission_clock(monkeypatch):
     return expired
 
 
+def corrupt_grant_after_final_physical(store, grant, ready, monkeypatch):
+    original = store._events
+    touched = []
+
+    def physical():
+        result = original()
+        if ready and store._read_snapshot() is None and not touched:
+            touched.append(True)
+            path = store.path / 'manifests' / ('authorization-' + grant['authorization_id'] + '.json')
+            path.write_bytes(encode({**grant, 'purposes': []}))
+        return result
+
+    monkeypatch.setattr(store, '_events', physical)
+    return touched
+
+
+@pytest.mark.parametrize('view', ['study', 'run', 'comparison', 'run-detail'])
+def test_metadata_grant_change_after_actual_final_physical_cannot_return(metadata, monkeypatch, view):
+    store, _, query, run, _ = metadata
+    grant = store.manifest('authorization-ui')
+    original = query._objects
+    ready = []
+
+    def objects(*args, **kwargs):
+        result = original(*args, **kwargs)
+        ready.append(True)
+        return result
+
+    monkeypatch.setattr(query, '_objects', objects)
+    touched = corrupt_grant_after_final_physical(store, grant, ready, monkeypatch)
+    with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+        query.run(run) if view == 'run-detail' else query.list(view)
+    assert ready and touched
+    assert store.events()[-1]['event_kind'] == 'DISCLOSURE_DENIED'
+    assert store._read_snapshot() is None
+
+
+@pytest.mark.parametrize('endpoint', ['/api/studies', '/api/runs', '/api/comparisons', 'run-detail'])
+def test_http_grant_change_after_actual_final_physical_is_403(tmp_path, monkeypatch, endpoint):
+    with service(tmp_path) as (store, value, server):
+        run = store.register_run(value['study_id'], value['cells'][0])
+        visible_comparison(store, value)
+        if endpoint == 'run-detail':
+            endpoint = '/api/runs/' + run
+        assert request(server, endpoint)[0] == 200
+        grant = store.manifest('authorization-ui')
+        original = ResearchQuery._objects
+        ready = []
+
+        def objects(query, *args, **kwargs):
+            result = original(query, *args, **kwargs)
+            ready.append(True)
+            return result
+
+        monkeypatch.setattr(ResearchQuery, '_objects', objects)
+        touched = corrupt_grant_after_final_physical(store, grant, ready, monkeypatch)
+        status, _, content = request(server, endpoint)
+        assert ready and touched
+        assert status == 403, content
+        assert set(json.loads(content)) == {'error'}
+        assert json.loads(content)['error']['code'] == 'UNAUTHORIZED_DATA'
+        assert run.encode() not in content
+        assert store.events()[-1]['event_kind'] == 'DISCLOSURE_DENIED'
+
+
 @pytest.mark.parametrize('kind', ['study', 'run', 'comparison'])
 def test_valid_metadata_query_retains_original_scope_and_values(metadata, permission_clock, kind):
     store, value, query, run, package = metadata
