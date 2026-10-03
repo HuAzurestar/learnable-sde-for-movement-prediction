@@ -2,6 +2,7 @@
 
 import hashlib
 from pathlib import Path
+import sys
 import tracemalloc
 
 import pytest
@@ -96,6 +97,42 @@ def test_real_legacy_provider_accepts_exact_valid_input_larger_than_comparison_c
         assert all(0 <= row["size"] <= 1024 * 1024 for row in reads)
     assert reads and handles == [True]
     assert store.events()[-1]["event_kind"] == "READ_COMPLETED"
+
+
+def test_streaming_verify_releases_consumed_chunk_before_next_real_read(tmp_path, monkeypatch):
+    content = b"synthetic verified chunk\n" * ((2 * 1024 * 1024) // 25 + 1)
+    target = tmp_path / "chunks.bin"
+    target.write_bytes(content)
+    store = ResearchStore(tmp_path, "chunk-lifetime", initialize=True)
+    protocol = {"schema_version": "pirc25-data-protocol-v1", "protocol_id": "chunks", "study_id": "synthetic",
+        "blocks": [{"block_id": "block", "dataset_id": "fixture", "release_id": "v1",
+            "split_role": "train", "fit_scope": True, "path": "chunks.bin", "sha256": hashlib.sha256(content).hexdigest()}]}
+    ledger = EvaluationExposureLedger(store)
+    ledger.register_protocol(protocol, digest(protocol))
+    grant = {"authorization_id": "chunks-grant", "study_id": "synthetic", "expires_at": "2099-01-01T00:00:00+00:00",
+        "evidence_hash": digest("synthetic chunk permission"), "protocol_hash": digest(protocol),
+        "purposes": ["fit"], "visibilities": ["synthetic"], "block_ids": ["block"]}
+    store.authorize(grant)
+    retained = []
+
+    def before_read(stream, size):
+        if size <= 1:
+            return
+        frame = sys._getframe(1)
+        try:
+            while frame is not None and frame.f_code is not EvaluationExposureLedger._read.__code__:
+                frame = frame.f_back
+            assert frame is not None, "actual provider verification frame missing"
+            retained.append(len(frame.f_locals.get("chunk", b"")))
+        finally:
+            del frame  # Do not retain the real frame or its input in the observer.
+
+    reads, handles = observe_file(monkeypatch, target, before_read=before_read)
+    assert ledger.verify("chunks", "block", purpose="fit", authorization_id="chunks-grant", data_root=tmp_path) == {
+        "sha256": hashlib.sha256(content).hexdigest(), "size_bytes": len(content)}
+    assert len(retained) >= 2 and all(value == 0 for value in retained), retained
+    assert sum(row["bytes"] for row in reads) == len(content) and handles == [True]
+    assert all(row["size"] <= 1024 * 1024 for row in reads)
 
 
 @pytest.mark.parametrize("purpose", PURPOSES)
