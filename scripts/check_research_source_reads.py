@@ -158,12 +158,15 @@ class NativeRootParents(unittest.TestCase):
             (outside / "data" / target.name).write_bytes(target.read_bytes())
             def redirect():
                 parent.rename(base / "original")
-                parent.symlink_to(outside, target_is_directory=True)
+                # Moving the original directory preserves both file and root
+                # inode. Namespace verification must still deny its redirect.
+                parent.symlink_to(base / "original" if scenario == "open_original" else outside,
+                    target_is_directory=True)
             try:
                 with ExitStack() as patches:
                     observer = SimpleNamespace(setattr=lambda obj, name, value: patches.enter_context(patch.object(obj, name, value)))
                     reads, _ = observe_file(observer, target,
-                        before_open=redirect if scenario == "open" else None)
+                        before_open=redirect if scenario in {"open", "open_original"} else None)
                     if scenario == "initial":
                         redirect()
                     files = importlib.import_module("infrastructure.research_files")
@@ -181,7 +184,7 @@ class NativeRootParents(unittest.TestCase):
                     parent.unlink()
 
 
-for scenario in ("normal", "normal_dotdot", "initial", "open"):
+for scenario in ("normal", "normal_dotdot", "initial", "open", "open_original"):
     def check(self, scenario=scenario):
         self.exercise(scenario)
     if os.name == "nt" and scenario not in {"normal", "normal_dotdot"}:
