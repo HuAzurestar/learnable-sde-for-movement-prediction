@@ -65,7 +65,8 @@ def test_corrupt_pre_grown_provider_does_not_materialize_entire_input(tmp_path, 
     assert handles == [True] and store.events()[-1]["event_kind"] == "READ_FAILED"
 
 
-def test_real_legacy_provider_accepts_exact_valid_input_larger_than_comparison_cap(tmp_path, monkeypatch):
+@pytest.mark.parametrize("operation", ["read", "verify"])
+def test_real_legacy_provider_accepts_exact_valid_input_larger_than_comparison_cap(tmp_path, monkeypatch, operation):
     content = b"synthetic large authorized block\n" * ((17 * 1024 * 1024) // 33 + 1)
     target = tmp_path / "large.bin"
     target.write_bytes(content)
@@ -80,7 +81,53 @@ def test_real_legacy_provider_accepts_exact_valid_input_larger_than_comparison_c
         "purposes": ["fit"], "visibilities": ["synthetic"], "block_ids": ["large-block"]}
     store.authorize(grant)
     reads, handles = observe_file(monkeypatch, target)
-    actual = ledger.read("large", "large-block", purpose="fit", authorization_id="large-grant", data_root=tmp_path)
-    assert len(actual) > 16 * 1024 * 1024 and actual == content
+    tracemalloc.start()
+    try:
+        actual = getattr(ledger, operation)("large", "large-block", purpose="fit", authorization_id="large-grant", data_root=tmp_path)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert len(content) > 16 * 1024 * 1024
+    if operation == "read":
+        assert actual == content
+    else:
+        assert actual == {"sha256": hashlib.sha256(content).hexdigest(), "size_bytes": len(content)}
+        assert peak < 4 * 1024 * 1024, "verification materialized a legitimate whole large input"
+        assert all(0 <= row["size"] <= 1024 * 1024 for row in reads)
     assert reads and handles == [True]
     assert store.events()[-1]["event_kind"] == "READ_COMPLETED"
+
+
+@pytest.mark.parametrize("purpose", PURPOSES)
+def test_streaming_verify_keeps_actual_role_grant_and_three_event_journal(tmp_path, monkeypatch, purpose):
+    store, ledger, grant, content = provider_source(tmp_path, purpose)
+    reads, handles = observe_file(monkeypatch, tmp_path / "block.bin")
+    assert ledger.verify("reserved", "test-block", purpose=purpose,
+        authorization_id=grant["authorization_id"], data_root=tmp_path) == {
+            "sha256": hashlib.sha256(content).hexdigest(), "size_bytes": len(content)}
+    assert reads and handles == [True]
+    assert all(0 <= row["size"] <= len(content) for row in reads), "verification took materialization pass"
+    assert [event["event_kind"] for event in store.events()][-3:] == ["EXPOSURE_ALLOWED", "READ_STARTED", "READ_COMPLETED"]
+
+
+@pytest.mark.parametrize("formal", [False, True])
+def test_actual_admission_streams_real_input_and_retains_consumer_receipt(tmp_path, monkeypatch, formal):
+    from application.research_admission import AdmissionGate
+    from tests.test_research_admission_chain import prepared
+
+    store, value, registry, _ = prepared(tmp_path, formal=formal)
+    store.register(value, digest(value))
+    cell = value["cells"][0]
+    attempt = store.new_attempt(store.register_run(value["study_id"], cell))
+    binding = cell["execution"]
+    plugin = registry.resolve(cell["plugin_id"], cell["capability"],
+        version=binding["component_version"], entry_hash=binding["registry_entry_hash"])
+    target = tmp_path / "plugin-input.bin"
+    size = target.stat().st_size
+    reads, handles = observe_file(monkeypatch, target)
+    receipt = AdmissionGate(store).prepare(value, cell, plugin, attempt)
+    assert reads and handles == [True]
+    assert all(0 <= row["size"] <= size for row in reads), "actual admission retained unused input materialization"
+    assert receipt["input_evidence"][-1]["payload"]["attempt_id"] == attempt
+    assert receipt["input_evidence"][-1]["payload"]["entrypoint"] == "shared-admission"
+    assert store.events()[-1]["event_kind"] == "ADMISSION"

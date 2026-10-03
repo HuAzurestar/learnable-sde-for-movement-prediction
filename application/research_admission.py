@@ -222,9 +222,9 @@ class AdmissionGate:
             root = grant.get("data_root")
             if not isinstance(root, str) or not Path(root).is_absolute():
                 raise ResearchError("UNAUTHORIZED_DATA", "execution needs an explicit authorized data root")
-            # The same read gate verifies real content before invoking a plugin;
-            # no 'qualified' string can replace this exposure receipt.
-            EvaluationExposureLedger(self.store).read(protocol["protocol_id"], cell["block_id"], purpose=purpose,
+            # The same read gate streams real content before invoking a plugin;
+            # retain its exposure receipt, not an unused whole input allocation.
+            EvaluationExposureLedger(self.store).verify(protocol["protocol_id"], cell["block_id"], purpose=purpose,
                 authorization_id=grant["authorization_id"], data_root=Path(root),
                 consumer={"attempt_id": attempt_id, "run_id": attempt["run_id"], "entrypoint": "shared-admission"})
             reads = [event for event in self.store.events() if event["event_kind"] == "READ_COMPLETED"

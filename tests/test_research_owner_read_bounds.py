@@ -6,6 +6,7 @@ import pytest
 
 from infrastructure.research_store import ResearchStore, ResearchError, digest
 from tests.test_research_store import spec
+from tests.research_file_observation import observe_file
 
 
 def prepared(tmp_path, content=b'{"synthetic":true}'):
@@ -28,35 +29,11 @@ def validate(store, artifact, attempt, content, operation):
 
 def observe(monkeypatch, target, *, grow_after_open=False):
     original = Path.open
-    reads = []
-
-    class Stream:
-        def __init__(self, actual):
-            self.actual = actual
-
-        def __enter__(self):
-            self.actual.__enter__()
-            return self
-
-        def __exit__(self, *args):
-            return self.actual.__exit__(*args)
-
-        def __getattr__(self, name):
-            return getattr(self.actual, name)
-
-        def read(self, size=-1):
-            if grow_after_open:
-                with original(target, "ab") as writer:
-                    writer.write(b"x" * 8192)
-            reads.append(size)
-            return self.actual.read(size)
-
-    def open_file(path, *args, **kwargs):
-        actual = original(path, *args, **kwargs)
-        mode = args[0] if args else kwargs.get("mode", "r")
-        return Stream(actual) if path == target and mode == "rb" else actual
-
-    monkeypatch.setattr(Path, "open", open_file)
+    def grow(*_):
+        if grow_after_open:
+            with original(target, "ab") as writer:
+                writer.write(b"x" * 8192)
+    reads, _ = observe_file(monkeypatch, target, before_read=grow)
     return reads
 
 
@@ -67,7 +44,7 @@ def test_actual_owner_validation_uses_explicit_frozen_read_bound(tmp_path, monke
     reads = observe(monkeypatch, target)
     result = validate(store, artifact, attempt, content, operation)
     assert result["state"] == "SUCCEEDED" if operation == "success" else result == artifact
-    assert reads and all(0 <= size <= len(content) + 1 for size in reads), "owner validation allocates without frozen size"
+    assert reads and all(0 <= row["size"] <= len(content) + 1 for row in reads), "owner validation allocates without frozen size"
     assert target.read_bytes() == content
 
 
@@ -92,7 +69,7 @@ def test_growth_after_owner_handle_stat_stays_bounded_and_cannot_publish(tmp_pat
     reads = observe(monkeypatch, target, grow_after_open=True)
     with pytest.raises(ResearchError, match="CORRUPT_ARTIFACT"):
         validate(store, artifact, attempt, content, operation)
-    assert reads and all(0 <= size <= len(content) + 1 for size in reads)
+    assert reads and all(0 <= row["size"] <= len(content) + 1 for row in reads)
     assert store.events() == before and store.attempts()[attempt]["state"] == "RUNNING"
 
 

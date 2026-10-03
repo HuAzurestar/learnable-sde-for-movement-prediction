@@ -13,6 +13,7 @@ from application.research_data import EvaluationExposureLedger
 from infrastructure.research_store import ResearchStore, ResearchError, digest, encode
 from tests.test_research_input_gates import final_eval, freeze_evidence
 from tests.test_research_recovery import setup as recovery_setup
+from tests.research_file_observation import observe_file
 
 
 @pytest.fixture
@@ -181,20 +182,13 @@ def provider_source(tmp_path, purpose):
 
 @pytest.mark.parametrize('purpose', ['fit', 'select', 'validate', 'evaluate'])
 @pytest.mark.parametrize('phase', ['EXPOSURE_ALLOWED', 'READ_STARTED', 'READ_COMPLETED', 'grant:READ_STARTED'])
-def test_actual_data_provider_cannot_use_post_journal_stale_grant(tmp_path, monkeypatch, read_clock, purpose, phase):
+@pytest.mark.parametrize('operation', ['read', 'verify'])
+def test_actual_data_provider_cannot_use_post_journal_stale_grant(tmp_path, monkeypatch, read_clock, purpose, phase, operation):
     store, ledger, grant, _ = provider_source(tmp_path, purpose)
     touched = fault_after_journal(store, grant, phase, read_clock, monkeypatch)
-    original = Path.read_bytes
-    reads = []
-
-    def read(path):
-        if path == tmp_path / 'block.bin':
-            reads.append(True)
-        return original(path)
-
-    monkeypatch.setattr(Path, 'read_bytes', read)
+    _, reads = observe_file(monkeypatch, tmp_path / 'block.bin')
     with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
-        ledger.read('reserved', 'test-block', purpose=purpose,
+        getattr(ledger, operation)('reserved', 'test-block', purpose=purpose,
                     authorization_id=grant['authorization_id'], data_root=tmp_path)
     assert touched
     assert len(reads) == (1 if phase == 'READ_COMPLETED' else 0)
@@ -217,22 +211,14 @@ def test_valid_provider_read_keeps_role_scope_bytes_and_frozen_evidence(tmp_path
 @pytest.mark.parametrize('purpose', ['fit', 'select', 'validate', 'evaluate'])
 @pytest.mark.parametrize('fault', ['grant', 'expiry'])
 @pytest.mark.parametrize('outer', [False, True])
-def test_provider_revalidates_after_real_final_physical_validation(tmp_path, monkeypatch, read_clock, purpose, fault, outer):
+@pytest.mark.parametrize('operation', ['read', 'verify'])
+def test_provider_revalidates_after_real_final_physical_validation(tmp_path, monkeypatch, read_clock, purpose, fault, outer, operation):
     store, ledger, grant, _ = provider_source(tmp_path, purpose)
-    original = Path.read_bytes
-    reads = []
-
-    def read(path):
-        result = original(path)
-        if path == tmp_path / 'block.bin':
-            reads.append(True)
-        return result
-
-    monkeypatch.setattr(Path, 'read_bytes', read)
+    _, reads = observe_file(monkeypatch, tmp_path / 'block.bin')
     touched = fault_after_final_chain(store, grant, fault, reads, read_clock, monkeypatch)
     with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
         with store._read_transaction() if outer else nullcontext():
-            ledger.read('reserved', 'test-block', purpose=purpose,
+            getattr(ledger, operation)('reserved', 'test-block', purpose=purpose,
                         authorization_id=grant['authorization_id'], data_root=tmp_path)
     assert touched and len(reads) == 1
     assert store.events()[-1]['event_kind'] == 'EXPOSURE_DENIED'

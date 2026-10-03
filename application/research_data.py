@@ -7,6 +7,7 @@ import hashlib
 from pathlib import Path
 
 from infrastructure.research_store import ResearchError, ResearchStore, digest, identifier
+from infrastructure.research_files import opened_regular_file
 from .research_preregistration import PreregistrationGate, source_identity
 
 
@@ -76,6 +77,16 @@ class EvaluationExposureLedger:
 
     def read(self, protocol_id: str, block_id: str, *, purpose: str,
              authorization_id: str, data_root: Path, consumer=None) -> bytes:
+        return self._read(protocol_id, block_id, purpose=purpose, authorization_id=authorization_id,
+                          data_root=data_root, consumer=consumer, materialize=True)
+
+    def verify(self, protocol_id: str, block_id: str, *, purpose: str,
+               authorization_id: str, data_root: Path, consumer=None) -> dict:
+        """Verify actual admitted bytes without retaining an unused whole input."""
+        return self._read(protocol_id, block_id, purpose=purpose, authorization_id=authorization_id,
+                          data_root=data_root, consumer=consumer, materialize=False)
+
+    def _read(self, protocol_id, block_id, *, purpose, authorization_id, data_root, consumer, materialize):
         with self.store._read_transaction():
             protocol = self.store._manifest("protocol-" + identifier(protocol_id))
             selected = [b for b in protocol["blocks"] if b["block_id"] == block_id]
@@ -102,15 +113,34 @@ class EvaluationExposureLedger:
                 raise ResearchError("UNAUTHORIZED_DATA", "data purpose, protocol or grant mismatch")
             self._require_read_authority(protocol, block, purpose, authorization_id, grant, request)
             root = Path(data_root).resolve()
-            path = (root / block["path"]).resolve()
-            if Path(block["path"]).is_absolute() or not path.is_relative_to(root):
+            path = root / block["path"]
+            if Path(block["path"]).is_absolute() or not path.resolve().is_relative_to(root):
                 raise ResearchError("UNAUTHORIZED_DATA", "data path escapes authorized root")
             self.store._append("READ_STARTED", request)
             self._require_read_authority(protocol, block, purpose, authorization_id, grant, request)
             try:
-                content = path.read_bytes()
-                if hashlib.sha256(content).hexdigest() != block["sha256"]:
-                    raise ResearchError("CORRUPT_ARTIFACT", "data content differs from protocol")
+                with opened_regular_file(root, path) as (stream, size, verify_identity):
+                    # Legacy protocols freeze a digest, not necessarily a size.
+                    # Verify with bounded memory before materializing any input;
+                    # legitimate large byte-return reads remain supported.
+                    remaining, hasher = size, hashlib.sha256()
+                    while remaining:
+                        chunk = stream.read(min(1024 * 1024, remaining))
+                        if not chunk:
+                            raise ResearchError("CORRUPT_ARTIFACT", "data shrank during verification")
+                        remaining -= len(chunk)
+                        hasher.update(chunk)
+                    if stream.read(1) or hasher.hexdigest() != block["sha256"]:
+                        raise ResearchError("CORRUPT_ARTIFACT", "data content differs from protocol")
+                    verify_identity()
+                    content = {"sha256": hasher.hexdigest(), "size_bytes": size}
+                    if materialize:
+                        self._require_read_authority(protocol, block, purpose, authorization_id, grant, request)
+                        verify_identity()
+                        stream.seek(0)
+                        content = stream.read(size + 1)
+                        if len(content) != size or hashlib.sha256(content).hexdigest() != block["sha256"]:
+                            raise ResearchError("CORRUPT_ARTIFACT", "data changed during materialization")
             except (OSError, ResearchError):
                 self.store._append("READ_FAILED", request)
                 raise

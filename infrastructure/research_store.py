@@ -566,17 +566,11 @@ class ResearchStore:
         size = metadata.get("size_bytes")
         if type(size) is not int or size < 0 or metadata.get("sha256") != artifact_id:
             raise ResearchError("CORRUPT_ARTIFACT", "artifact frozen size or hash is invalid")
-        path = (self.path / "artifacts" / artifact_id).resolve()
-        if not path.is_relative_to((self.path / "artifacts").resolve()):
-            raise ResearchError("UNAUTHORIZED_DATA", "artifact path escapes root")
+        from .research_files import opened_regular_file
+        root = (self.path / "artifacts").resolve()
+        path = root / artifact_id
         try:
-            information = path.stat()
-            if not stat.S_ISREG(information.st_mode) or information.st_size != size:
-                raise ResearchError("CORRUPT_ARTIFACT", "artifact frozen size differs before read")
-            with path.open("rb") as stream:
-                information = os.fstat(stream.fileno())
-                if not stat.S_ISREG(information.st_mode) or information.st_size != size:
-                    raise ResearchError("CORRUPT_ARTIFACT", "artifact frozen size differs at open")
+            with opened_regular_file(root, path, expected_size=size) as (stream, _, _):
                 # A changed file cannot turn a previously admitted small
                 # artifact into an unbounded read. The extra byte detects
                 # growth even after the open-handle size check.

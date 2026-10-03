@@ -97,11 +97,10 @@ def test_r3_rejects_invalid_evidence_binding_before_data_access(tmp_path, mutati
     ledger = EvaluationExposureLedger(store)
     ledger.register_protocol(protocol, digest(protocol))
     authorize(store, protocol)
-    original = Path.read_bytes
-    def forbid_data(path):
-        assert path.name != "block.bin", "gate touched data before rejecting"
-        return original(path)
-    monkeypatch.setattr(Path, "read_bytes", forbid_data)
+    from tests.research_file_observation import observe_file
+    def forbid_data():
+        pytest.fail("gate opened data before rejecting")
+    observe_file(monkeypatch, tmp_path / "block.bin", before_open=forbid_data)
     with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
         read(ledger, tmp_path)
     assert store.events()[-1]["event_kind"] == "EXPOSURE_DENIED"
@@ -175,11 +174,10 @@ def test_r3_audit_failure_prevents_read(tmp_path, monkeypatch):
             raise OSError("audit unavailable")
         return append(kind, *args, **kwargs)
     monkeypatch.setattr(store, "_append", fail)
-    original = Path.read_bytes
-    def forbid_data(path):
-        assert path.name != "block.bin"
-        return original(path)
-    monkeypatch.setattr(Path, "read_bytes", forbid_data)
+    from tests.research_file_observation import observe_file
+    def forbid_data():
+        pytest.fail("failed audit opened data")
+    observe_file(monkeypatch, tmp_path / "block.bin", before_open=forbid_data)
     with pytest.raises(OSError, match="audit unavailable"):
         read(ledger, tmp_path)
 

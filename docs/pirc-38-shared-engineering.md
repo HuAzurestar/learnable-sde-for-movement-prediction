@@ -243,6 +243,17 @@ and explicit test authorization. Allowed/denied access and read start are logged
 before reads; interrupted reads remain potentially exposed. Preview does not imply
 export permission. This cannot detect unrelated tools bypassing controlled entry.
 
+Raw artifact and data-provider reads use shared regular opened handles, reject
+late path replacement and POSIX symlink/FIFO races before bytes, and verify file
+identity and the authorized root again after the complete read. Artifact bytes
+retain their frozen-size-plus-one bound. Legacy providers first verify their
+frozen digest with at most 1 MiB per read and constant auxiliary memory; a valid
+byte-return read then materializes through the same handle and rechecks its hash.
+There is no new blanket data-size cap. Execution admission uses the same streamed
+verification and durable consumer receipt without materializing unused inputs.
+Native `scripts/check_research_source_reads.py` tests the actual APIs and real
+Path/descriptor reads on Windows and Linux; it is not full platform acceptance.
+
 Raw artifact and data-provider reads rehash the immutable grant and its current
 scope after allowed/start/completed journals, before opening bytes and before
 returning them. Provider checks retain role, fit scope and frozen test/history
