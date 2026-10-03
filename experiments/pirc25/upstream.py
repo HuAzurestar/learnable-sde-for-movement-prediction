@@ -17,6 +17,7 @@ from typing import Any
 from infrastructure.research_files import opened_regular_file
 from infrastructure.research_json import read_json
 from infrastructure.research_store import ResearchError
+from .snapshot import UpstreamSnapshot, resolve_snapshot
 
 
 class AdmissionError(ValueError):

@@ -17,6 +17,7 @@ JSON_BLOCK_BYTES = 64 * 1024
 _SPACE = re.compile(r"[ \t\r\n]*")
 _STRING_END = re.compile(r'["\\\x00-\x1f]')
 _DIGITS = re.compile(r"[0-9]*")
+_DISCARDED_SCALAR = object()
 
 
 def _text_chunks(stream, size, first, encoding):
@@ -68,34 +69,46 @@ class _Cursor:
             if self.index < len(self.text):
                 return
 
-    def string(self, build):
+    def string(self, build, *, max_chars=None):
         assert self.take() == '"'
         pieces = ['"'] if build else None
+        captured, discarded = 1, False
+        def collect(value):
+            nonlocal captured, discarded
+            if build and not discarded:
+                captured += len(value)
+                if max_chars is not None and captured > max_chars:
+                    pieces.clear()
+                    discarded = True
+                else:
+                    pieces.append(value)
         while self.peek() is not None:
             found = _STRING_END.search(self.text, self.index)
             end = found.start() if found else len(self.text)
             if build:
-                pieces.append(self.text[self.index:end])
+                collect(self.text[self.index:end])
             self.index = end
             if not found:
                 continue
             character = self.take()
             if build:
-                pieces.append(character)
+                collect(character)
             if character == '"':
+                if discarded:
+                    return _DISCARDED_SCALAR
                 return json.loads("".join(pieces)) if build else None
             if character != "\\":
                 self.error()
             escape = self.take()
             if build:
-                pieces.append(escape)
+                collect(escape)
             if escape == "u":
                 for _ in range(4):
                     digit = self.take()
                     if digit not in "0123456789abcdefABCDEF":
                         self.error()
                     if build:
-                        pieces.append(digit)
+                        collect(digit)
             elif escape not in '"\\/bfnrt':
                 self.error()
         self.error()
@@ -106,25 +119,39 @@ class _Cursor:
                 self.error()
         return json.loads(spelling) if build else None
 
-    def digits(self, pieces):
+    def digits(self, pieces, *, collect=None):
         count = 0
         while self.peek() is not None:
             end = _DIGITS.match(self.text, self.index).end()
             count += end - self.index
-            if pieces is not None:
+            if collect is not None:
+                collect(self.text[self.index:end])
+            elif pieces is not None:
                 pieces.append(self.text[self.index:end])
             self.index = end
             if end < len(self.text):
                 return count
         return count
 
-    def number(self, build):
+    def number(self, build, *, max_chars=None):
         pieces = [] if build else None
+        captured, discarded = 0, False
+        def collect(value):
+            nonlocal captured, discarded
+            if build and not discarded:
+                captured += len(value)
+                if max_chars is not None and captured > max_chars:
+                    pieces.clear()
+                    discarded = True
+                else:
+                    pieces.append(value)
+        def digits():
+            return self.digits(None, collect=collect if build else None)
 
         def take():
             character = self.take()
             if build:
-                pieces.append(character)
+                collect(character)
 
         if self.peek() == "-":
             take()
@@ -133,32 +160,37 @@ class _Cursor:
                 return json.loads("-Infinity") if build else None
         if self.peek() == "0":
             take()
-            digits = 1
+            digit_count = 1
         elif self.peek() is not None and "1" <= self.peek() <= "9":
-            digits = self.digits(pieces)
+            digit_count = digits()
         else:
             self.error()
         floating = False
         if self.peek() == ".":
             take()
             floating = True
-            if not self.digits(pieces):
+            if not digits():
                 self.error()
         if self.peek() in ("e", "E"):
             take()
             floating = True
             if self.peek() in ("+", "-"):
                 take()
-            if not self.digits(pieces):
+            if not digits():
                 self.error()
         limit = getattr(sys, "get_int_max_str_digits", lambda: 0)()
-        if not floating and limit and digits > limit:
+        if not floating and limit and digit_count > limit:
             raise ValueError("JSON integer exceeds current interpreter conversion limit")
+        if discarded:
+            return _DISCARDED_SCALAR
         return json.loads("".join(pieces)) if build else None
 
 
 def _parse(chunks, *, build):
-    cursor = _Cursor(chunks)
+    return _parse_cursor(_Cursor(chunks), build=build)
+
+
+def _parse_cursor(cursor, *, build, consume_all=True):
     keys = {}  # Match stdlib's document-local object-key sharing, not a cache.
     # Frame = [grammar state, decoded container/value, pending object key].
     # The validation pass retains states only, not keys, strings or containers.
@@ -184,7 +216,7 @@ def _parse(chunks, *, build):
         character, frame = cursor.peek(), frames[-1]
         state = frame[0]
         if state == "root-done":
-            if character is not None:
+            if consume_all and character is not None:
                 cursor.error()
             return frame[1]
         if (state in ("object-first", "object-end") and character == "}"
@@ -239,3 +271,57 @@ def read_json(stream, size, *, encoding=None, verify_identity=None):
     stream.seek(0)
     first = stream.read(min(JSON_BLOCK_BYTES, size + 1))
     return _parse(_text_chunks(stream, size, first, encoding), build=True)
+
+
+def read_metadata_header(stream, size, expected_fields):
+    """Syntax-check JSON while selecting only bounded top-level scalar fields.
+
+    Expected fields are frozen schema/status/identity metadata, not a request
+    for a file payload. Oversized or non-scalar selected values are represented
+    by a private sentinel and must fail the caller's exact typed comparison.
+    Unselected keys/values are parsed without constructing decoded objects.
+    """
+    first = stream.read(min(JSON_BLOCK_BYTES, size + 1))
+    cursor = _Cursor(_text_chunks(stream, size, first, 'utf-8'))
+    cursor.whitespace()
+    if cursor.take() != '{':
+        cursor.error()
+    result = {}
+    key_limit = 12 * max((len(key) for key in expected_fields), default=0) + 2
+    cursor.whitespace()
+    if cursor.peek() != '}':
+        while True:
+            if cursor.peek() != '"':
+                cursor.error()
+            key = cursor.string(True, max_chars=key_limit)
+            cursor.whitespace()
+            if cursor.take() != ':':
+                cursor.error()
+            cursor.whitespace()
+            if key not in expected_fields:
+                _parse_cursor(cursor, build=False, consume_all=False)
+            else:
+                character, expected = cursor.peek(), expected_fields[key]
+                if character == '"':
+                    value = cursor.string(True, max_chars=12 * max(64, len(str(expected))) + 2)
+                elif character in ('t', 'f', 'n'):
+                    value = cursor.literal({'t': 'true', 'f': 'false', 'n': 'null'}[character], True)
+                elif character is not None and character in '-0123456789':
+                    value = cursor.number(True, max_chars=max(128, len(str(expected)) + 8))
+                else:
+                    _parse_cursor(cursor, build=False, consume_all=False)
+                    value = _DISCARDED_SCALAR
+                result[key] = value
+            cursor.whitespace()
+            character = cursor.take()
+            if character == '}':
+                break
+            if character != ',':
+                cursor.error()
+            cursor.whitespace()
+    else:
+        cursor.take()
+    cursor.whitespace()
+    if cursor.peek() is not None:
+        cursor.error()
+    return result

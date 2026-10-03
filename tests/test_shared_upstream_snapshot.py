@@ -1,6 +1,7 @@
 """Synthetic metadata snapshots, not real upstream acceptance or data grants."""
 from copy import deepcopy
 import hashlib
+import io
 import json
 from pathlib import Path
 import tracemalloc
@@ -9,6 +10,7 @@ import pytest
 
 import experiments.pirc25.upstream as upstream
 from infrastructure.research_store import ResearchStore, digest
+from infrastructure.research_json import read_metadata_header
 from tests.research_file_observation import observe_file
 
 
@@ -22,7 +24,8 @@ def snapshot_fixture(tmp_path, *, terrain=False):
     record = {'object_id': 'selection' if terrain else 'metadata', 'issue': 'synthetic-control',
               'acceptance_commit': hashlib.sha1(b'explicit synthetic acceptance control, not a real ref').hexdigest(),
               'code_sha': hashlib.sha1(b'explicit synthetic upstream code control').hexdigest(),
-              'schema_version': value['schema_version'], 'artifact_hash': hashlib.sha256(path.read_bytes()).hexdigest(),
+              'schema_version': value['schema_version'], 'artifact_id': 'synthetic-metadata-artifact',
+              'artifact_hash': hashlib.sha256(path.read_bytes()).hexdigest(),
               'artifact_size_bytes': path.stat().st_size, 'path': path.name, 'format': 'json-metadata',
               'role': 'metadata-only', 'kind': 'terrain-selection' if terrain else 'metadata',
               'data_hash': digest('synthetic dataset'), 'split_hash': digest('synthetic split'),
@@ -58,7 +61,7 @@ def test_full_snapshot_receipt_keeps_all_declared_identities_and_no_data_permiss
     result = resolve(manifest, tmp_path, accepted)
     assert not result['rejected_inputs'] and result['data_authorization'] == 'none'
     actual = result['resolved'][0]
-    for field in ('issue', 'acceptance_commit', 'code_sha', 'schema_version', 'artifact_hash', 'artifact_size_bytes',
+    for field in ('issue', 'acceptance_commit', 'code_sha', 'schema_version', 'artifact_id', 'artifact_hash', 'artifact_size_bytes',
                   'data_hash', 'split_hash', 'fold_hash', 'feature_hash', 'selection_hash', 'license'):
         assert actual[field] == manifest['inputs'][0][field]
     assert actual['last_validated_at'] and actual['physical_size_bytes'] == path.stat().st_size
@@ -161,7 +164,7 @@ def test_large_actual_json_hash_and_schema_projection_do_not_allocate_whole_file
     record.update(artifact_hash=hasher.hexdigest() if valid else '0' * 64, artifact_size_bytes=path.stat().st_size)
     accepted[0]['input'] = deepcopy(record)
     reads = []
-    observe_file(monkeypatch, path, before_read=lambda size: reads.append(size))
+    observe_file(monkeypatch, path, before_read=lambda actual, size: reads.append(size))
     # Collection, fixture creation and observation helpers precede measurement.
     tracemalloc.start()
     try:
@@ -193,3 +196,95 @@ def test_existing_public_metadata_binding_control_remains_unchanged():
     root = Path(__file__).resolve().parents[1]
     result = upstream.audit_inputs(root, ('affine-4d',))
     assert result['data_authorization'] == 'none' and result['objects'][0]['sha256'] == upstream.PUBLIC_BINDINGS[2].sha256
+
+
+def test_snapshot_definition_and_identity_do_not_alias_mutable_callers(tmp_path):
+    _, manifest, accepted = snapshot_fixture(tmp_path)
+    snapshot = upstream.UpstreamSnapshot(manifest)
+    original = snapshot.snapshot_hash
+    manifest['inputs'][0]['code_sha'] = '0' * 40
+    detached = snapshot.definition
+    detached['inputs'][0]['license']['scope'] = 'not-a-metadata-license'
+    assert digest(snapshot.definition) == original
+    assert not snapshot.resolve(root=tmp_path, accepted_versions=accepted)['rejected_inputs']
+    with pytest.raises(AttributeError):
+        snapshot.snapshot_hash = '0' * 64
+
+
+def test_declared_wrong_size_is_refused_before_any_actual_file_bytes(tmp_path, monkeypatch):
+    path, manifest, accepted = snapshot_fixture(tmp_path)
+    manifest['inputs'][0]['artifact_size_bytes'] += 1
+    accepted[0]['input'] = deepcopy(manifest['inputs'][0])
+    reads, _ = observe_file(monkeypatch, path)
+    result = resolve(manifest, tmp_path, accepted)
+    assert result['rejected_inputs'][0]['code'] == 'IDENTITY_MISMATCH'
+    assert not reads
+
+
+def test_actual_earlier_input_change_during_later_input_io_rejects_only_its_cells(tmp_path, monkeypatch):
+    first, manifest, accepted = snapshot_fixture(tmp_path)
+    second = tmp_path / 'other.json'
+    second.write_bytes(first.read_bytes())
+    record = {**deepcopy(manifest['inputs'][0]), 'object_id': 'other', 'artifact_id': 'other-artifact', 'path': second.name}
+    manifest['inputs'].append(record)
+    manifest['cells'][1]['upstream_ids'] = ['other']
+    accepted.append({'status': 'accepted', 'input': deepcopy(record)})
+    changed = []
+    def mutate(actual, size):
+        if not changed:
+            changed.append(True)
+            first.write_bytes(first.read_bytes().replace(b'accepted-control', b'rejected-control'))
+    observe_file(monkeypatch, second, before_read=mutate)
+    result = resolve(manifest, tmp_path, accepted)
+    assert changed and result['rejected_inputs'][0]['object_id'] == 'metadata'
+    assert cells(result)['dependent']['status'] == 'rejected'
+    assert cells(result)['independent']['status'] == 'ready'
+    assert [record['object_id'] for record in result['resolved']] == ['other']
+
+
+def test_ambiguous_catalog_version_is_refused_only_for_its_dependents(tmp_path):
+    _, manifest, accepted = snapshot_fixture(tmp_path)
+    conflicting = deepcopy(accepted[0])
+    conflicting['input']['artifact_hash'] = '0' * 64
+    result = resolve(manifest, tmp_path, accepted + [conflicting])
+    assert result['rejected_inputs'][0]['code'] == 'UNACCEPTED_VERSION'
+    assert cells(result)['independent']['status'] == 'ready'
+
+
+def test_schema_checks_cannot_request_arbitrary_file_payload_as_metadata(tmp_path, monkeypatch):
+    path, manifest, accepted = snapshot_fixture(tmp_path)
+    manifest['inputs'][0]['metadata_checks']['payload'] = 'arbitrary file payload is not a schema header'
+    accepted[0]['input'] = deepcopy(manifest['inputs'][0])
+    reads, _ = observe_file(monkeypatch, path)
+    result = resolve(manifest, tmp_path, accepted)
+    assert result['rejected_inputs'][0]['code'] == 'IDENTITY_MISMATCH'
+    assert not reads
+
+
+@pytest.mark.parametrize('source,expected', [
+    ('{"schema_version":[],"schema_version":"v1","payload":{"x":[1,true,null]}}', {'schema_version': 'v1'}),
+    ('{"\\u0073chema_version":"v1","count":-0}', {'schema_version': 'v1', 'count': 0}),
+    (json.dumps({'schema_version': 'v1-日本-🙂'}), {'schema_version': 'v1-日本-🙂'}),
+])
+def test_actual_header_projection_preserves_scalar_escape_and_last_key_semantics(source, expected):
+    encoded = source.encode('utf-8')
+    assert read_metadata_header(io.BytesIO(encoded), len(encoded), expected) == expected
+
+
+@pytest.mark.parametrize('actual', [[], {}, [None], 'x' * (1024 * 1024)],
+                         ids=['array', 'object', 'nested-null', 'large-string'])
+def test_selected_non_scalar_or_large_string_is_not_confused_with_json_null(actual):
+    encoded = json.dumps({'schema_version': actual, 'payload': {'ignored': True}}).encode()
+    selected = read_metadata_header(io.BytesIO(encoded), len(encoded), {'schema_version': None})
+    assert selected['schema_version'] is not None
+
+
+@pytest.mark.parametrize('suffix', [b' trailing', b',', b' {}'])
+def test_actual_hash_bound_json_still_rejects_trailing_syntax(tmp_path, suffix):
+    path, manifest, accepted = snapshot_fixture(tmp_path)
+    path.write_bytes(path.read_bytes() + suffix)
+    record = manifest['inputs'][0]
+    record.update(artifact_hash=hashlib.sha256(path.read_bytes()).hexdigest(), artifact_size_bytes=path.stat().st_size)
+    accepted[0]['input'] = deepcopy(record)
+    result = resolve(manifest, tmp_path, accepted)
+    assert result['rejected_inputs'][0]['code'] == 'IDENTITY_MISMATCH'

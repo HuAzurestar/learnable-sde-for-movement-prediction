@@ -60,6 +60,36 @@ is not proof of the full parent read-check complexity contract.
 
 ### Execution admission and formal evidence
 
+`experiments.pirc25.upstream.UpstreamSnapshot` and
+`resolve_snapshot(manifest, root=..., accepted_versions=...)` implement the
+versioned metadata takeover API. A `pirc25-upstream-snapshot-v1` definition has
+`inputs`, `studies` with explicit `pirc22_cutover`, and `cells` with frozen
+`upstream_ids`. Each input records issue/acceptance commit/code SHA, artifact
+ID/raw SHA256/physical byte size/schema, data/split/fold/feature/selection hashes
+(or an explicit non-applicability reason), metadata-only license and frozen
+scalar schema/status checks. `source_branch` is display only, not identity.
+The external acceptance catalog must come from independently reconciled
+operator evidence; matching it does not authenticate a human decision.
+
+The resolver streams actual raw bytes through regular lexical-root handles,
+then syntax-checks JSON while projecting only schema/status/identity headers.
+It does not materialize unused large values or use a new arbitrary file-size
+cap. Exact raw byte identity is explicit in this new schema, not a replacement
+for the existing canonical-value public bindings. A changed checkout encoding
+needs its explicit accepted byte binding, not an inferred latest branch.
+Inputs stay pinned through the final batch boundary. `MISSING_ARTIFACT`,
+`IDENTITY_MISMATCH` and `UNACCEPTED_VERSION` reject only dependent cells, without
+fallback; PIRC-22 adoption requires the same immutable zero-final-eval selection.
+`snapshot.register(store, ...)` persists immutable normalized definition and
+content-addressed validation receipt, including the actual validation time.
+These are metadata only, never data grants or proof that a future read is safe.
+
+This API does not by itself close the parent takeover contract. Complete real
+accepted PIRC-19–22 field/license reconciliation and selected-cell execution,
+independent Paper and UI rejection integration remain required. Do not treat
+the historical `audit_inputs` binding as that complete receipt or label this
+standalone API validation as final engineering/scientific acceptance.
+
 `SharedRunner` and `SharedRecovery.resume` use `AdmissionGate` before invoking
 a command builder. A registered capability alone is not permission. The source
 tree code hash must match the registered spec. Reused legacy successes without
