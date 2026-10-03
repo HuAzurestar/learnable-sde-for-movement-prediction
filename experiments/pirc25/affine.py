@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 from infrastructure.research_store import digest
+from infrastructure.research_files import source_file_hash
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_VERSION = "shared-affine-synthetic-v1"
@@ -21,7 +21,7 @@ def code_hash():
     files = [ROOT / name for name in ("config.py", "numerics.py", "registry.py")]
     for directory in ("application", "data", "domain", "estimation", "evaluation", "experiments", "inference", "infrastructure", "models"):
         files.extend((ROOT / directory).rglob("*.py"))
-    return digest({path.relative_to(ROOT).as_posix(): hashlib.sha256(path.read_text(encoding="utf-8").encode()).hexdigest()
+    return digest({path.relative_to(ROOT).as_posix(): source_file_hash(ROOT, path)
                    for path in sorted(files)})
 
 

@@ -5,7 +5,9 @@ File identity is checked before any bytes and after the complete operation.
 """
 
 from contextlib import contextmanager
+import codecs
 import errno
+import hashlib
 import os
 from pathlib import Path
 import stat
@@ -64,3 +66,31 @@ def opened_regular_file(root, path, *, expected_size=None):
         verify_identity()
         yield stream, opened.st_size, verify_identity
         verify_identity()
+
+
+def source_file_hash(root, path, *, maximum_bytes=None):
+    """Stream the historical UTF-8/universal-newline source identity.
+
+    A caller-specific admission quota is optional; runtime sources have no
+    blanket paper-worker cap. Neither decoding nor hashing buffers a file.
+    """
+    with opened_regular_file(root, path) as (stream, size, _):
+        if maximum_bytes is not None and size > maximum_bytes:
+            raise ResearchError("UNAUTHORIZED_DATA", "source exceeds its declared quota")
+        decoder = codecs.getincrementaldecoder("utf-8")()
+        hasher, pending, consumed = hashlib.sha256(), "", 0
+        while True:
+            chunk = stream.read(min(64 * 1024, size - consumed + 1))
+            consumed += len(chunk)
+            if consumed > size:
+                raise ResearchError("CORRUPT_ARTIFACT", "source grew during hash read")
+            text = pending + decoder.decode(chunk, final=not chunk)
+            pending = ""
+            if chunk and text.endswith("\r"):
+                text, pending = text[:-1], "\r"
+            hasher.update(text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8"))
+            if not chunk:
+                break
+        if consumed != size:
+            raise ResearchError("CORRUPT_ARTIFACT", "source was truncated during hash read")
+    return hasher.hexdigest()

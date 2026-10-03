@@ -9,6 +9,7 @@ import pytest
 from application.research_computation import paper_identity, MAX_INPUT_BYTES
 from experiments.pirc25 import affine
 from infrastructure.research_store import ResearchError, digest
+from infrastructure.research_files import source_file_hash
 from tests.research_file_observation import observe_file
 from tests.test_research_paper_source_identity import replica
 
@@ -102,3 +103,23 @@ def test_runtime_source_large_file_streaming_remains_compatible(tmp_path, monkey
     reads, handles = observe_file(monkeypatch, target, before_read=bounded)
     assert affine.code_hash() == expected
     assert reads and handles == [True]
+
+
+@pytest.mark.parametrize("content", [b"", b"\r", b"x" * 65535 + b"\r\nend\r",
+    b"x" * 65535 + "π\r\nend".encode("utf-8")],
+    ids=["empty", "terminal-cr", "crlf-chunk-boundary", "utf8-chunk-boundary"])
+def test_streaming_source_hash_decoder_and_newline_edges(tmp_path, content):
+    path = tmp_path / "source.py"
+    path.write_bytes(content)
+    assert source_file_hash(tmp_path, path) == hashlib.sha256(
+        path.read_text(encoding="utf-8").encode()).hexdigest()
+
+
+def test_paper_source_quota_denies_before_consumption(tmp_path, monkeypatch):
+    root, _ = replica(tmp_path)
+    target = root / "scripts/pirc25/__init__.py"
+    target.write_bytes(b"#" * (MAX_INPUT_BYTES + 1))
+    reads, _ = observe_file(monkeypatch, target)
+    with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
+        paper_identity(root)
+    assert not reads

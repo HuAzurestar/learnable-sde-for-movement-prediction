@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
-import stat
 import subprocess
 
 from infrastructure.research_store import ResearchError, digest, encode
+from infrastructure.research_files import source_file_hash
 
 MAX_INPUT_BYTES = 16 * 1024 * 1024
 MAX_OUTPUT_BYTES = 64 * 1024 * 1024
@@ -17,7 +16,7 @@ MAX_OPERATIONS = 20_000_000
 
 
 def paper_identity(root):
-    root = Path(root).resolve()
+    root = Path(os.path.abspath(root))
     directory = root / "scripts" / "pirc25"
     paths = sorted(directory.glob("*.py"))
     if not paths or len(paths) > 64:
@@ -32,21 +31,10 @@ def paper_identity(root):
         if path.is_symlink() or not path.resolve().is_relative_to(root):
             raise ResearchError("UNAUTHORIZED_DATA", "paper source is outside the declared root/quota")
         try:
-            information = path.stat()
-            if not stat.S_ISREG(information.st_mode) or information.st_size > MAX_INPUT_BYTES:
-                raise ResearchError("UNAUTHORIZED_DATA", "paper source is outside the declared root/quota")
-            with path.open("rb") as stream:
-                information = os.fstat(stream.fileno())
-                if not stat.S_ISREG(information.st_mode) or information.st_size > MAX_INPUT_BYTES:
-                    raise ResearchError("UNAUTHORIZED_DATA", "paper source is outside the declared root/quota")
-                content = stream.read(MAX_INPUT_BYTES + 1)
-            if len(content) > MAX_INPUT_BYTES:
-                raise ResearchError("UNAUTHORIZED_DATA", "paper source is outside the declared root/quota")
-            # Retain the previous universal-newline identity on Windows/Linux.
-            normalized = content.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+            source_hash = source_file_hash(root, path, maximum_bytes=MAX_INPUT_BYTES)
         except (OSError, UnicodeError) as exc:
             raise ResearchError("CONTRACT_MISMATCH", "paper source is not readable UTF-8") from exc
-        files[path.relative_to(root).as_posix()] = hashlib.sha256(normalized).hexdigest()
+        files[path.relative_to(root).as_posix()] = source_hash
     head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], check=True,
                           capture_output=True, text=True, timeout=10).stdout.strip()
     dirty = bool(subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--", "scripts/pirc25", "scripts/__init__.py"],

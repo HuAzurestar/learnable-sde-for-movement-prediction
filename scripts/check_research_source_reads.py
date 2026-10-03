@@ -323,6 +323,9 @@ for entry in ("runtime", "paper"):
 
 
 if __name__ == "__main__":
-    for module in (STORE, DATA):
+    sources = (STORE, DATA, importlib.import_module("infrastructure.research_files"),
+        importlib.import_module("application.research_computation"),
+        importlib.import_module("experiments.pirc25.affine"))
+    for module in sources:
         print(module.__name__ + "_sha256=" + hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest(), flush=True)
     unittest.main(verbosity=2)

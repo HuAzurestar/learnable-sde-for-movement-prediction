@@ -273,6 +273,16 @@ verification and durable consumer receipt without materializing unused inputs.
 Native `scripts/check_research_source_reads.py` tests the actual APIs and real
 Path/descriptor reads on Windows and Linux; it is not full platform acceptance.
 
+Authoritative manifest/event loads also use regular handles, preserving the
+admitted file size and rejecting redirected roots or replaced files before
+reading. Runtime code and paper source identities hash UTF-8 incrementally in
+64 KiB chunks with the existing universal-newline normalization, including CRLF
+and multibyte sequences split between chunks. Paper's existing 16 MiB per-source
+admission quota remains; it is not imposed on runtime code or other data. Code
+identity roots retain their declared lexical paths so directory links cannot
+silently establish a new trusted tree. Native source checks use actual Git when
+testing paper identity; missing Git is an explicit skip, not substituted proof.
+
 Raw artifact and data-provider reads rehash the immutable grant and its current
 scope after allowed/start/completed journals, before opening bytes and before
 returning them. Provider checks retain role, fit scope and frozen test/history
