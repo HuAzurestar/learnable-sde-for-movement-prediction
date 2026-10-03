@@ -12,10 +12,9 @@ MAX_OUTPUT_BYTES = 32 * 1024 * 1024
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
 
 
-def case_plan(result, max_operations=MAX_OPERATIONS):
+def validate_case_layout(result):
+    """Validate bounded saved values without admitting any rendering work."""
     try:
-        if type(max_operations) is not int or not 0 < max_operations <= MAX_OPERATIONS:
-            raise ResearchError('RESOURCE_PLAN_REJECTED', 'invalid case graph operation quota')
         if not isinstance(result, dict) or len(encode(result)) > MAX_SOURCE_BYTES:
             raise ResearchError('RESOURCE_PLAN_REJECTED', 'case input exceeds byte quota')
         forecast = result.get('forecast', {})
@@ -54,29 +53,38 @@ def case_plan(result, max_operations=MAX_OPERATIONS):
                 any(type(v) not in (str, int) or len(encode(v)) > 256 for v in policy['sample_ids']) or
                 len({encode(v) for v in policy['sample_ids']}) != len(samples)):
             raise ValueError('frozen preview selection policy missing or inconsistent')
-        panels = len(order) // 2
-        points = panels * len(samples) * (len(horizons) + len(horizons) * (len(horizons) + 1) // 2)
-        figures = len(horizons) + 1
-        operations = points * 8 + len(samples) * len(horizons) * len(order) + figures * 256
-        # Provenance is embedded in XML text and that SVG is embedded in JSON.
-        # Budget the actual frozen policy, including XML entity expansion and
-        # a second conservative JSON escaping allowance, before any rendering.
-        policy_bytes = encode(policy)
-        escaped_policy_bytes = (len(policy_bytes) + 4 * policy_bytes.count(b'&') +
-                                3 * policy_bytes.count(b'<') + 3 * policy_bytes.count(b'>'))
-        output_bound = points * 128 + figures * (2 * escaped_policy_bytes + 16384)
-        if operations > max_operations or output_bound > MAX_OUTPUT_BYTES:
-            raise ResearchError('RESOURCE_PLAN_REJECTED', 'joint case graph allocation exceeds quota')
-        return {'schema_version': 'pirc25-case-graph-plan-v1', 'renderer_version': 'saved-paths-v1',
-                'paths': len(samples), 'horizons': len(horizons), 'panels': panels,
-                'figure_count': figures, 'maximum_operations': max_operations,
-                'planned_operations': operations, 'maximum_input_bytes': MAX_SOURCE_BYTES,
-                'maximum_output_bytes': MAX_OUTPUT_BYTES, 'figure_byte_bound': MAX_FIGURE_BYTES,
-                'planned_output_bytes': output_bound, 'allocation': 'shared-job-on-source-arm'}
+        return {'paths': len(samples), 'horizons': len(horizons), 'panels': len(order) // 2,
+                'preview_policy': policy}
     except ResearchError:
         raise
     except (KeyError, TypeError, ValueError, OverflowError) as exc:
         raise ResearchError('CONTRACT_MISMATCH', 'saved case layout or preview policy differs') from exc
+
+
+def case_plan(result, max_operations=MAX_OPERATIONS):
+    if type(max_operations) is not int or not 0 < max_operations <= MAX_OPERATIONS:
+        raise ResearchError('RESOURCE_PLAN_REJECTED', 'invalid case graph operation quota')
+    layout = validate_case_layout(result)
+    if layout is None:
+        return None
+    paths, horizons, panels = layout['paths'], layout['horizons'], layout['panels']
+    points = panels * paths * (horizons + horizons * (horizons + 1) // 2)
+    figures = horizons + 1
+    operations = points * 8 + paths * horizons * panels * 2 + figures * 256
+    # Provenance is embedded in XML text and that SVG is embedded in JSON.
+    # Admit actual policy/entity expansion plus a conservative JSON allowance.
+    policy_bytes = encode(layout['preview_policy'])
+    escaped_policy_bytes = (len(policy_bytes) + 4 * policy_bytes.count(b'&') +
+                            3 * policy_bytes.count(b'<') + 3 * policy_bytes.count(b'>'))
+    output_bound = points * 128 + figures * (2 * escaped_policy_bytes + 16384)
+    if operations > max_operations or output_bound > MAX_OUTPUT_BYTES:
+        raise ResearchError('RESOURCE_PLAN_REJECTED', 'joint case graph allocation exceeds quota')
+    return {'schema_version': 'pirc25-case-graph-plan-v1', 'renderer_version': 'saved-paths-v1',
+            'paths': paths, 'horizons': horizons, 'panels': panels,
+            'figure_count': figures, 'maximum_operations': max_operations,
+            'planned_operations': operations, 'maximum_input_bytes': MAX_SOURCE_BYTES,
+            'maximum_output_bytes': MAX_OUTPUT_BYTES, 'figure_byte_bound': MAX_FIGURE_BYTES,
+            'planned_output_bytes': output_bound, 'allocation': 'shared-job-on-source-arm'}
 
 
 def provenance(result, source_id, reference, selection):

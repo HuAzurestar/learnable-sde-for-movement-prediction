@@ -5,7 +5,7 @@ import re
 import sys
 
 from application.research_budget import BudgetSpec
-from application.research_case_figures import case_plan, validate_case_package, MAX_SOURCE_BYTES, MAX_OUTPUT_BYTES, MAX_OPERATIONS
+from application.research_case_figures import case_plan, validate_case_layout, validate_case_package, MAX_SOURCE_BYTES, MAX_OUTPUT_BYTES, MAX_OPERATIONS
 from application.research_computation import _verify_job_cost
 from application.research_evidence import authorize_study
 from application.research_supervisor import ResearchSupervisor
@@ -31,6 +31,10 @@ def read_case_source(store, source_id, grant):
             result.get('cell_hash') not in {digest(c) for c in spec['cells']} or
             not isinstance(result.get('forecast', {}), dict)):
         raise ResearchError('CONTRACT_MISMATCH', 'case source identity differs from registration')
+    samples = result.get('forecast', {}).get('samples')
+    if isinstance(samples, list) and (len(samples) > 64 or
+            any(isinstance(path, list) and len(path) > 512 for path in samples)):
+        raise ResearchError('TOO_LARGE', 'preview exceeds 64 trajectories or 512 points')
     return result, metadata, spec, content
 
 
@@ -93,8 +97,9 @@ def verified_case_job(store, package, source):
 def case_view(store, source_id, grant):
     with store._read_transaction():
         source, _, _, _ = read_case_source(store, source_id, grant)
-        # Plan validation is not rendering; queries never launch a graph job.
-        case_plan(source)
+        # Layout validation is not allocation admission. Valid saved data stays
+        # readable even when rendering every horizon would exceed job quotas.
+        validate_case_layout(source)
         packages = []
         for event in store._events():
             if event['event_kind'] == 'MANIFEST' and event['payload']['object_id'].startswith('case-'):
