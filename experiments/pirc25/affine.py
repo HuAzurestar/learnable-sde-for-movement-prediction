@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from infrastructure.research_store import digest
+from infrastructure.research_store import ResearchError, digest
 from infrastructure.research_files import source_file_hash
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -20,7 +21,21 @@ def phase_space_api():
 def code_hash():
     files = [ROOT / name for name in ("config.py", "numerics.py", "registry.py")]
     for directory in ("application", "data", "domain", "estimation", "evaluation", "experiments", "inference", "infrastructure", "models"):
-        files.extend((ROOT / directory).rglob("*.py"))
+        top = ROOT / directory
+        if top.is_symlink():
+            raise ResearchError("UNAUTHORIZED_DATA", "runtime source directory is a symbolic link")
+        # rglob('*.py') skips nested directory links although Python imports can
+        # follow them. Reject aliases explicitly instead of omitting executable
+        # sources from the frozen identity. Ordinary nested trees keep old hashes.
+        for current, directories, names in os.walk(top, followlinks=False):
+            current = Path(current)
+            for name in directories:
+                path = current / name
+                if path.is_symlink():
+                    raise ResearchError("UNAUTHORIZED_DATA", "runtime source directory is a symbolic link")
+                if os.path.normcase(name).endswith(".py"):
+                    files.append(path)  # Retain rejection of non-file *.py entries.
+            files.extend(current / name for name in names if os.path.normcase(name).endswith(".py"))
     return digest({path.relative_to(ROOT).as_posix(): source_file_hash(ROOT, path)
                    for path in sorted(files)})
 

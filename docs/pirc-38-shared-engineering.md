@@ -282,6 +282,9 @@ admission quota remains; it is not imposed on runtime code or other data. Code
 identity roots retain their declared lexical paths so directory links cannot
 silently establish a new trusted tree. Native source checks use actual Git when
 testing paper identity; missing Git is an explicit skip, not substituted proof.
+Runtime source enumeration rejects directory links rather than silently omitting
+modules that Python can import through them. Ordinary nested source trees retain
+the previous path/content hash mapping and platform-specific extension matching.
 
 Raw artifact and data-provider reads rehash the immutable grant and its current
 scope after allowed/start/completed journals, before opening bytes and before
