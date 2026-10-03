@@ -2,7 +2,10 @@
 
 import json
 from pathlib import Path
+import subprocess
+import sys
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -279,3 +282,24 @@ def test_identical_export_retry_does_not_replace_existing_inode(source, tmp_path
     assert (final.st_dev, final.st_ino, final.st_mtime_ns) == (
         original.st_dev, original.st_ino, original.st_mtime_ns)
     assert json.loads(capsys.readouterr().out)['bundle_hash'] == json.loads(expected)['bundle_hash']
+
+
+@pytest.mark.parametrize('immutable', [False, True])
+def test_colliding_staging_name_is_never_deleted(tmp_path, monkeypatch, immutable):
+    output = tmp_path / 'collision.json'
+    output.write_bytes(b'existing target')
+    foreign = output.with_name('.' + output.name + '.controlled-collision.staging')
+    foreign.write_bytes(b'owned by another interrupted writer')
+    monkeypatch.setattr(store_module.uuid, 'uuid4', lambda: SimpleNamespace(hex='controlled-collision'))
+    with pytest.raises(FileExistsError):
+        store_module.atomic_write(output, b'new writer', immutable=immutable)
+    assert output.read_bytes() == b'existing target'
+    assert foreign.read_bytes() == b'owned by another interrupted writer'
+
+
+def test_native_publication_probe_remains_executable():
+    script = Path(__file__).resolve().parents[1] / 'scripts' / 'check_evidence_publication.py'
+    completed = subprocess.run([sys.executable, '-B', str(script)], capture_output=True, text=True, timeout=15)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert 'Production SHA256:' in completed.stdout
+    assert 'Ran 6 tests' in completed.stderr
