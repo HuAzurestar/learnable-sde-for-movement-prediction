@@ -45,6 +45,12 @@ def authorize_study(store, study_id, authorization, purpose):
     # A successful pre-I/O check is not permission to read after that write.
     require_unexpired_disclosure(store, study_id, authorization, purpose)
     verify_study_disclosure(store, study_id, authorization, purpose)
+    if store._read_snapshot() is not None:
+        # Metadata-only queries/exports have no raw-byte completion guard.
+        # Rehash their own grant after the outer physical verification too.
+        store._read_completion(
+            lambda: verify_study_disclosure(store, study_id, authorization, purpose),
+            lambda: require_unexpired_disclosure(store, study_id, authorization, purpose))
 
 
 def verify_study_disclosure(store, study_id, authorization, purpose):

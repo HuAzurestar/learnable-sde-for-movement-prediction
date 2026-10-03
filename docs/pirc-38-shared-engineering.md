@@ -311,6 +311,13 @@ response. Genuine manifest/attempt/budget/recovery-hold changes during assembly
 reject a mixed snapshot; disclosure journals alone do not invalidate pagination.
 No permission or arm-balance cache is shared between requests.
 
+Study disclosure also registers a current-grant rehash at the actual outer
+scope completion, after the uncached physical validation. This applies even to
+metadata-only pages, all-missing matrix exports and the external publication
+guard, where there is no raw artifact read. Every consumed grant's pure expiry
+guard follows all final authority I/O. A denied export retains the already
+authorized private bundle but does not permit external publication or disclosure.
+
 Limits: default 50 objects/page, maximum 200; responses/previews ≤2 MiB; forecast
 previews ≤64 trajectories and ≤512 points each. Oversized content is explicitly
 rejected. Cursors bind filters and the data watermark. Empty, incomplete,
