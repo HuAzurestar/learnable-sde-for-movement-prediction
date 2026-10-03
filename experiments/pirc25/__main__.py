@@ -109,7 +109,7 @@ def main(argv=None):
             store.authorize(grant)
             result = {"authorization_id": grant["authorization_id"]}
         elif args.command == "export":
-            from application.research_evidence import export_evidence
+            from application.research_evidence import export_evidence, authorize_evidence_publication
             from infrastructure.research_store import atomic_write, encode
             grant = store.manifest("authorization-" + args.authorization_id)
             bundle = export_evidence(store, args.study, grant)
@@ -120,7 +120,8 @@ def main(argv=None):
             if output.exists() and output.read_bytes() != content:
                 raise ResearchError("IDENTITY_CONFLICT", "export exists with different content")
             output.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write(output, content)
+            atomic_write(output, content,
+                before_replace=lambda: authorize_evidence_publication(store, bundle, grant))
             result = {"bundle_hash": bundle["bundle_hash"]}
         elif args.command == "import-evidence":
             from application.research_evidence import accept_evidence_package

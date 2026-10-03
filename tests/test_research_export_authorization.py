@@ -411,3 +411,79 @@ def test_actual_cli_target_fsync_cannot_publish_expired_foreign_model_evidence(f
     denial = store.events()[-1]
     assert denial['event_kind'] == 'DISCLOSURE_DENIED'
     assert denial['payload']['study_id'] == 'model-study'
+
+
+@pytest.mark.parametrize('foreign', [False, True])
+@pytest.mark.parametrize('phase', ['before-publication', 'after-publication'])
+def test_grant_change_during_final_allowed_journal_cannot_publish_or_return(
+        request, permission_clock, monkeypatch, foreign, phase):
+    fixture = request.getfixturevalue('foreign_source' if foreign else 'source')
+    store, value, main = fixture[:3]
+    checked = store.manifest('authorization-model-consumer') if foreign else main
+    original = store.append
+    allowed, touched = [], []
+    occurrence = (1 if foreign else 2) + (phase == 'after-publication')
+
+    def change_after_journal(kind, payload, *args, **kwargs):
+        result = original(kind, payload, *args, **kwargs)
+        if kind == 'DISCLOSURE_ALLOWED' and payload['authorization_hash'] == digest(checked):
+            allowed.append(True)
+            if len(allowed) == occurrence:
+                touched.append(True)
+                (store.path / 'manifests' / ('authorization-' + checked['authorization_id'] + '.json')).write_bytes(
+                    encode({**checked, 'purposes': []}))
+        return result
+
+    monkeypatch.setattr(store, 'append', change_after_journal)
+    with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+        export_evidence(store, value['study_id'], main)
+    assert touched
+    assert store._read_snapshot() is None
+    assert len(bundles(store)) == (phase == 'after-publication')
+    denial = store.events()[-1]
+    assert denial['event_kind'] == 'DISCLOSURE_DENIED'
+    assert denial['payload']['study_id'] == checked['study_id']
+
+
+def test_actual_cli_denial_preserves_existing_identical_export(source, tmp_path):
+    store, value, main, _ = source
+    original = encode(export_evidence(store, value['study_id'], main))
+    output = tmp_path / 'existing-bundle.json'
+    output.write_bytes(original)
+    completed = subprocess.run([sys.executable, '-B', '-c', CLI_EXPIRE, str(store.path.parent), store.store_id,
+        str(output), 'target-fsync', main['authorization_id']], capture_output=True, text=True, timeout=30)
+    assert completed.returncode != 0, completed.stdout + completed.stderr
+    assert json.loads(completed.stdout)['error']['code'] == 'UNAUTHORIZED_DATA', completed.stderr
+    assert output.read_bytes() == original
+    assert not list(output.parent.glob('.' + output.name + '.*.staging'))
+
+
+@pytest.mark.parametrize('denied', [False, True])
+def test_actual_atomic_guard_follows_fsync_and_preserves_target_on_failure(tmp_path, monkeypatch, denied):
+    output = tmp_path / 'guarded.json'
+    output.write_bytes(b'old immutable target')
+    original_fsync = store_module.os.fsync
+    flushed, guarded = [], []
+
+    def fsync(fd):
+        original_fsync(fd)
+        flushed.append(True)
+
+    def guard():
+        assert flushed == [True]
+        assert output.read_bytes() == b'old immutable target'
+        staging = list(output.parent.glob('.' + output.name + '.*.staging'))
+        assert len(staging) == 1 and staging[0].read_bytes() == b'new authorized target'
+        guarded.append(True)
+        if denied:
+            raise ResearchError('UNAUTHORIZED_DATA', 'synthetic publication denied')
+
+    monkeypatch.setattr(store_module.os, 'fsync', fsync)
+    if denied:
+        with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+            store_module.atomic_write(output, b'new authorized target', before_replace=guard)
+    else:
+        store_module.atomic_write(output, b'new authorized target', before_replace=guard)
+    assert guarded == [True]
+    assert output.read_bytes() == (b'old immutable target' if denied else b'new authorized target')
+    assert not list(output.parent.glob('.' + output.name + '.*.staging'))

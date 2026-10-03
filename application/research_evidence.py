@@ -70,7 +70,102 @@ def require_export_visibility(store, spec, cells, authorization):
 
 
 def export_evidence(store: ResearchStore, study_id: str, authorization: dict):
-    authorize_study(store, study_id, authorization, "export")
+    # Retain one current-thread/PID verified scope and its actual OS lock for
+    # the whole source/cost assembly. This is not a persistent grant cache.
+    with store._read_transaction():
+        authorize_study(store, study_id, authorization, "export")
+        snapshot = _export_data_snapshot(store)
+        bundle = _assemble_evidence(store, study_id, authorization)
+        grants = _fresh_export_authority(store, bundle, authorization)
+        if _export_data_snapshot(store) != snapshot:
+            raise ResearchError("INDEX_STALE", "authority changed while assembling evidence; retry export")
+        object_id = "bundle-" + bundle["bundle_hash"]
+        store.publish(object_id, bundle)
+        grants = _fresh_export_authority(store, bundle, authorization)
+        # The only permitted new data event is this exact private bundle's
+        # immutable publication. Disclosure/read journals do not change data.
+        current = _export_data_snapshot(store, after=snapshot,
+            publication={"object_id": object_id, "sha256": digest(bundle)})
+        if current != snapshot:
+            raise ResearchError("INDEX_STALE", "authority changed while publishing evidence; retry export")
+    # The final uncached physical validation can itself cross expiry. No
+    # valid-path I/O may follow this last clock check before returning bytes.
+    _require_current_export_grants(store, grants)
+    return bundle
+
+
+def _export_data_snapshot(store, *, after=(), publication=None):
+    kinds = {"MANIFEST", "ATTEMPT", "RESERVE", "SETTLE", "ARM_CLOSED", "RECOVERY_HOLD"}
+    result, publications = [], 0
+    last_sequence = after[-1][0] if after else 0
+    for event in store.events():
+        if event["event_kind"] not in kinds:
+            continue
+        if (publication is not None and event["sequence"] > last_sequence
+                and event["event_kind"] == "MANIFEST" and event["payload"] == publication):
+            publications += 1
+            if publications > 1:
+                raise ResearchError("INDEX_STALE", "evidence publication changed more than once")
+            continue
+        # Include hashes, not just the largest sequence, so forensic recovery
+        # cannot replace a data prefix with a different equal-sized chain.
+        result.append((event["sequence"], event["hash"]))
+    return tuple(result)
+
+
+def _export_grants(bundle, authorization):
+    grants = {digest(authorization): authorization}
+    for cell in bundle["cells"]:
+        documents = cell.get("admission", {}).get("documents", {})
+        if documents.get("model_qualification_evidence"):
+            grant = documents["model_authorization"]
+            if (grant["study_id"] != bundle["study_id"]
+                    and bundle["study_id"] not in grant.get("consumer_study_ids", [])):
+                raise ResearchError("UNAUTHORIZED_DATA", "model evidence export consumer differs")
+            grants[digest(grant)] = grant
+    return list(grants.values())
+
+
+def _require_current_export_grants(store, grants):
+    # All manifests/studies/purposes have just been freshly authenticated.
+    # Checking the earliest expiry last protects every consumed grant at the
+    # same disclosure instant, including a model grant shorter than the main.
+    earliest = min(grants, key=lambda grant: datetime.fromisoformat(grant["expires_at"]))
+    require_unexpired_disclosure(store, earliest["study_id"], earliest, "export")
+
+
+def _fresh_export_authority(store, bundle, authorization):
+    spec = store.manifest("study-" + bundle["study_id"])["spec"]
+    if spec != bundle["registered_spec"] or digest(spec) != bundle["spec_hash"]:
+        raise ResearchError("CORRUPT_ARTIFACT", "export study source binding changed")
+    if not {cell["block_id"] for cell in spec["cells"]} <= set(authorization["block_ids"]):
+        raise ResearchError("UNAUTHORIZED_DATA", "export does not cover the complete study matrix")
+    require_export_visibility(store, spec, bundle["cells"], authorization)
+    grants = _export_grants(bundle, authorization)
+    for grant in grants:
+        authorize_study(store, grant["study_id"], grant, "export")
+    _require_current_export_grants(store, grants)
+    return grants
+
+
+def authorize_evidence_publication(store, bundle, authorization):
+    """Reauthenticate a frozen export after target fsync, before its rename.
+
+    The CLI cannot reuse export_evidence's earlier permission after directory
+    creation, existing-file checks, encoding and flushing the target bytes.
+    This guard does not recalculate metrics, rerun cells or alter old costs.
+    """
+    with store._read_transaction():
+        authorize_study(store, bundle["study_id"], authorization, "export")
+        body = {key: value for key, value in bundle.items() if key != "bundle_hash"}
+        if (bundle["bundle_hash"] != digest(body)
+                or store.manifest("bundle-" + bundle["bundle_hash"]) != bundle):
+            raise ResearchError("CORRUPT_ARTIFACT", "target export differs from its immutable bundle")
+        grants = _fresh_export_authority(store, bundle, authorization)
+    _require_current_export_grants(store, grants)
+
+
+def _assemble_evidence(store, study_id, authorization):
     spec = store.manifest("study-" + study_id)["spec"]
     if not {c["block_id"] for c in spec["cells"]} <= set(authorization["block_ids"]):
         raise ResearchError("UNAUTHORIZED_DATA", "export does not cover the complete study matrix")
@@ -148,7 +243,6 @@ def export_evidence(store: ResearchStore, study_id: str, authorization: dict):
                                    "comparison_dimensions": comparison_dimensions(c)} for c in spec["cells"]],
                "cells": cells, "disclosure_scope": "authorized-local-export"}
     bundle = {**payload, "bundle_hash": digest(payload)}
-    store.publish("bundle-" + bundle["bundle_hash"], bundle)
     return bundle
 
 

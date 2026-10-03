@@ -103,6 +103,16 @@ still be inspected, but legacy qualified results without admission cannot be
 exported or formally aggregated. Register new versioned inputs rather than
 rewriting an immutable legacy success.
 
+Complete evidence export assembles source results and all-attempt costs inside
+one lock-held verified read scope. It rejects changed data/reservation/recovery
+snapshots, freshly checks the main and consumed foreign-model export grants
+before and after private immutable bundle publication, and checks the earliest
+expiry again after final physical validation. Read/disclosure journals remain
+durable and do not invalidate an otherwise unchanged export. The CLI also
+reauthenticates its frozen bundle after target staging fsync and before atomic
+rename. A refused target publication removes only its own staging file; an
+existing target and already authorized private bundle are preserved.
+
 ## Independent reproduction
 
 From this repository, with the matching paper repository checked out:

@@ -59,14 +59,21 @@ def _sync_directory(path: Path):
             os.close(fd)
 
 
-def atomic_write(path: Path, content: bytes):
-    """Caller holds the store lock; abandoned staging never becomes visible."""
+def atomic_write(path: Path, content: bytes, *, before_replace=None):
+    """Flush staging, optionally recheck disclosure, then atomically publish.
+
+    Authority-store callers hold their lock and use the ordinary two-argument
+    form. External evidence publication may supply a guard after fsync; a
+    failed guard preserves any existing target and removes only this staging.
+    """
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.staging")
     try:
         with temporary.open("xb") as stream:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
+        if before_replace is not None:
+            before_replace()
         os.replace(temporary, path)
         _sync_directory(path.parent)
     finally:
