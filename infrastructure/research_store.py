@@ -105,8 +105,10 @@ def atomic_write(path: Path, content: bytes, *, before_replace=None, immutable=F
     identical content is accepted only after a bounded read and a fresh guard.
     """
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.staging")
+    created = False
     try:
         with temporary.open("xb") as stream:
+            created = True
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
@@ -124,7 +126,8 @@ def atomic_write(path: Path, content: bytes, *, before_replace=None, immutable=F
             os.replace(temporary, path)
         _sync_directory(path.parent)
     finally:
-        temporary.unlink(missing_ok=True)
+        if created:
+            temporary.unlink(missing_ok=True)
 
 
 @contextmanager

@@ -122,6 +122,8 @@ compared through one size-checked regular file handle with a read bounded by
 the expected bytes plus one, then export authority is rechecked after that I/O.
 Idempotent retries also sync the directory. Ordinary locked authority-store
 writes retain their existing replace semantics.
+Staging cleanup requires successful exclusive creation by the current writer;
+a preexisting staging-name collision is retained, not deleted as failed output.
 
 ## Independent reproduction
 

@@ -10,6 +10,7 @@ import importlib.util
 import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -80,6 +81,18 @@ class NativePublication(unittest.TestCase):
                 STORE.atomic_write(self.target, self.content, immutable=True)
         self.assertFalse(self.target.exists())
         self.assert_clean()
+
+    def test_exclusive_staging_collision_keeps_foreign_staging(self):
+        self.target.write_bytes(b'original target')
+        foreign = self.target.with_name('.export.json.fixed.staging')
+        foreign.write_bytes(b'foreign staging')
+        for immutable in (False, True):
+            with self.subTest(immutable=immutable), patch.object(
+                    STORE.uuid, 'uuid4', return_value=SimpleNamespace(hex='fixed')):
+                with self.assertRaises(FileExistsError):
+                    STORE.atomic_write(self.target, self.content, immutable=immutable)
+            self.assertEqual(self.target.read_bytes(), b'original target')
+            self.assertEqual(foreign.read_bytes(), b'foreign staging')
 
     @unittest.skipIf(os.name == 'nt', 'native POSIX FIFO race')
     def test_regular_file_swapped_for_fifo_cannot_block_comparison(self):
