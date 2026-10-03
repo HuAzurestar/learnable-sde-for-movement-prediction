@@ -46,6 +46,18 @@ silently reclassified as blind. These plan and history hashes are recorded in
 each read event. This read gate is separate from package qualification and does
 not itself grant formal-comparison eligibility.
 
+Within one PID/thread-owned verified physical phase, imported history may share
+only content-bound, schema-validated identity/status facts. Exact coverage and
+the conservative same-content or same-dataset/source-block veto use sorted keys;
+every original guard still rereads and hashes the actual manifests and rechecks
+current grants and expiry. New history publication, uncertain writes, recovery
+and the physical phase boundary discard these facts. Fact publication is all or
+discard: publish the completion marker only after all veto scopes are merged,
+and clear derived facts on interruption so the next guard rebuilds them. This
+reduces repeated record predicates and structural validation, not the remaining
+manifest enumeration, canonical hashing or complete physical-prefix scans; it
+is not proof of the full parent read-check complexity contract.
+
 ### Execution admission and formal evidence
 
 `SharedRunner` and `SharedRecovery.resume` use `AdmissionGate` before invoking

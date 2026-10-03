@@ -140,6 +140,18 @@ def test_paper_side_rejects_conflicting_imported_history_from_legacy_runtime(tmp
     # cross-dataset history reconciliation was added to the runtime.
     monkeypatch.setattr(preregistration, "same_source",
         lambda left, right: left.get("dataset_id") == right.get("dataset_id"))
+    # Imported reports now query compiled facts rather than same_source. Keep
+    # this explicitly faulty legacy-runtime simulation on the actual report
+    # facts too; do not change production matching or the independent paper
+    # rejection below. Normal current-runtime reads must still reject aliases.
+    from infrastructure.research_history_lookup import SourceHistoryLookup
+    def legacy_imported_exposure(lookup, identity):
+        fields = ('dataset_id', 'release_id', 'source_block_id', 'sha256')
+        return any(preregistration.same_source(dict(zip(fields, key)), identity)
+                   and status in {'exposed', 'unknown'}
+                   for keys, statuses in lookup._reports.values()
+                   for key, status in zip(keys, statuses))
+    monkeypatch.setattr(SourceHistoryLookup, 'prior_exposure', legacy_imported_exposure)
     store, value, registry, grant = prepared(tmp_path, formal=True, two_arms=True)
     store.register(value, digest(value))
     for cell in value["cells"]:

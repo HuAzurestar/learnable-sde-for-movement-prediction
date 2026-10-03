@@ -55,6 +55,13 @@ class VerifiedEventLookup:
         self._rows = [groups[key] for key in self._keys]
         self.size = len(events)
         self.last_hash = events[-1]["hash"] if events else "0" * 64
+        self._history = None
+
+    def source_history(self):
+        if self._history is None:
+            from .research_history_lookup import SourceHistoryLookup
+            self._history = SourceHistoryLookup()
+        return self._history
 
     def _group(self, key):
         position = bisect_left(self._keys, key)
@@ -117,5 +124,13 @@ class VerifiedEventLookup:
                 self._keys.insert(position, key)
                 self._rows.insert(position, [])
             self._rows[position].append(event)
+        if event['event_kind'] == 'MANIFEST':
+            payload = event['payload']
+            if (not isinstance(payload, dict) or not isinstance(payload.get('object_id'), str)
+                    or payload['object_id'].startswith('exposure-history-')):
+                # A new/changed report must not inherit facts from an earlier
+                # manifest version. Other appends retain pure metadata facts;
+                # all permission/grant/expiry checks still run afresh.
+                self._history = None
         self.size += 1
         self.last_hash = event["hash"]

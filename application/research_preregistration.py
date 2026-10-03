@@ -111,29 +111,44 @@ class PreregistrationGate:
         validator(value)
         return value
 
+    def _history_facts(self, object_id, lookup, *, expected=None):
+        # Always consume/hash actual metadata, including when facts were already
+        # compiled under this short owned prefix. Never reuse file bytes or an
+        # authorization result. The key is the actual freshly verified content.
+        value = self.store._manifest(object_id)
+        content_hash = digest(value)
+        if expected is not None and content_hash != expected:
+            raise ResearchError('UNAUTHORIZED_DATA', 'frozen evidence content binding differs')
+        report_key = (object_id, content_hash)
+        if not lookup.contains(report_key):
+            validate_history(value)
+            lookup.add(report_key, value['source_evidence']['records'])
+        return report_key
+
     def _validate(self, protocol, block):
         """Caller holds the store lock through validation and READ_STARTED."""
         prereg = self._resolve("preregistration", protocol.get("preregistration_hash"), validate_preregistration)
-        history = self._resolve("exposure-history", protocol.get("history_hash"), validate_history)
+        history_hash = protocol.get('history_hash')
+        if not hash_reference(history_hash):
+            raise ResearchError('UNAUTHORIZED_DATA', 'valid frozen exposure-history reference required')
+        history = self.store._event_lookup().source_history()
+        report_key = self._history_facts('exposure-history-' + history_hash, history, expected=history_hash)
         if (protocol["study_id"] not in prereg["study_ids"] or
                 protocol_binding(protocol) not in prereg["protocol_bindings"]):
             raise ResearchError("UNAUTHORIZED_DATA", "preregistration does not bind this study/protocol")
         identity = source_identity(block)
-        matching = [record for record in history["source_evidence"]["records"]
-                    if all(record[key] == value for key, value in identity.items())]
-        if len(matching) != 1 or matching[0]["status"] == "unknown":
+        status = history.coverage(report_key, identity)
+        if status is None or status == 'unknown':
             raise ResearchError("UNAUTHORIZED_DATA", "historical coverage unknown or mismatched")
         frozen = self.store._manifest_event("preregistration-" + protocol["preregistration_hash"])
         if prereg["test_mode"] == "blind":
-            if matching[0]["status"] != "unexposed":
+            if status != "unexposed":
                 raise ResearchError("UNAUTHORIZED_DATA", "previously exposed data cannot be blind test")
             for event in self.store._manifest_events("exposure-history-"):
                 payload = event["payload"]
-                prior = self.store._manifest(payload["object_id"])
-                validate_history(prior)
-                if any(same_source(record, identity) and record["status"] in {"exposed", "unknown"}
-                       for record in prior["source_evidence"]["records"]):
-                    raise ResearchError("UNAUTHORIZED_DATA", "prior imported exposure cannot be reset")
+                self._history_facts(payload['object_id'], history)
+            if history.prior_exposure(identity):
+                raise ResearchError("UNAUTHORIZED_DATA", "prior imported exposure cannot be reset")
             for event in self.store._prior_read_events(identity, frozen["sequence"]):
                 payload = event["payload"]
                 if event["event_kind"] in {"READ_STARTED", "READ_COMPLETED", "READ_FAILED"}:
