@@ -145,3 +145,48 @@ def test_recovery_hold_during_list_invalidates_the_budget_snapshot(tmp_path, mon
     with pytest.raises(ResearchError, match='INDEX_STALE'):
         ResearchQuery(store, 'ui').list('run')
     assert (store.path / 'recovery-hold.json').is_file()
+
+
+@pytest.mark.parametrize('kind', ['study', 'run', 'comparison'])
+def test_parallel_disclosure_cannot_invalidate_a_read_only_index_projection(tmp_path, monkeypatch, kind):
+    import threading
+    from infrastructure.research_index import ResearchIndex
+    store, _ = listing_store(tmp_path)
+    original_rebuild = ResearchIndex.rebuild
+    started, done = threading.Event(), threading.Event()
+    workers, errors = [], []
+
+    def disclose():
+        started.set()
+        try:
+            # A concurrent authorized request journals disclosure even though
+            # the underlying studies/results/budgets have not changed.
+            store.append('DISCLOSURE_ALLOWED', {'synthetic_parallel_read': True})
+        except BaseException as error:
+            errors.append(error)
+        finally:
+            done.set()
+
+    def interleave(index):
+        count = original_rebuild(index)
+        worker = threading.Thread(target=disclose)
+        workers.append(worker)
+        worker.start()
+        assert started.wait(1)
+        # Old code allows the journal write between rebuild and index.list.
+        # A coherent projection keeps its outer lock, so the write waits until
+        # the projection exits; do not deadlock by demanding completion here.
+        done.wait(0.3)
+        return count
+
+    monkeypatch.setattr(ResearchIndex, 'rebuild', interleave)
+    try:
+        viewed = ResearchQuery(store, 'ui').list(kind)
+        assert len(viewed['items']) == {'study': 1, 'run': 4, 'comparison': 0}[kind]
+    finally:
+        for worker in workers:
+            worker.join(timeout=5)
+        assert all(not worker.is_alive() for worker in workers)
+    assert done.is_set() and not errors
+    assert any(e['event_kind'] == 'DISCLOSURE_ALLOWED' and e['payload'].get('synthetic_parallel_read')
+               for e in store.events())
