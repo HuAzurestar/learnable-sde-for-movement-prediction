@@ -46,7 +46,9 @@ class NativeSourceReads(unittest.TestCase):
             def read():
                 return store.read_artifact(artifact["artifact_id"], purpose="preview", authorization=grant)
         else:
-            target = root / "block.bin"
+            data_root = root / "data"
+            data_root.mkdir()
+            target = data_root / "block.bin"
             target.write_bytes(content)
             protocol = {"schema_version": "pirc25-data-protocol-v1", "protocol_id": "native", "study_id": "synthetic",
                 "blocks": [{"block_id": "b", "dataset_id": "fixture", "release_id": "v1", "split_role": "train",
@@ -55,12 +57,25 @@ class NativeSourceReads(unittest.TestCase):
             ledger.register_protocol(protocol, STORE.digest(protocol))
             grant["protocol_hash"] = STORE.digest(protocol)
             def read():
-                return ledger.read("native", "b", purpose="fit", authorization_id="native", data_root=root)
+                return ledger.read("native", "b", purpose="fit", authorization_id="native", data_root=data_root)
         store.authorize(grant)
         other = base / "outside.bin"
         other.write_bytes(b"x" * len(content) if scenario == "symlink" else content)
         touched, held = [], []
         original_os_open = os.open
+        source_root = target.parent
+        outside_root = base / "outside"
+        outside_root.mkdir()
+        (outside_root / target.name).write_bytes(content)
+
+        def redirect_root():
+            self.assertFalse(touched, "root replacement must reach the real read boundary once")
+            touched.append(True)
+            source_root.rename(source_root.with_name(source_root.name + "-original"))
+            if scenario == "root_replace":
+                outside_root.rename(source_root)
+            else:
+                source_root.symlink_to(outside_root, target_is_directory=True)
 
         def replace():
             self.assertFalse(touched, "race must occur exactly at the actual selected opener")
@@ -83,8 +98,18 @@ class NativeSourceReads(unittest.TestCase):
 
         with ExitStack() as patches:
             observer = SimpleNamespace(setattr=lambda obj, name, value: patches.enter_context(patch.object(obj, name, value)))
+            if scenario in {"root_journal", "root_authority"}:
+                original_append = store._append
+                def append(kind, *args, **kwargs):
+                    result = original_append(kind, *args, **kwargs)
+                    if kind == ("EXPOSURE_ALLOWED" if scenario == "root_authority" else "READ_STARTED"):
+                        redirect_root()
+                    return result
+                observer.setattr(store, "_append", append)
             reads, handles = observe_file(observer, target,
-                before_open=None if scenario == "normal" else replace, before_read=before_read)
+                before_open=(None if scenario in {"normal", "root_journal", "root_authority"}
+                    else redirect_root if scenario in {"root_open", "root_replace"} else replace),
+                before_read=before_read)
             try:
                 if scenario == "normal":
                     self.assertEqual(read(), content)
@@ -99,15 +124,62 @@ class NativeSourceReads(unittest.TestCase):
                     self.assertEqual(store.events()[-1]["event_kind"], "READ_FAILED")
             finally:
                 before_read()
+                if source_root.is_symlink():
+                    source_root.unlink()
 
 
 for entry in ("raw", "provider"):
-    for scenario in ("normal", "replace", "symlink", "fifo"):
+    for scenario in ("normal", "replace", "symlink", "fifo", "root_journal", "root_authority", "root_open", "root_replace"):
         def check(self, entry=entry, scenario=scenario):
             self.exercise(entry, scenario)
-        if os.name == "nt" and scenario in {"symlink", "fifo"}:
+        if os.name == "nt" and scenario in {"symlink", "fifo", "root_journal", "root_authority", "root_open"}:
             check = unittest.skip("POSIX-native link/FIFO; regular-file replacement remains tested on Windows")(check)
         setattr(NativeSourceReads, "test_" + entry + "_" + scenario, check)
+
+
+class NativeRootParents(unittest.TestCase):
+    def exercise(self, scenario):
+        with tempfile.TemporaryDirectory(prefix="pirc38-source-parent-") as directory:
+            base = Path(directory).resolve()
+            parent = base / "parent"
+            root = parent / "data"
+            root.mkdir(parents=True)
+            target = root / "block.bin"
+            target.write_bytes(b"synthetic parent fixture")
+            outside = base / "outside"
+            (outside / "data").mkdir(parents=True)
+            (outside / "data" / target.name).write_bytes(target.read_bytes())
+            def redirect():
+                parent.rename(base / "original")
+                parent.symlink_to(outside, target_is_directory=True)
+            try:
+                with ExitStack() as patches:
+                    observer = SimpleNamespace(setattr=lambda obj, name, value: patches.enter_context(patch.object(obj, name, value)))
+                    reads, _ = observe_file(observer, target,
+                        before_open=redirect if scenario == "open" else None)
+                    if scenario == "initial":
+                        redirect()
+                    files = importlib.import_module("infrastructure.research_files")
+                    if scenario == "normal":
+                        with files.opened_regular_file(root, target) as (stream, _, _):
+                            self.assertEqual(stream.read(24), b"synthetic parent fixture")
+                        self.assertTrue(reads)
+                    else:
+                        with self.assertRaisesRegex(STORE.ResearchError, "UNAUTHORIZED_DATA|CORRUPT_ARTIFACT"):
+                            with files.opened_regular_file(root, target) as (stream, _, _):
+                                stream.read(24)
+                        self.assertEqual(reads, [], "redirected parent bytes were consumed")
+            finally:
+                if parent.is_symlink():
+                    parent.unlink()
+
+
+for scenario in ("normal", "initial", "open"):
+    def check(self, scenario=scenario):
+        self.exercise(scenario)
+    if os.name == "nt" and scenario != "normal":
+        check = unittest.skip("POSIX-native parent directory symlink")(check)
+    setattr(NativeRootParents, "test_parent_" + scenario, check)
 
 
 if __name__ == "__main__":
