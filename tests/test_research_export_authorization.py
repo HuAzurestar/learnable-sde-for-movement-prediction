@@ -274,6 +274,7 @@ def test_parallel_authorized_disclosure_does_not_invalidate_an_unchanged_export(
 CLI_EXPIRE = r'''
 from datetime import datetime, timezone
 from importlib import import_module
+from pathlib import Path
 import sys
 from unittest.mock import patch
 import infrastructure.research_store as store_module
@@ -282,7 +283,7 @@ cli = import_module('experiments.pirc25.__main__')
 expired = [False]
 armed = [False]
 original = ResearchStore.read_artifact
-original_write, original_fsync = cli.atomic_write, store_module.os.fsync
+original_write, original_fsync = store_module.atomic_write, store_module.os.fsync
 class Clock(datetime):
     @classmethod
     def now(cls, tz=None):
@@ -292,17 +293,18 @@ def read(store, *args, **kwargs):
     if sys.argv[4] == 'read':
         expired[0] = True
     return result
-def write(*args, **kwargs):
-    armed[0] = True
+def write(path, *args, **kwargs):
+    previous = armed[0]
+    armed[0] = Path(path).resolve() == Path(sys.argv[3]).resolve()
     try:
-        return original_write(*args, **kwargs)
+        return original_write(path, *args, **kwargs)
     finally:
-        armed[0] = False
+        armed[0] = previous
 def fsync(fd):
     original_fsync(fd)
     if armed[0] and sys.argv[4] == 'target-fsync':
         expired[0] = True
-with patch('application.research_evidence.datetime', Clock), patch('infrastructure.research_store.datetime', Clock), patch.object(ResearchStore, 'read_artifact', read), patch.object(cli, 'atomic_write', write), patch.object(store_module.os, 'fsync', fsync):
+with patch('application.research_evidence.datetime', Clock), patch('infrastructure.research_store.datetime', Clock), patch.object(ResearchStore, 'read_artifact', read), patch.object(store_module, 'atomic_write', write), patch.object(store_module.os, 'fsync', fsync):
     raise SystemExit(cli.main(['--root', sys.argv[1], '--store-id', sys.argv[2], 'export', 'synthetic', '--authorization-id', sys.argv[5], '--output', sys.argv[3]]))
 '''
 
@@ -313,8 +315,8 @@ def test_actual_cli_expiry_returns_error_without_writing_bundle_file(source, tmp
     output = tmp_path / 'denied-bundle.json'
     completed = subprocess.run([sys.executable, '-B', '-c', CLI_EXPIRE, str(store.path.parent), store.store_id,
                                 str(output), phase, 'export'], capture_output=True, text=True, timeout=30)
-    assert completed.returncode != 0
-    assert json.loads(completed.stdout)['error']['code'] == 'UNAUTHORIZED_DATA'
+    assert completed.returncode != 0, completed.stdout + completed.stderr
+    assert json.loads(completed.stdout)['error']['code'] == 'UNAUTHORIZED_DATA', completed.stderr
     assert not output.exists()
     assert not list(output.parent.glob('.' + output.name + '.*.staging'))
     if phase == 'read':
@@ -402,8 +404,8 @@ def test_actual_cli_target_fsync_cannot_publish_expired_foreign_model_evidence(f
     output = tmp_path / 'denied-model-bundle.json'
     completed = subprocess.run([sys.executable, '-B', '-c', CLI_EXPIRE, str(store.path.parent), store.store_id,
         str(output), 'target-fsync', main['authorization_id']], capture_output=True, text=True, timeout=30)
-    assert completed.returncode != 0
-    assert json.loads(completed.stdout)['error']['code'] == 'UNAUTHORIZED_DATA'
+    assert completed.returncode != 0, completed.stdout + completed.stderr
+    assert json.loads(completed.stdout)['error']['code'] == 'UNAUTHORIZED_DATA', completed.stderr
     assert not output.exists()
     assert not list(output.parent.glob('.' + output.name + '.*.staging'))
     denial = store.events()[-1]
