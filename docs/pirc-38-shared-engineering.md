@@ -294,6 +294,9 @@ receipt and 2 MiB figure/index quotas. Regular opened handles are checked agains
 the inside-root path and the admitted file identity; actual reads are bounded by
 that size plus one byte. Growth, replacement or in-place modification is rejected
 before parsing/import, rather than allocating the entire changed file first.
+Owner-side success transitions and duplicate artifact registration use the same
+frozen-size regular-file/hash integrity primitive as authorized artifact reads;
+damaged bytes cannot be allocated without that bound or produce a new success.
 The UI displays the frozen aggregate and downloads the original CSV; it does not
 implement another statistics calculation. Raw trajectories never enter TSDE.
 

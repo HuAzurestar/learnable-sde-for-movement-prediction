@@ -514,9 +514,7 @@ class ResearchStore:
             run = self._manifest("run-" + current["run_id"])
             if metadata["study_id"] != run["study_id"]:
                 raise ResearchError("CONTRACT_MISMATCH", "artifact belongs to another study")
-            content = (self.path / "artifacts" / artifact_id).read_bytes()
-            if hashlib.sha256(content).hexdigest() != metadata["sha256"]:
-                raise ResearchError("CORRUPT_ARTIFACT", "success artifact hash mismatch")
+            self._verified_artifact_content(metadata)
             artifact_hash = digest(metadata)
         updated = {**current, "state": state, "error_code": error_code,
                    "artifact_id": artifact_id, "artifact_manifest_hash": artifact_hash,
@@ -552,8 +550,7 @@ class ResearchStore:
         with self.lock():
             path = self.path / "artifacts" / sha
             if path.exists():
-                if hashlib.sha256(path.read_bytes()).hexdigest() != sha:
-                    raise ResearchError("CORRUPT_ARTIFACT", "artifact content changed")
+                self._verified_artifact_content(metadata)
             else:
                 atomic_write(path, content)
             object_id = "artifact-" + sha
