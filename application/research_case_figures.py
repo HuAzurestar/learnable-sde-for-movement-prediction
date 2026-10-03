@@ -58,7 +58,13 @@ def case_plan(result, max_operations=MAX_OPERATIONS):
         points = panels * len(samples) * (len(horizons) + len(horizons) * (len(horizons) + 1) // 2)
         figures = len(horizons) + 1
         operations = points * 8 + len(samples) * len(horizons) * len(order) + figures * 256
-        output_bound = points * 128 + figures * (16384 + 4096)
+        # Provenance is embedded in XML text and that SVG is embedded in JSON.
+        # Budget the actual frozen policy, including XML entity expansion and
+        # a second conservative JSON escaping allowance, before any rendering.
+        policy_bytes = encode(policy)
+        escaped_policy_bytes = (len(policy_bytes) + 4 * policy_bytes.count(b'&') +
+                                3 * policy_bytes.count(b'<') + 3 * policy_bytes.count(b'>'))
+        output_bound = points * 128 + figures * (2 * escaped_policy_bytes + 16384)
         if operations > max_operations or output_bound > MAX_OUTPUT_BYTES:
             raise ResearchError('RESOURCE_PLAN_REJECTED', 'joint case graph allocation exceeds quota')
         return {'schema_version': 'pirc25-case-graph-plan-v1', 'renderer_version': 'saved-paths-v1',

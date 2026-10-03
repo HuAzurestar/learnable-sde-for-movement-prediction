@@ -15,15 +15,18 @@ from experiments.pirc25.affine import code_hash
 from infrastructure.research_store import atomic_write, digest, encode
 
 
-def _input_bytes(path):
+def _input_bytes(path, *, limit=None):
     # The owner's stat preflight is not an allocation bound: a file can grow
     # after it. Check the opened object and cap the actual read before parsing.
+    limit = MAX_INPUT_BYTES if limit is None else limit
+    if type(limit) is not int or not 0 < limit <= MAX_INPUT_BYTES:
+        raise ValueError('RESOURCE_PLAN_REJECTED input quota')
     with path.open('rb') as stream:
         information = os.fstat(stream.fileno())
-        if not stat.S_ISREG(information.st_mode) or information.st_size > MAX_INPUT_BYTES:
+        if not stat.S_ISREG(information.st_mode) or information.st_size > limit:
             raise ValueError('RESOURCE_PLAN_REJECTED input bytes')
-        content = stream.read(MAX_INPUT_BYTES + 1)
-    if len(content) > MAX_INPUT_BYTES:
+        content = stream.read(limit + 1)
+    if len(content) > limit:
         raise ValueError('RESOURCE_PLAN_REJECTED input bytes')
     return content
 

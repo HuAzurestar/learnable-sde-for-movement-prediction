@@ -9,7 +9,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from application.research_case_figures import case_plan, render_case_package, MAX_OUTPUT_BYTES
+from application.research_case_figures import case_plan, render_case_package, MAX_OUTPUT_BYTES, MAX_SOURCE_BYTES
 from experiments.pirc25.affine import code_hash
 from experiments.pirc25.compare_worker import _input_bytes
 from infrastructure.research_store import atomic_write, digest, encode
@@ -21,8 +21,8 @@ def main():
     parser.add_argument('source', type=Path)
     parser.add_argument('output', type=Path)
     args = parser.parse_args()
-    request = json.loads(_input_bytes(args.request))
-    content = _input_bytes(args.source)
+    request = json.loads(_input_bytes(args.request, limit=MAX_SOURCE_BYTES))
+    content = _input_bytes(args.source, limit=MAX_SOURCE_BYTES)
     if len(content) > request['resource_plan']['maximum_input_bytes']:
         raise ValueError('RESOURCE_PLAN_REJECTED case source bytes')
     source = json.loads(content)
