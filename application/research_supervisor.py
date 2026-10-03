@@ -66,6 +66,7 @@ class ResearchSupervisor:
         monitor_errors = []
         outcome, artifact_id, error_code = "FAILED", None, "WORKER_FAILED"
         control_close_error, control_close_recorded = False, False
+        tree_stop_recorded = False
         def stop_tree():
             try:
                 if tree is not None:
@@ -90,6 +91,14 @@ class ResearchSupervisor:
 
         def past_deadline():
             return expired.is_set() or self.monotonic() >= deadline
+        def record_tree_stopped():
+            nonlocal tree_stop_recorded
+            if not tree_stop_recorded:
+                self.store.append("WORKER_TREE_STOPPED", {"attempt_id": attempt_id,
+                    "reservation_id": reservation["reservation_id"],
+                    "observed_elapsed_ms": math.ceil((self.monotonic() - start) * 1000),
+                    "confirmation": "native-job-or-process-group-no-running-descendants"})
+                tree_stop_recorded = True
         def collect_checkpoint():
             nonlocal saved_checkpoint
             if channel is None or saved_checkpoint is not None or past_deadline():
@@ -181,10 +190,7 @@ class ResearchSupervisor:
                 # A successful wrapper is not proof its descendants exited.
                 # Stop and confirm them before any owner-side result handling.
                 stop_tree()
-                self.store.append("WORKER_TREE_STOPPED", {"attempt_id": attempt_id,
-                    "reservation_id": reservation["reservation_id"],
-                    "observed_elapsed_ms": math.ceil((self.monotonic() - start) * 1000),
-                    "confirmation": "native-job-or-process-group-no-running-descendants"})
+                record_tree_stopped()
                 if completed_code is not None:
                     if past_deadline() or completed_code == 124:
                         outcome, error_code = "TIMEOUT", "TIMEOUT"
@@ -260,6 +266,12 @@ class ResearchSupervisor:
                         pass
                     else:
                         control_close_recorded = True
+            # Control release or owner I/O can leave the body before its normal
+            # stop journal. Native cleanup still proves the launched tree is
+            # stopped; preserve that evidence before authoritative settlement,
+            # including when settlement subsequently fails and retains cost.
+            if stop_confirmed and tree is not None:
+                record_tree_stopped()
             elapsed = math.ceil((self.monotonic() - start) * 1000)
             if outcome == "SUCCEEDED" and (past_deadline() or elapsed > reservation["reserved_ms"]):
                 outcome, artifact_id, error_code = "TIMEOUT", None, "TIMEOUT"
