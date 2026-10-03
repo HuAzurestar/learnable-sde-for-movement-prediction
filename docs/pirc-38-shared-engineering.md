@@ -650,3 +650,18 @@ Acceptance also binds the independent reproduction and matching TSDE tests.
 Required review and CI must pass before merging the relevant PRs. A draft PR,
 fixture run or closed-but-unmerged PR is not completion. Authoritative decisions
 and task/ref records remain in MPA `project/PIRC-38`.
+
+The loopback UI's **Upstream inputs** view uses `GET /api/upstream?limit=50&cursor=...`
+(maximum 200) and the same fresh versioned preview grant, whole source visibility,
+durable disclosure journal and final physical/expiry checks as other query views.
+Rows identify the affected registered study/cell and declared dependency IDs,
+recorded rejection codes, immutable validation/refusal event hashes and timestamps.
+`READY` is a historical metadata check, not present source availability or data
+permission; `NOT_CHECKED` and `NOT_CONFIGURED` never imply acceptance. Losing an
+already published authoritative object is an integrity refusal, not a missing
+optional input or a reason to loosen lineage checks. The view never resolves
+upstream paths, opens provider/source payloads, reruns benchmarks or returns raw
+metadata paths/details. Changed upstream facts invalidate cursors; a failed refresh
+clears the displayed upstream rows. This view does not replace the separately
+required purpose/authorization/exposure table, actual upstream acceptance-field
+reconciliation, complete BenchmarkSelection semantics or final paired acceptance.

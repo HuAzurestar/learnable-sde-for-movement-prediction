@@ -2,7 +2,7 @@
 const token = new URLSearchParams(location.hash.slice(1)).get('session') || '';
 history.replaceState(null, '', location.pathname);
 const el = id => document.getElementById(id);
-let view = 'runs', cursor = null, rows = [];
+let view = 'runs', cursor = null, rows = [], upstreamContext = null;
 let appliedFilters = {}, loadSequence = 0;
 const filterKeys = ['model', 'version', 'trainer', 'predictor', 'horizon', 'seed', 'state'];
 async function api(path, raw = false) {
@@ -301,6 +301,18 @@ async function detail(row) {
 }
 function render() {
   const target = el('results'); target.replaceChildren();
+  if (view === 'upstream') {
+    const context = text('p', `Affected study: ${upstreamContext.study_id} · Frozen snapshot: ${upstreamContext.snapshot_hash || 'Not configured'} · Recorded metadata checks, not data permission. READY describes a past check, not current source availability.`);
+    context.id = 'upstream-context'; target.append(context);
+    const grid = table(['Affected study / arm', 'Registered cell / block', 'Required input IDs', 'Recorded status', 'Rejection codes', 'Observed validation source'],
+      rows.map(row => [`${row.study_id} / ${row.arm_id}`, `${row.cell_id} / ${row.block_id}`, row.upstream_ids.join(', ') || 'No input IDs recorded', row.status,
+        row.rejected_inputs.map(item => `${item.object_id || '(cell)'}: ${item.code}`).join('; ') || 'None recorded',
+        [row.validation_ref ? `${row.validation_ref.checked_at} · ${row.validation_ref.validation_hash} · validation event ${row.validation_ref.sequence}: ${row.validation_ref.event_hash}` : '',
+          row.refusal_ref ? `Refusal event ${row.refusal_ref.sequence}: ${row.refusal_ref.event_hash}` : ''].filter(Boolean).join('; ') || 'No execution check recorded']));
+    grid.id = 'upstream-table'; target.append(grid);
+    if (!rows.length) target.append(text('p', 'No registered cells in this authorized study.'));
+    return;
+  }
   if (!rows.length) {target.append(text('p', view === 'runs' ? (Object.keys(appliedFilters).length ? 'No runs match the current filters. Reset filters to see all registered cells.' : 'No registered runs or cells are available.') : 'No frozen comparisons yet. Import a validated evidence package to view it here.', 'empty')); return;}
   if (view === 'runs') target.append(table(['Model / arm', 'Version', 'Horizon / seed / block', 'State', 'Budget (whole arm)', ''], rows.map(row => [row.selectors.model + ' / ' + row.manifest.arm_id, row.selectors.version, `${row.selectors.horizon ?? 'Unspecified'} / ${row.manifest.seed} / ${row.manifest.cell.block_id}`, text('span', row.state, 'status ' + row.state.toLowerCase()), `${row.budget.committed_ms} committed / ${row.budget.limit_ms} slot-ms`, row.manifest.run_id ? action('Inspect', () => detail(row)) : 'Registered cell'])));
   else target.append(table(['Study', 'Aggregate version', ''], rows.map(row => [row.manifest.study_id, row.manifest.aggregate_hash, action('Compare & export', () => detail(row))])));
@@ -308,14 +320,18 @@ function render() {
 async function load(more = false) {
   const sequence = ++loadSequence, selectedView = view;
   el('error').hidden = true;
+  if (selectedView === 'upstream') {el('results').replaceChildren(); el('more').hidden = true;}
   if (!token) throw new Error('Open the local session link printed by the serve command.');
-  const studies = await api('/api/studies');
-  const study = studies.items[0]?.manifest.spec; el('study').textContent = study?.study_id || 'No study';
-  el('summary').textContent = study ? `${study.cells.length} registered cells · ${study.arms.length} arms · read-only session` : 'No authorized study found.';
+  if (selectedView !== 'upstream') {
+    const studies = await api('/api/studies');
+    const study = studies.items[0]?.manifest.spec; el('study').textContent = study?.study_id || 'No study';
+    el('summary').textContent = study ? `${study.cells.length} registered cells · ${study.arms.length} arms · read-only session` : 'No authorized study found.';
+  }
   const params = new URLSearchParams(selectedView === 'runs' ? appliedFilters : {});
   if (more && cursor) params.set('cursor',cursor);
   const page = await api('/api/' + selectedView + '?' + params);
   if (sequence !== loadSequence || selectedView !== view) return;
+  if (selectedView === 'upstream') {upstreamContext = page; el('study').textContent = page.study_id; el('summary').textContent = 'Recorded upstream metadata · read-only authorized session';}
   rows = more ? rows.concat(page.items) : page.items; cursor = page.next_cursor; el('more').hidden = !cursor; render();
 }
 document.querySelectorAll('[data-view]').forEach(button => button.onclick = () => {view = button.dataset.view; document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b === button)); el('filters').hidden = view !== 'runs'; el('detail').hidden = true; cursor = null; load().catch(showError);});

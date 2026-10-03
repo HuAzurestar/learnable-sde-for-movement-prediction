@@ -37,6 +37,14 @@ def main():
             page.get_by_role("button", name="Refresh", exact=True).click()
             expect(page.locator("#upstream-table tbody tr")).to_have_count(2)
             assert not any(event["event_kind"] in {"READ_STARTED", "READ_COMPLETED", "WORKER_STARTED"} for event in store.events())
+            grant_path = store.path / "manifests" / ("authorization-" + grant["authorization_id"] + ".json")
+            grant_path.write_bytes(encode({**grant, "purposes": []}))
+            page.get_by_role("button", name="Refresh", exact=True).click()
+            # Physically changing immutable grant content breaks its recorded
+            # hash; this is actual integrity denial, not a versioned revocation.
+            expect(page.locator("#error")).to_contain_text("CORRUPT_ARTIFACT")
+            expect(page.locator("#upstream-table")).to_have_count(0)
+            page.screenshot(path=str(root / "upstream-denied.png"), full_page=True)
             receipt["status"] = "passed"
             receipt["upstream_events"] = [event for event in store.events() if event["event_kind"].startswith("UPSTREAM_")]
             browser.close()

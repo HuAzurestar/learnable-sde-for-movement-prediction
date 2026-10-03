@@ -44,7 +44,8 @@ class ResearchQuery:
     def _data_watermark(self):
         return max((event['sequence'] for event in self.store.events()
                     if event['event_kind'] in {'MANIFEST', 'ATTEMPT', 'RESERVE', 'SETTLE',
-                                              'ARM_CLOSED', 'RECOVERY_HOLD'}), default=0)
+                                              'ARM_CLOSED', 'RECOVERY_HOLD', 'UPSTREAM_VALIDATION',
+                                              'UPSTREAM_REFUSED'}), default=0)
 
     def _authorized_response(self, assemble, *, purpose='preview'):
         # This snapshot belongs only to this request and the current lock owner.
@@ -185,6 +186,44 @@ class ResearchQuery:
         result = {"items": page, "next_cursor": next_cursor, "watermark": watermark, "schema_version": self.store.SCHEMA}
         if len(json.dumps(result).encode()) > MAX_RESPONSE:
             raise ResearchError("TOO_LARGE", "query response exceeds 2 MiB; lower page limit")
+        return result
+
+    def upstream(self, *, limit=50, cursor=None):
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise ResearchError("CONTRACT_MISMATCH", "invalid upstream page limit")
+        return self._authorized_response(lambda grant: self._upstream(grant, limit, cursor))
+
+    def _upstream(self, grant, limit, cursor):
+        from .research_upstream_view import recorded_cells
+        spec = self.store.manifest("study-" + grant["study_id"])["spec"]
+        watermark = self._data_watermark()
+        spec_hash = digest(spec)
+        selector = digest({"kind": "upstream", "study_id": spec["study_id"], "spec_hash": spec_hash})
+        cells = sorted(spec["cells"], key=digest)
+        after = ""
+        if cursor:
+            try:
+                saved = json.loads(base64.urlsafe_b64decode(cursor.encode()))
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ResearchError("CURSOR_STALE", "invalid upstream cursor") from exc
+            if (not isinstance(saved, dict) or saved.get("selector") != selector
+                    or saved.get("watermark") != watermark or saved.get("after") not in {digest(cell) for cell in cells}):
+                raise ResearchError("CURSOR_STALE", "upstream facts or cursor scope changed")
+            after = saved["after"]
+        remaining = [cell for cell in cells if digest(cell) > after]
+        page = remaining[:limit]
+        rows = recorded_cells(self.store, spec, self.store.events(), page, spec_hash=spec_hash)
+        next_cursor = None
+        if len(remaining) > limit:
+            next_cursor = base64.urlsafe_b64encode(json.dumps({"selector": selector, "watermark": watermark,
+                "after": digest(page[-1])}).encode()).decode()
+        settings = spec.get("admission", {})
+        result = {"schema_version": "pirc25-upstream-view-v1", "study_id": spec["study_id"],
+                  "spec_hash": spec_hash, "snapshot_hash": settings.get("upstream_snapshot_hash"),
+                  "acceptance_catalog_hash": settings.get("upstream_acceptance_hash"), "data_authorization": "none",
+                  "items": rows, "watermark": watermark, "next_cursor": next_cursor}
+        if len(json.dumps(result).encode()) > MAX_RESPONSE:
+            raise ResearchError("TOO_LARGE", "upstream view exceeds 2 MiB; lower page limit")
         return result
 
     def run(self, run_id):
