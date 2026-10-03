@@ -243,6 +243,15 @@ and explicit test authorization. Allowed/denied access and read start are logged
 before reads; interrupted reads remain potentially exposed. Preview does not imply
 export permission. This cannot detect unrelated tools bypassing controlled entry.
 
+Raw artifact and data-provider reads rehash the immutable grant and its current
+scope after allowed/start/completed journals, before opening bytes and before
+returning them. Provider checks retain role, fit scope and frozen test/history
+bindings; raw reads retain conservative source visibility. Successful reads keep
+the original three-event journal rather than writing redundant allowed records.
+Expiry is checked again after final physical event-chain verification. Recovery
+preparation rechecks resume authority after its checkpoint source/save validation,
+before returning method state; this never creates an attempt or resets costs.
+
 Grant publication is an explicit local-owner `authorize` operation, never a web
 route. `CapabilityRegistry` routes exact transition, generic rollout, switching,
 coupled-level and rare-event capabilities. Plugins supply command builders to

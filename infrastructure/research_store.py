@@ -564,45 +564,87 @@ class ResearchStore:
             raise ResearchError("CORRUPT_ARTIFACT", "artifact hash mismatch")
         return content
 
+    def _artifact_read_allowed(self, metadata, purpose, authorization):
+        """Fresh authority, not an authorization cached by the read scope."""
+        if not isinstance(authorization, dict):
+            return False
+        try:
+            grant_id = "authorization-" + identifier(authorization.get("authorization_id"))
+            grant = self._manifest(grant_id)
+            allowed = (self._manifest("artifact-" + metadata["artifact_id"]) == metadata
+                       and grant == authorization and metadata["study_id"] == grant["study_id"]
+                       and purpose in {"preview", "export", "evaluate", "resume"}
+                       and purpose in grant["purposes"]
+                       and metadata["visibility"] in grant["visibilities"]
+                       and set(metadata["block_ids"]) <= set(grant["block_ids"]))
+        except (ResearchError, KeyError, TypeError, ValueError):
+            return False
+        if allowed and metadata["role"] != "qualification":
+            # Old derived artifacts may claim synthetic visibility. Retain the
+            # authoritative source-lineage check and the standalone owner case.
+            try:
+                study = self._manifest("study-" + metadata["study_id"])
+            except ResearchError as exc:
+                if exc.code != "MISSING_INPUT":
+                    raise
+                study = None
+            if study is not None:
+                from infrastructure.research_visibility import study_visibility
+                allowed = study_visibility(self._manifest, study["spec"]) in grant["visibilities"]
+        try:
+            # Lineage reads can themselves outlive or invalidate this grant.
+            return (allowed and self._manifest(grant_id) == grant
+                    and datetime.fromisoformat(grant["expires_at"]) > datetime.now(timezone.utc))
+        except (ResearchError, KeyError, TypeError, ValueError):
+            return False
+
+    def _require_artifact_read(self, metadata, purpose, authorization, request):
+        if not self._artifact_read_allowed(metadata, purpose, authorization):
+            self._append("EXPOSURE_DENIED", {**request, "allowed": False})
+            raise ResearchError("UNAUTHORIZED_DATA", "artifact disclosure not authorized")
+
+    def _require_artifact_expiry(self, authorization, request):
+        # No further successful I/O follows this check. The outer scope has
+        # already performed its uncached physical event-chain verification.
+        try:
+            unexpired = datetime.fromisoformat(authorization["expires_at"]) > datetime.now(timezone.utc)
+        except (KeyError, TypeError, ValueError):
+            unexpired = False
+        if not unexpired:
+            self.append("EXPOSURE_DENIED", {**request, "allowed": False})
+            raise ResearchError("UNAUTHORIZED_DATA", "artifact disclosure not authorized")
+
+    def verify_artifact_read(self, artifact_id: str, *, purpose: str, authorization: dict):
+        """Recheck a consumer's final disclosure after its extra source I/O."""
+        if not isinstance(artifact_id, str) or not re.fullmatch(r"[0-9a-f]{64}", artifact_id):
+            raise ResearchError("UNAUTHORIZED_DATA", "invalid artifact ID")
+        request = {"artifact_id": artifact_id, "purpose": purpose,
+                   "authorization_hash": digest(authorization), "allowed": True}
+        with self._read_transaction():
+            metadata = self._manifest("artifact-" + artifact_id)
+            self._require_artifact_read(metadata, purpose, authorization, request)
+        self._require_artifact_expiry(authorization, request)
+
     def read_artifact(self, artifact_id: str, *, purpose: str, authorization: dict) -> bytes:
-        if not re.fullmatch(r"[0-9a-f]{64}", artifact_id):
+        if not isinstance(artifact_id, str) or not re.fullmatch(r"[0-9a-f]{64}", artifact_id):
             raise ResearchError("UNAUTHORIZED_DATA", "invalid artifact ID")
         with self._read_transaction():
             metadata = self._manifest("artifact-" + artifact_id)
-            try:
-                grant = self._manifest("authorization-" + identifier(authorization.get("authorization_id")))
-                authentic = (grant == authorization
-                             and datetime.fromisoformat(grant["expires_at"]) > datetime.now(timezone.utc)
-                             and metadata["study_id"] == grant["study_id"])
-            except (ResearchError, KeyError, TypeError, ValueError):
-                authentic = False
-            allowed = (authentic and purpose in {"preview", "export", "evaluate", "resume"}
-                       and purpose in authorization.get("purposes", [])
-                       and metadata["visibility"] in authorization.get("visibilities", [])
-                       and set(metadata["block_ids"]) <= set(authorization.get("block_ids", [])))
-            if allowed and metadata["role"] != "qualification":
-                # Legacy supervisors could mark derived results/checkpoints as
-                # synthetic despite restricted source packages. Recompute from
-                # immutable study authority; never rewrite old manifests.
-                try:
-                    study = self._manifest("study-" + metadata["study_id"])
-                except ResearchError as exc:
-                    if exc.code != "MISSING_INPUT":
-                        raise
-                    study = None  # Standalone owner-controlled artifacts.
-                if study is not None:
-                    from infrastructure.research_visibility import study_visibility
-                    allowed = study_visibility(self._manifest, study["spec"]) in authorization.get("visibilities", [])
+            allowed = self._artifact_read_allowed(metadata, purpose, authorization)
             request = {"artifact_id": artifact_id, "purpose": purpose,
                        "authorization_hash": digest(authorization), "allowed": allowed}
             self._append("EXPOSURE_ALLOWED" if allowed else "EXPOSURE_DENIED", request)
             if not allowed:
                 raise ResearchError("UNAUTHORIZED_DATA", "artifact disclosure not authorized")
+            self._require_artifact_read(metadata, purpose, authorization, request)
             self._append("READ_STARTED", request)
+            self._require_artifact_read(metadata, purpose, authorization, request)
             try:
                 content = self._verified_artifact_content(metadata)
             except (OSError, ResearchError):
                 self._append("READ_FAILED", request)
                 raise
             self._append("READ_COMPLETED", request)
-            return content
+            self._require_artifact_read(metadata, purpose, authorization, request)
+        self._require_artifact_expiry(authorization, request)
+        return content

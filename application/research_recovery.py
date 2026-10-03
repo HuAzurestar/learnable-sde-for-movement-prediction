@@ -146,6 +146,7 @@ class SharedRecovery:
                 or not any(event["event_kind"] == "CHECKPOINT" and event["payload"] == saved
                            for event in self.store.events())):
             raise ResearchError("CONTRACT_MISMATCH", "checkpoint lacks authoritative source save and scope")
+        self.store.verify_artifact_read(checkpoint_id, purpose="resume", authorization=authorization)
         return {"run": run, "spec": spec, "cell": cell, "plugin": plugin,
                 "adapter": adapter, "state": value["state"], "checkpoint_id": checkpoint_id}
 

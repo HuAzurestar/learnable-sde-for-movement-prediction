@@ -31,9 +31,43 @@ class EvaluationExposureLedger:
                 raise ResearchError("CONTRACT_MISMATCH", "data identity incomplete")
         self.store.publish("protocol-" + protocol["protocol_id"], protocol)
 
+    def _read_authority(self, protocol, block, purpose, authorization_id, expected=None):
+        evidence, grant = {}, {}
+        try:
+            grant_id = "authorization-" + identifier(authorization_id)
+            protocol_id = "protocol-" + protocol["protocol_id"]
+            grant = self.store._manifest(grant_id)
+            purposes = {"train": {"fit"}, "selection": {"select"}, "validation": {"validate"},
+                        "test": {"evaluate"}, "final-eval": {"evaluate"}}[block["split_role"]]
+            allowed = (self.store._manifest(protocol_id) == protocol
+                       and (expected is None or grant == expected)
+                       and purpose in purposes and purpose in grant["purposes"]
+                       and protocol["study_id"] == grant["study_id"]
+                       and block["block_id"] in grant["block_ids"]
+                       and grant.get("protocol_hash") == digest(protocol))
+            if block["split_role"] in {"test", "final-eval"}:
+                allowed = allowed and grant.get("test_authorization") is True
+                if allowed:
+                    evidence = PreregistrationGate(self.store)._validate(protocol, block)
+            if purpose == "fit" and not block.get("fit_scope"):
+                allowed = False
+            # Rehash after preregistration/history I/O, not just before it.
+            allowed = (allowed and self.store._manifest(protocol_id) == protocol
+                       and self.store._manifest(grant_id) == grant
+                       and datetime.fromisoformat(grant["expires_at"]) > datetime.now(timezone.utc))
+        except (ResearchError, KeyError, ValueError, TypeError):
+            allowed = False
+        return bool(allowed), evidence, grant
+
+    def _require_read_authority(self, protocol, block, purpose, authorization_id, grant, request):
+        allowed, _, _ = self._read_authority(protocol, block, purpose, authorization_id, expected=grant)
+        if not allowed:
+            self.store._append("EXPOSURE_DENIED", {**request, "allowed": False})
+            raise ResearchError("UNAUTHORIZED_DATA", "data purpose, protocol or grant mismatch")
+
     def read(self, protocol_id: str, block_id: str, *, purpose: str,
              authorization_id: str, data_root: Path, consumer=None) -> bytes:
-        with self.store.lock():
+        with self.store._read_transaction():
             protocol = self.store._manifest("protocol-" + identifier(protocol_id))
             selected = [b for b in protocol["blocks"] if b["block_id"] == block_id]
             if len(selected) != 1:
@@ -47,25 +81,7 @@ class EvaluationExposureLedger:
                 run = self.store._manifest("run-" + attempt["run_id"])
                 if run["study_id"] != protocol["study_id"] or run["cell"]["block_id"] != block_id:
                     raise ResearchError("CONTRACT_MISMATCH", "data consumer study/block mismatch")
-            allowed = False
-            evidence = {}
-            try:
-                grant = self.store._manifest("authorization-" + identifier(authorization_id))
-                purposes = {"train": {"fit"}, "selection": {"select"}, "validation": {"validate"},
-                            "test": {"evaluate"}, "final-eval": {"evaluate"}}[block["split_role"]]
-                allowed = (purpose in purposes and purpose in grant["purposes"]
-                           and protocol["study_id"] == grant["study_id"]
-                           and block_id in grant["block_ids"]
-                           and grant.get("protocol_hash") == digest(protocol)
-                           and datetime.fromisoformat(grant["expires_at"]) > datetime.now(timezone.utc))
-                if block["split_role"] in {"test", "final-eval"}:
-                    allowed = allowed and grant.get("test_authorization") is True
-                    if allowed:
-                        evidence = PreregistrationGate(self.store)._validate(protocol, block)
-                if purpose == "fit" and not block.get("fit_scope"):
-                    allowed = False
-            except (ResearchError, KeyError, ValueError, TypeError):
-                allowed = False
+            allowed, evidence, grant = self._read_authority(protocol, block, purpose, authorization_id)
             request = {"study_id": protocol["study_id"], "protocol_hash": digest(protocol),
                        "block_id": block_id, "dataset_id": block["dataset_id"],
                        "release_id": block["release_id"], "purpose": purpose,
@@ -75,11 +91,13 @@ class EvaluationExposureLedger:
             self.store._append("EXPOSURE_ALLOWED" if allowed else "EXPOSURE_DENIED", request)
             if not allowed:
                 raise ResearchError("UNAUTHORIZED_DATA", "data purpose, protocol or grant mismatch")
+            self._require_read_authority(protocol, block, purpose, authorization_id, grant, request)
             root = Path(data_root).resolve()
             path = (root / block["path"]).resolve()
             if Path(block["path"]).is_absolute() or not path.is_relative_to(root):
                 raise ResearchError("UNAUTHORIZED_DATA", "data path escapes authorized root")
             self.store._append("READ_STARTED", request)
+            self._require_read_authority(protocol, block, purpose, authorization_id, grant, request)
             try:
                 content = path.read_bytes()
                 if hashlib.sha256(content).hexdigest() != block["sha256"]:
@@ -88,4 +106,9 @@ class EvaluationExposureLedger:
                 self.store._append("READ_FAILED", request)
                 raise
             self.store._append("READ_COMPLETED", request)
-            return content
+            self._require_read_authority(protocol, block, purpose, authorization_id, grant, request)
+        # Physical scope verification is I/O too; do not cache an earlier clock.
+        if datetime.fromisoformat(grant["expires_at"]) <= datetime.now(timezone.utc):
+            self.store.append("EXPOSURE_DENIED", {**request, "allowed": False})
+            raise ResearchError("UNAUTHORIZED_DATA", "data purpose, protocol or grant mismatch")
+        return content
