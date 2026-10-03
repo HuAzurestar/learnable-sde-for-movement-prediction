@@ -325,6 +325,54 @@ for entry in ("runtime", "paper"):
         setattr(NativeCodeSourceReads, "test_" + entry + "_" + scenario, check)
 
 
+class NativeSourceEnumeration(unittest.TestCase):
+    def exercise(self, link):
+        with tempfile.TemporaryDirectory(prefix="pirc38-source-enumeration-") as directory:
+            base = Path(directory).resolve()
+            root, outside = base / "runtime", base / "outside"
+            root.mkdir()
+            outside.mkdir()
+            for name in ("config.py", "numerics.py", "registry.py"):
+                (root / name).write_bytes(b"# synthetic source\n")
+            (root / "application").mkdir()
+            (root / "application/__init__.py").write_bytes(b"")
+            alias = root / "application/alias"
+            if link:
+                alias.symlink_to(outside, target_is_directory=True)
+                source = outside / "code.py"
+            else:
+                alias.mkdir()
+                source = alias / "code.py"
+            source.write_bytes(b"VALUE = 111\n")
+            affine = importlib.import_module("experiments.pirc25.affine")
+            with patch.object(affine, "ROOT", root):
+                if link:
+                    # Python actually follows this source directory even though
+                    # rglob('*.py') silently skips it. No alternate policy here.
+                    source.write_bytes(b"VALUE = 222\n")
+                    actual = subprocess.run([sys.executable, "-B", "-c",
+                        "import sys; sys.path.insert(0,sys.argv[1]); from application.alias.code import VALUE; print(VALUE)",
+                        str(root)], check=True, capture_output=True, text=True, timeout=10)
+                    self.assertEqual(actual.stdout.strip(), "222")
+                    with self.assertRaisesRegex(STORE.ResearchError, "UNAUTHORIZED_DATA"):
+                        affine.code_hash()
+                else:
+                    before = affine.code_hash()
+                    source.write_bytes(b"VALUE = 222\n")
+                    self.assertNotEqual(affine.code_hash(), before)
+                    self.assertEqual(affine.code_hash(), STORE.digest({
+                        path.relative_to(root).as_posix(): hashlib.sha256(
+                            path.read_text(encoding="utf-8").encode()).hexdigest()
+                        for path in root.rglob("*.py")}))
+
+    def test_normal_nested_sources_retain_legacy_hashes(self):
+        self.exercise(False)
+
+    @unittest.skipIf(os.name == "nt", "POSIX-native directory source alias")
+    def test_importable_directory_alias_cannot_be_omitted_from_code_identity(self):
+        self.exercise(True)
+
+
 if __name__ == "__main__":
     sources = (STORE, DATA, importlib.import_module("infrastructure.research_files"),
         importlib.import_module("application.research_computation"),
