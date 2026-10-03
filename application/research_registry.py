@@ -10,14 +10,21 @@ gates must actually bind/revalidate these plans before invoking a worker.
 
 from __future__ import annotations
 
+import ast
+from contextlib import ExitStack
 from dataclasses import dataclass
 import hashlib
 import inspect
+import io
 import json
 import math
+import os
 from pathlib import Path
+import re
+import tokenize
 from types import CodeType, MappingProxyType, ModuleType
 
+from infrastructure.research_files import opened_regular_file
 from infrastructure.research_store import ResearchError, digest, encode, identifier
 
 GLOBAL_LIMITS = MappingProxyType({"matrix_cells": 100_000, "paths": 1_000_000,
@@ -283,28 +290,96 @@ def _class_identity(builder):
     return result
 
 
+def _source_block(builder, payload):
+    """Inspect's block selection, using only already bounded source bytes.
+
+    Do not consult or mutate the process-global linecache: its mtime/size cache
+    is neither a fresh source read nor an opened-file integrity boundary.
+    """
+    buffer = io.BytesIO(payload)
+    encoding, _ = tokenize.detect_encoding(buffer.readline)
+    buffer.seek(0)
+    with io.TextIOWrapper(buffer, encoding=encoding) as stream:
+        lines = stream.readlines()
+    # linecache historically supplies this final newline to inspect.getblock.
+    if lines and not lines[-1].endswith('\n'):
+        lines[-1] += '\n'
+    if not lines:
+        raise OSError('could not get source code')
+    if inspect.isclass(builder):
+        class Finder(ast.NodeVisitor):
+            def __init__(self):
+                self.names, self.line = [], None
+
+            def visit_FunctionDef(self, node):
+                self.names.extend((node.name, '<locals>'))
+                self.generic_visit(node)
+                del self.names[-2:]
+
+            visit_AsyncFunctionDef = visit_FunctionDef
+
+            def visit_ClassDef(self, node):
+                if self.line is not None:
+                    return
+                self.names.append(node.name)
+                if '.'.join(self.names) == builder.__qualname__:
+                    self.line = (node.decorator_list[0] if node.decorator_list else node).lineno - 1
+                else:
+                    self.generic_visit(node)
+                self.names.pop()
+
+        finder = Finder()
+        finder.visit(ast.parse(''.join(lines)))
+        if finder.line is None:
+            raise OSError('could not find class definition')
+        start = finder.line
+    elif inspect.isfunction(builder):
+        start = builder.__code__.co_firstlineno - 1
+        pattern = re.compile(r'^(\s*def\s)|(\s*async\s+def\s)|(.*(?<!\w)lambda(:|\s))|^(\s*@)')
+        if not 0 <= start < len(lines):
+            raise OSError('lineno is out of bounds')
+        while start > 0 and not pattern.match(lines[start]):
+            start -= 1
+    else:
+        raise OSError('could not find code object')
+    return ''.join(inspect.getblock(lines[start:]))
+
+
 def implementation_hash(builder):
     """Never invokes a factory; excludes local absolute filenames from identity."""
     try:
-        path = Path(inspect.getsourcefile(builder))
-        if path.stat().st_size > 4 * 1024 * 1024:
-            reject("inspectable implementation exceeds source quota")
-        with path.open("rb") as stream:
-            defining_module = stream.read(4 * 1024 * 1024 + 1)
-        if len(defining_module) > 4 * 1024 * 1024:
-            reject("inspectable implementation exceeds source quota")
-        source = inspect.getsource(builder)
-        if len(source.encode("utf-8")) > 65536:
-            reject("inspectable implementation exceeds source quota")
-        if inspect.isclass(builder):
-            codes = {"classes": _class_identity(builder)}
-        else:
-            if not inspect.isfunction(builder):
-                reject("registered factories must be inspectable functions or classes, not opaque bound instances")
-            codes = {"callable": _function_identity(builder)}
-        return digest({"source": source, "module": builder.__module__, "qualname": builder.__qualname__,
-            "defining_module_hash": hashlib.sha256(defining_module.decode("utf-8").replace("\r\n", "\n").encode()).hexdigest(), "codes": codes})
-    except (OSError, TypeError, AttributeError, ValueError) as exc:
+        with ExitStack() as handles:
+            sources = {}
+
+            def read_source(value):
+                path = Path(os.path.abspath(inspect.getsourcefile(value)))
+                if path not in sources:
+                    stream, size, verify = handles.enter_context(opened_regular_file(path.parent, path))
+                    if size > 4 * 1024 * 1024:
+                        reject("inspectable implementation exceeds source quota")
+                    payload = stream.read(size + 1)
+                    if len(payload) != size:
+                        reject("implementation source size changed during read")
+                    verify()
+                    sources[path] = payload
+                return sources[path]
+
+            defining_module = read_source(builder)
+            original = inspect.unwrap(builder)
+            source = _source_block(original, read_source(original))
+            if len(source.encode("utf-8")) > 65536:
+                reject("inspectable implementation exceeds source quota")
+            if inspect.isclass(builder):
+                codes = {"classes": _class_identity(builder)}
+            else:
+                if not inspect.isfunction(builder):
+                    reject("registered factories must be inspectable functions or classes, not opaque bound instances")
+                codes = {"callable": _function_identity(builder)}
+            result = digest({"source": source, "module": builder.__module__, "qualname": builder.__qualname__,
+                "defining_module_hash": hashlib.sha256(defining_module.decode("utf-8").replace("\r\n", "\n").encode()).hexdigest(), "codes": codes})
+        # Every actual source handle is reverified before the identity escapes.
+        return result
+    except (OSError, TypeError, AttributeError, ValueError, SyntaxError, tokenize.TokenError) as exc:
         if isinstance(exc, ResearchError):
             raise
         raise ResearchError("CONTRACT_MISMATCH", "implementation needs bounded inspectable source") from exc
