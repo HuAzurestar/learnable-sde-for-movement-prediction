@@ -10,7 +10,7 @@ import infrastructure.research_store as store_module
 from application.research_query import ResearchQuery
 from infrastructure.research_store import ResearchError, digest, encode
 from tests.test_research_cases import case_source
-from tests.test_research_metadata_authorization import visible_comparison
+from tests.test_research_metadata_authorization import visible_comparison, corrupt_grant_after_allowed_journal
 from tests.test_research_web import service, request
 
 VIEWS = ['preview', 'export', 'manifest', 'case', 'comparison']
@@ -152,4 +152,39 @@ def test_actual_http_result_final_expiry_is_403_without_result_or_source_ids(tmp
         assert response['error']['code'] == 'UNAUTHORIZED_DATA'
         assert artifact['artifact_id'].encode() not in content
         assert package['aggregate_hash'].encode() not in content
+        assert store.events()[-1]['event_kind'] == 'DISCLOSURE_DENIED'
+
+
+@pytest.mark.parametrize('view', VIEWS)
+def test_final_permission_journal_grant_change_cannot_return_result(frozen_result, permission_clock,
+                                                                  monkeypatch, view):
+    store, artifact, _, query, package = frozen_result
+    touched = corrupt_grant_after_allowed_journal(store, query.authorization_id, 3 if view == 'case' else 2, monkeypatch)
+    with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+        view_result(query, view, artifact, package)
+    assert touched and store._read_snapshot() is None
+    assert store.events()[-1]['event_kind'] == 'DISCLOSURE_DENIED'
+
+
+@pytest.mark.parametrize('view', VIEWS)
+def test_actual_http_final_journal_grant_change_denies_result_and_source_ids(tmp_path, permission_clock,
+                                                                         monkeypatch, view):
+    with service(tmp_path) as (store, value, server):
+        result = {'spec_hash': digest(value), 'cell_hash': digest(value['cells'][0]),
+                  'protocol_hash': value['protocol_hash'], 'forecast': {}, 'metrics': {'error': 2.5}}
+        artifact = store.artifact(encode(result), role='result', visibility='synthetic',
+                                 study_id=value['study_id'], block_ids=['fixture-1'])
+        package = visible_comparison(store, value)
+        artifact_path = '/api/artifacts/' + artifact['artifact_id']
+        endpoint = {'preview': artifact_path, 'export': artifact_path + '?download=1',
+                    'manifest': artifact_path + '?manifest=1', 'case': '/api/cases/' + artifact['artifact_id'],
+                    'comparison': '/api/comparisons/' + package['aggregate_hash']}[view]
+        assert request(server, endpoint)[0] == 200
+        touched = corrupt_grant_after_allowed_journal(store, 'ui', 3 if view == 'case' else 2, monkeypatch)
+        status, _, content = request(server, endpoint)
+        assert touched
+        assert status == 403, content
+        response = json.loads(content)
+        assert set(response) == {'error'} and response['error']['code'] == 'UNAUTHORIZED_DATA'
+        assert artifact['artifact_id'].encode() not in content and package['aggregate_hash'].encode() not in content
         assert store.events()[-1]['event_kind'] == 'DISCLOSURE_DENIED'

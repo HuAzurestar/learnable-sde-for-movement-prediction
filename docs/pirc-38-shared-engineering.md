@@ -107,7 +107,9 @@ Complete evidence export assembles source results and all-attempt costs inside
 one lock-held verified read scope. It rejects changed data/reservation/recovery
 snapshots, freshly checks the main and consumed foreign-model export grants
 before and after private immutable bundle publication, and checks the earliest
-expiry again after final physical validation. Read/disclosure journals remain
+expiry again after final physical validation. All consumed grant manifests are
+rehashed after the successful permission journals; a journal-time grant change
+is durably denied before publication or return. Read/disclosure journals remain
 durable and do not invalidate an otherwise unchanged export. The CLI also
 reauthenticates its frozen bundle after target staging fsync and before atomic
 rename. A refused target publication removes only its own staging file; an

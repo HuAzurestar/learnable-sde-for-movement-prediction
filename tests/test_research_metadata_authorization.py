@@ -299,3 +299,52 @@ def test_metadata_query_retains_bounded_physical_checks_and_every_permission_jou
     assert physical_reads <= 2 * len(after)
     assert [event['event_kind'] for event in after[before:]] == ['DISCLOSURE_ALLOWED'] * 3
     assert store._read_snapshot() is None
+
+
+def corrupt_grant_after_allowed_journal(store, authorization_id, occurrence, monkeypatch):
+    grant = store.manifest('authorization-' + authorization_id)
+    original = store.append
+    allowed, touched = [], []
+
+    def change_after_journal(kind, payload, *args, **kwargs):
+        result = original(kind, payload, *args, **kwargs)
+        if kind == 'DISCLOSURE_ALLOWED' and payload['authorization_hash'] == digest(grant):
+            allowed.append(True)
+            if len(allowed) == occurrence:
+                (store.path / 'manifests' / ('authorization-' + authorization_id + '.json')).write_bytes(
+                    encode({**grant, 'purposes': []}))
+                touched.append(True)
+        return result
+
+    monkeypatch.setattr(store, 'append', change_after_journal)
+    return touched
+
+
+@pytest.mark.parametrize('view', ['study', 'run', 'comparison', 'run-detail'])
+def test_final_permission_journal_grant_change_cannot_return_metadata(metadata, permission_clock,
+                                                                    monkeypatch, view):
+    store, _, query, run, _ = metadata
+    touched = corrupt_grant_after_allowed_journal(store, query.authorization_id, 3, monkeypatch)
+    with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+        query.run(run) if view == 'run-detail' else query.list(view)
+    assert touched and store._read_snapshot() is None
+    assert store.events()[-1]['event_kind'] == 'DISCLOSURE_DENIED'
+
+
+@pytest.mark.parametrize('endpoint', ['/api/studies', '/api/runs', '/api/comparisons', 'run-detail'])
+def test_actual_http_final_journal_grant_change_denies_private_metadata(tmp_path, permission_clock,
+                                                                     monkeypatch, endpoint):
+    with service(tmp_path) as (store, value, server):
+        run = store.register_run(value['study_id'], value['cells'][0])
+        package = visible_comparison(store, value)
+        if endpoint == 'run-detail':
+            endpoint = '/api/runs/' + run
+        assert request(server, endpoint)[0] == 200
+        touched = corrupt_grant_after_allowed_journal(store, 'ui', 3, monkeypatch)
+        status, _, content = request(server, endpoint)
+        assert touched
+        assert status == 403, content
+        response = json.loads(content)
+        assert set(response) == {'error'} and response['error']['code'] == 'UNAUTHORIZED_DATA'
+        assert run.encode() not in content and package['aggregate_hash'].encode() not in content
+        assert store.events()[-1]['event_kind'] == 'DISCLOSURE_DENIED'

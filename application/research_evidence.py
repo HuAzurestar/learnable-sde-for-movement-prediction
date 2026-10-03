@@ -25,14 +25,18 @@ def evidence_visibility(store, spec, cells):
     return combine_visibility(labels)
 
 
-def authorize_study(store, study_id, authorization, purpose):
+def _study_disclosure_allowed(store, study_id, authorization, purpose):
     try:
         grant = store.manifest("authorization-" + authorization["authorization_id"])
-        allowed = (grant == authorization and grant["study_id"] == study_id
-                   and purpose in grant["purposes"]
-                   and datetime.fromisoformat(grant["expires_at"]) > datetime.now(timezone.utc))
+        return (grant == authorization and grant["study_id"] == study_id
+                and purpose in grant["purposes"]
+                and datetime.fromisoformat(grant["expires_at"]) > datetime.now(timezone.utc))
     except (ResearchError, KeyError, ValueError, TypeError):
-        allowed = False
+        return False
+
+
+def authorize_study(store, study_id, authorization, purpose):
+    allowed = _study_disclosure_allowed(store, study_id, authorization, purpose)
     store.append("DISCLOSURE_ALLOWED" if allowed else "DISCLOSURE_DENIED", {
         "study_id": study_id, "purpose": purpose, "authorization_hash": digest(authorization)})
     if not allowed:
@@ -142,8 +146,18 @@ def _fresh_export_authority(store, bundle, authorization):
         raise ResearchError("UNAUTHORIZED_DATA", "export does not cover the complete study matrix")
     require_export_visibility(store, spec, bundle["cells"], authorization)
     grants = _export_grants(bundle, authorization)
-    for grant in grants:
-        authorize_study(store, grant["study_id"], grant, "export")
+    for index, grant in enumerate(grants):
+        study_id = bundle["study_id"] if index == 0 else grant["study_id"]
+        authorize_study(store, study_id, grant, "export")
+    # All successful permission journals must finish before the last rehash.
+    # Do not add another ALLOWED journal here: its I/O would reopen the same
+    # integrity window. Denial must still be durable, and failure propagates.
+    for index, grant in enumerate(grants):
+        study_id = bundle["study_id"] if index == 0 else grant["study_id"]
+        if not _study_disclosure_allowed(store, study_id, grant, "export"):
+            store.append("DISCLOSURE_DENIED", {"study_id": study_id, "purpose": "export",
+                "authorization_hash": digest(grant)})
+            raise ResearchError("UNAUTHORIZED_DATA", "export grant changed during disclosure verification")
     _require_current_export_grants(store, grants)
     return grants
 
