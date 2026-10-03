@@ -298,10 +298,34 @@ separately and remain downloadable. Preview permission alone cannot export.
 Legacy packages without frozen figures retain their tables/CSV and explicitly
 report unavailable figures rather than silently regenerating them.
 
-Case display exports currently render saved preview data; frozen worker case-figure
-delivery remains an engineering acceptance obligation. Frozen CSV remains the
-original TSDE byte stream. Run budgets are current ledger views, not retrospectively
-attached scientific costs to an older aggregate.
+Case previews and exports also consume saved worker SVGs, never browser-generated
+plots. Prepare them offline from an already-authorized saved result:
+
+```console
+python -m experiments.pirc25 --root /absolute/runtime --store-id research render-case RESULT_ARTIFACT_ID --authorization-id my-grant --seconds 7200
+```
+
+This job uses the same supervisor, 2H job/24H original-source-arm ledger, immutable
+attempts and measured settlement proof as other shared jobs. Its source input is
+bounded to 2 MiB; the frozen path/layout policy allows at most 64 paths and 512
+points each. Joint output/operation quotas are checked before reserving or
+starting a worker. Four-state saved paths have separate position and velocity
+panels with their original units. No new predictions or metric calculations occur.
+Missing saved paths explicitly return unavailable without launching any job;
+per-segment scores are never converted into invented sample paths.
+
+GET `/api/cases/{result_artifact_id}` returns the authorized saved result and,
+when present, a verified frozen figure index and computation receipt. Queries
+never launch jobs. The index uses `horizon_index` (zero-based saved-grid ordinal,
+or null for all), with the original numeric horizon stored separately. It binds
+the source artifact/spec/cell/protocol, exact preview policy, worker request and
+settled source-arm cost. Reopening the store can reuse an intact successful job
+without resetting or charging the budget again. The browser verifies index,
+size/MIME/SHA, uses only Blob images and performs a fresh export-purpose read
+for every download. Legacy results without a saved graph retain their values
+but show the figure as unavailable. Preview-only permission never authorizes
+export. Frozen CSV remains the original TSDE byte stream. Run budgets are
+current ledger views, not retrospectively attached costs to an older aggregate.
 
 Result and aggregate manifest downloads use `?manifest=1` on the authorized
 artifact-ID endpoint. They require export permission, verify the source artifact,

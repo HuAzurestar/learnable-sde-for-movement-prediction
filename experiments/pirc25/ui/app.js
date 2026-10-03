@@ -18,33 +18,9 @@ function table(headers, values) {
   const body = document.createElement('tbody'); values.forEach(cells => {const row = document.createElement('tr'); cells.forEach(value => {const td = document.createElement('td'); td.append(value instanceof Node ? value : text('span', value)); row.append(td);}); body.append(row);}); result.append(body); return result;
 }
 function action(label, fn) {const button = text('button', label); button.onclick = () => Promise.resolve().then(fn).catch(showError); return button;}
-function forecastPlot(result, selected = null) {
-  const samples = result.forecast?.samples;
-  if (!samples?.length) return text('p', 'Per-case metrics and provenance are shown below.');
-  const points = samples.flat().filter(p => p.length >= 2 && p.slice(0,2).every(Number.isFinite));
-  if (!points.length) return text('p', 'No finite forecast coordinates available.');
-  const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', '0 0 600 300'); svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', 'Forecast state sample paths; display only');
-  const xs = points.map(p=>p[0]), ys = points.map(p=>p[1]);
-  const minX = Math.min(...xs), minY = Math.min(...ys), spanX = Math.max(...xs)-minX || 1, spanY = Math.max(...ys)-minY || 1;
-  samples.forEach(sample => {const visible = selected === null ? sample : sample.slice(0, selected + 1); const line = document.createElementNS(ns, 'polyline'); line.setAttribute('points', visible.map(p => `${40+(p[0]-minX)/spanX*520},${250-(p[1]-minY)/spanY*220}`).join(' ')); line.setAttribute('fill','none'); line.setAttribute('stroke','#287c9c'); line.setAttribute('stroke-opacity','.4'); svg.append(line);});
-  const caption = document.createElementNS(ns,'text'); caption.setAttribute('x','40'); caption.setAttribute('y','285'); caption.textContent = `${result.state_order[0]} (${result.units[0]}) / ${result.state_order[1]} (${result.units[1]}) · ${samples.length} sample paths · display only`; svg.append(caption); return svg;
-}
 function saveBlob(blob, filename) {
   const url = URL.createObjectURL(blob), link = document.createElement('a');
   link.href = url; link.download = filename; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-function sourceFigure(svg, source, title) {
-  if (svg.namespaceURI !== 'http://www.w3.org/2000/svg') throw new Error('No figure is available for this result.');
-  const copy = svg.cloneNode(true), ns = copy.namespaceURI;
-  copy.setAttribute('xmlns', ns);
-  const metadata = document.createElementNS(ns, 'metadata'); metadata.textContent = JSON.stringify(source); copy.prepend(metadata);
-  const description = document.createElementNS(ns, 'desc'); description.textContent = title + ' · ' + JSON.stringify(source); copy.prepend(description);
-  const bounds = copy.getAttribute('viewBox').split(' ').map(Number), height = bounds[3];
-  copy.setAttribute('viewBox', `0 0 ${bounds[2]} ${height + 65}`);
-  ['artifact_id','spec_hash','protocol_hash'].forEach((key,i) => {const caption = document.createElementNS(ns,'text'); caption.setAttribute('x','12'); caption.setAttribute('y',String(height + 15 + i*16)); caption.setAttribute('font-size','9'); caption.textContent = `${key}: ${source[key] || 'unspecified'}`; copy.append(caption);});
-  saveBlob(new Blob([new XMLSerializer().serializeToString(copy)], {type:'image/svg+xml'}), 'research-figure.svg');
 }
 function dimensionsLabel(value) {return JSON.stringify(value || {});}
 function selector(id, label, values, changed) {
@@ -61,20 +37,49 @@ function budgetView(budget) {
   return section;
 }
 async function inspectCase(target, artifactId) {
-  const result = await api('/api/artifacts/' + encodeURIComponent(artifactId));
+  inspectCase.views ??= new WeakMap();
+  inspectCase.views.get(target)?.dispose();
+  let previewURL = null, drawSequence = 0;
+  const state = {active:true, dispose:() => {state.active = false; ++drawSequence; if (previewURL) {URL.revokeObjectURL(previewURL); previewURL = null;}}};
+  inspectCase.views.set(target, state);
+  const data = await api('/api/cases/' + encodeURIComponent(artifactId));
+  if (!state.active) return;
+  const result = data.result;
   const section = document.createElement('section'), chart = document.createElement('div');
   const horizons = result.forecast?.horizons;
   let selected = null;
-  const draw = () => {chart.replaceChildren(forecastPlot(result, selected)); chart.id = 'case-chart'; chart.dataset.horizon = selected === null ? 'all' : String(horizons[selected]);};
-  if (Array.isArray(horizons) && horizons.length) section.append(selector('case-horizon', 'Case horizon', [['all','All horizons'], ...horizons.map((h,i) => [String(i), `${h} ${result.time_unit || '(time unit unspecified)'}`])], () => {const value = el('case-horizon').value; selected = value === 'all' ? null : Number(value); draw();}));
+  const draw = async () => {
+    const sequence = ++drawSequence, selection = selected;
+    if (previewURL) {URL.revokeObjectURL(previewURL); previewURL = null;}
+    chart.replaceChildren(); chart.id = 'case-chart';
+    chart.dataset.horizon = selection === null ? 'all' : String(horizons[selection]);
+    try {
+      const entry = frozenCaseEntry(data, artifactId, selection);
+      if (!entry) {chart.append(text('p','Frozen case figure unavailable in this version. Saved values remain below; use the authorized offline render-case command to prepare figures.')); return;}
+      const blob = await frozenFigureBlob(entry);
+      if (!state.active || sequence !== drawSequence) return;
+      previewURL = URL.createObjectURL(blob);
+      const image = document.createElement('img'); image.src = previewURL;
+      image.alt = 'Frozen saved case paths; display only'; image.dataset.artifactId = entry.sha256;
+      image.dataset.horizon = selection === null ? 'all' : String(entry.horizon);
+      image.dataset.horizonIndex = selection === null ? 'all' : String(selection);
+      chart.append(image);
+    } catch (error) {if (state.active && sequence === drawSequence) chart.append(text('p','Frozen case figure unavailable: ' + error.message));}
+  };
+  if (Array.isArray(horizons) && horizons.length) section.append(selector('case-horizon', 'Case horizon', [['all','All horizons'], ...horizons.map((h,i) => [String(i), `${h} ${result.time_unit || '(time unit unspecified)'}`])], async () => {const value = el('case-horizon').value; selected = value === 'all' ? null : Number(value); await draw();}));
   else section.append(text('p', 'No explicit horizon grid in this artifact; horizon switching is unavailable.'));
-  draw(); section.append(chart);
+  section.append(chart);
   const preview = document.createElement('section'); preview.id = 'preview-provenance';
   preview.append(text('h3','Preview provenance'));
   const policy = result.forecast?.preview || {};
   preview.append(table(['Declared field','Value'], ['case_selection_rule','sample_selection_rule','sample_ids','generation_version','n_samples'].map(key => [key,policy[key] === undefined ? 'Unavailable — not declared in this artifact' : JSON.stringify(policy[key])])));
-  preview.append(text('p',`${result.forecast?.samples?.length ?? 0} saved paths displayed; no best-case selection or metric recomputation is performed by this viewer.`));
+  preview.append(text('p',`${result.forecast?.samples?.length ?? 0} saved paths; displayed only when a verified frozen graph exists. No best-case selection or metric recomputation is performed by this viewer.`));
   section.append(preview);
+  const cost = data.computation_receipt?.cost, trace = document.createElement('section'); trace.id = 'case-computation';
+  trace.append(text('h3','Frozen case graph source & cost'));
+  trace.append(text('p',`Source ${artifactId} · ${cost?.charged_ms ?? 'Unknown'} ${cost?.unit || 'slot-ms'} · charged arm ${cost?.arm_id || 'Unknown'}. Graph cost is measured once for the whole saved-path job, not repeated on horizon switching.`));
+  trace.append(text('pre',JSON.stringify({computation_ref:data.package?.computation_ref ?? null,computation_receipt:data.computation_receipt ?? null,figure_index:data.figure_index ?? null},null,2)));
+  section.append(trace);
   const optional = document.createElement('section'); optional.id = 'optional-payloads';
   optional.append(text('h3','Saved optional payloads'));
   const fields = [['History',result.observations?.history],['Evaluation truth',result.observations?.truth],
@@ -94,12 +99,44 @@ async function inspectCase(target, artifactId) {
   section.append(optional);
   section.append(action('Download result manifest', async () => saveBlob(await api('/api/artifacts/' + encodeURIComponent(artifactId) + '?manifest=1',true),'research-result-manifest.json')));
   section.append(action('Export case figure', async () => {
-    const fresh = await (await api('/api/artifacts/' + encodeURIComponent(artifactId) + '?download=1', true)).text();
-    const exported = JSON.parse(fresh);
-    sourceFigure(forecastPlot(exported, selected), {artifact_id:artifactId, spec_hash:exported.spec_hash, cell_hash:exported.cell_hash,
-      protocol_hash:exported.protocol_hash, horizon:selected === null ? null : horizons[selected], units:exported.units}, 'Forecast display; not a recomputed metric');
+    const entry = frozenCaseEntry(data, artifactId, selected);
+    if (!entry) throw new Error('Frozen case figure unavailable in this version.');
+    saveBlob(await frozenFigureBlob(entry, true), entry.filename);
   }));
   section.append(text('pre', JSON.stringify(result, null, 2))); target.querySelector('[data-case]')?.remove(); section.dataset.case = 'true'; target.append(section);
+  await draw();
+}
+function frozenCaseEntry(data, sourceId, selected) {
+  if (data.figure_status === 'UNAVAILABLE') return null;
+  const index = data.figure_index, result = data.result, published = data.package, receipt = data.computation_receipt;
+  const horizons = result.forecast?.horizons;
+  if (data.schema_version !== 'pirc25-case-view-v1' || data.case_id !== sourceId || data.figure_status !== 'AVAILABLE' ||
+      index?.schema_version !== 'pirc25-case-figure-index-v1' || index.source_artifact_id !== sourceId ||
+      ['spec_hash','cell_hash','protocol_hash'].some(key => index[key] !== result[key]) ||
+      published?.schema_version !== 'pirc25-case-package-v1' || published.case_id !== sourceId ||
+      JSON.stringify(published.figure_index) !== JSON.stringify(index) ||
+      !index.computation_ref || JSON.stringify(index.computation_ref) !== JSON.stringify(published.computation_ref) ||
+      receipt?.schema_version !== 'pirc25-case-graph-receipt-v1' ||
+      JSON.stringify(receipt.computation_ref) !== JSON.stringify(index.computation_ref) ||
+      !Array.isArray(horizons) || horizons.length < 1 || horizons.length > 512 ||
+      !Array.isArray(index.figures) || index.figures.length !== horizons.length + 1 ||
+      !Array.isArray(published.figures) || published.figures.length !== index.figures.length) throw new Error('Frozen case index mismatch.');
+  const seen = new Set();
+  for (const entry of index.figures) {
+    const ordinal = entry.horizon_index, hash = entry.sha256;
+    const matches = published.figures.filter(value => value.sha256 === hash);
+    if ((ordinal !== null && (!Number.isSafeInteger(ordinal) || ordinal < 0 || ordinal >= horizons.length)) ||
+        entry.horizon !== (ordinal === null ? null : horizons[ordinal]) || seen.has(ordinal) ||
+        typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash) || entry.filename !== `case-figure-${hash}.svg` ||
+        entry.kind !== 'case' || entry.media_type !== 'image/svg+xml' ||
+        !Number.isSafeInteger(entry.size_bytes) || entry.size_bytes < 1 || entry.size_bytes > 2*1024*1024 ||
+        matches.length !== 1 || matches[0].artifact_id !== hash ||
+        ['filename','kind','horizon','horizon_index','size_bytes','media_type'].some(key => matches[0][key] !== entry[key])) throw new Error('Frozen case package mismatch.');
+    seen.add(ordinal);
+  }
+  const selectedEntry = index.figures.find(entry => entry.horizon_index === selected);
+  if (!selectedEntry) throw new Error('Frozen case selection mismatch.');
+  return selectedEntry;
 }
 function comparisonRows(aggregate, horizon) {
   return aggregate.arms.filter(arm => horizon === 'all' || String(arm.comparison_dimensions?.horizon) === horizon);
@@ -167,7 +204,7 @@ function frozenComparisonEntry(data, horizon) {
   }
   return entry;
 }
-async function frozenComparisonBlob(entry, exporting = false) {
+async function frozenFigureBlob(entry, exporting = false) {
   if (!entry) throw new Error('Frozen figure unavailable in this version; generate an authorized budgeted comparison.');
   const blob = await api('/api/artifacts/' + encodeURIComponent(entry.sha256) + (exporting ? '?download=1' : ''), true);
   if (blob.type.split(';', 1)[0].trim().toLowerCase() !== 'image/svg+xml' || blob.size !== entry.size_bytes || blob.size > 2*1024*1024) {
@@ -205,7 +242,7 @@ function showComparison(target, data) {
     pane.append(adjudicationView(aggregate,data.computation_receipt));
     const figure = text('div','Loading frozen worker figure…'); figure.id = 'comparison-figure'; pane.append(figure);
     try {
-      const entry = frozenComparisonEntry(data, selectedHorizon), blob = await frozenComparisonBlob(entry);
+      const entry = frozenComparisonEntry(data, selectedHorizon), blob = await frozenFigureBlob(entry);
       if (sequence !== drawSequence) return;
       const image = document.createElement('img'), url = URL.createObjectURL(blob); previewURL = url;
       image.alt = `Frozen comparison ${aggregate.aggregate_hash} · horizon ${selectedHorizon}`;
@@ -223,7 +260,7 @@ function showComparison(target, data) {
   target.append(action('Export comparison figure', async () => {
     const entry = frozenComparisonEntry(data, horizon);
     // Never reuse preview bytes: export must pass a fresh server-side grant check.
-    saveBlob(await frozenComparisonBlob(entry, true), entry.filename);
+    saveBlob(await frozenFigureBlob(entry, true), entry.filename);
   }));
   target.append(action('Download frozen CSV', () => download(data.package.table)));
   if (data.package['computation-receipt']) target.append(action('Download computation receipt', async () => saveBlob(await api('/api/artifacts/' + encodeURIComponent(data.package['computation-receipt']) + '?download=1',true),'research-computation-receipt.json')));
@@ -236,7 +273,7 @@ async function download(id) {
   const url = URL.createObjectURL(blob), link = document.createElement('a'); link.href = url; link.download = 'research-metrics.csv'; link.click(); URL.revokeObjectURL(url);
 }
 async function detail(row) {
-  const target = el('detail-content'); target.replaceChildren(); el('detail').hidden = false;
+  const target = el('detail-content'); inspectCase.views?.get(target)?.dispose(); target.replaceChildren(); el('detail').hidden = false;
   if (view === 'comparisons') {
     const data = await api('/api/comparisons/' + encodeURIComponent(row.manifest.aggregate_hash));
     showComparison(target, data);

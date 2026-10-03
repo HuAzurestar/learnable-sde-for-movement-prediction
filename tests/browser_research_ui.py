@@ -236,6 +236,103 @@ def check_managed_adjudication(browser, root, expect):
         thread.join(timeout=5)
 
 
+def check_managed_cases(browser, root, expect):
+    """Owner-published synthetic paths; actual budgeted 2D/4D graph workers."""
+    import xml.etree.ElementTree as ET
+    from application.research_cases import CaseGraphRunner
+    from application.research_query import ResearchQuery
+    from tests.test_research_cases import case_source
+
+    receipts = []
+    for four_state in (False, True):
+        store, spec, artifact, source, grant = case_source(root / ('case-4d' if four_state else 'case-2d'), four_state=four_state)
+        produced = CaseGraphRunner(store).run(artifact['artifact_id'], authorization_id=grant['authorization_id'], budget=BudgetSpec(20))
+        assert produced['state'] == 'SUCCEEDED', produced
+        viewed = ResearchQuery(store, grant['authorization_id']).case(artifact['artifact_id'])
+        before_starts = sum(e['event_kind'] == 'WORKER_STARTED' for e in store.events())
+        before_cost = BudgetLedger(store).balance('affine')['committed_ms']
+        server = make_server(store, grant['authorization_id'])
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            page = browser.new_page()
+            page.set_default_timeout(6000)
+            errors, requests = [], []
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.on('request', lambda request: requests.append((request.method, request.url)))
+            page.goto(f'http://127.0.0.1:{server.server_port}/#session={server.session_token}')
+            expect(page.locator('#results tbody tr')).to_have_count(1)
+            page.get_by_role('button', name='Inspect', exact=True).click()
+            page.get_by_role('button', name='Inspect result', exact=False).click()
+            expect(page.locator('#case-computation')).to_contain_text(str(viewed['computation_receipt']['cost']['charged_ms']))
+            expect(page.locator('#case-computation')).to_contain_text('affine')
+            expect(page.locator('#preview-provenance')).to_contain_text('case-fixture-v1')
+            expect(page.locator('#optional-payloads')).to_contain_text('Density: unavailable')
+            for selection in ('all', '0', '1', 'all'):
+                page.locator('#case-horizon').select_option(selection)
+                entry = next(e for e in viewed['package']['figures'] if e['horizon_index'] == (None if selection == 'all' else int(selection)))
+                image = page.locator('#case-chart img')
+                expect(image).to_have_attribute('data-artifact-id', entry['artifact_id'])
+                expect(image).to_have_attribute('data-horizon-index', selection)
+                page.wait_for_function("document.querySelector('#case-chart img')?.naturalWidth > 0")
+                expect(page.locator('#case-chart svg')).to_have_count(0)
+                with page.expect_download() as downloaded:
+                    page.get_by_role('button', name='Export case figure', exact=True).click()
+                content = Path(downloaded.value.path()).read_bytes()
+                assert content == store.read_artifact(entry['artifact_id'], purpose='export', authorization=grant)
+                assert downloaded.value.suggested_filename == entry['filename']
+                metadata = json.loads(ET.fromstring(content).find('{http://www.w3.org/2000/svg}metadata').text)
+                assert metadata['source_artifact_id'] == artifact['artifact_id']
+                assert metadata['preview_policy'] == source['forecast']['preview']
+                assert metadata['horizon_index'] == entry['horizon_index'] and metadata['horizon'] == entry['horizon']
+                assert metadata['computation_ref'] == viewed['package']['computation_ref']
+                if four_state:
+                    assert b'vx (m/s)' in content and b'vy (m/s)' in content
+            assert any('/api/cases/' + artifact['artifact_id'] in url for _, url in requests)
+            assert all(method == 'GET' for method, _ in requests)
+            assert not errors, errors
+            page.screenshot(path=str(root / ('case-4d.png' if four_state else 'case-2d.png')), full_page=True)
+            page.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+        store.authorize({**grant, 'authorization_id': 'case-preview', 'purposes': ['preview']})
+        server = make_server(store, 'case-preview')
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            page = browser.new_page()
+            downloads = []
+            page.on('download', lambda download: downloads.append(download))
+            page.goto(f'http://127.0.0.1:{server.server_port}/#session={server.session_token}')
+            page.get_by_role('button', name='Inspect', exact=True).click()
+            page.get_by_role('button', name='Inspect result', exact=False).click()
+            expect(page.locator('#case-chart img')).to_be_visible()
+            page.wait_for_function("document.querySelector('#case-chart img')?.naturalWidth > 0")
+            with page.expect_response(lambda response: 'download=1' in response.url) as response:
+                page.get_by_role('button', name='Export case figure', exact=True).click()
+            assert response.value.status == 403
+            expect(page.locator('#error')).to_contain_text('UNAUTHORIZED_DATA')
+            assert not downloads
+            # Corrupt only the disposable public figure: no regenerated fallback.
+            (store.path / 'artifacts' / viewed['package']['figures'][1]['artifact_id']).write_bytes(b'corrupt synthetic SVG')
+            page.locator('#case-horizon').select_option('0')
+            expect(page.locator('#case-chart')).to_contain_text('CORRUPT_ARTIFACT')
+            expect(page.locator('#case-chart img, #case-chart svg')).to_have_count(0)
+            page.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+        assert sum(e['event_kind'] == 'WORKER_STARTED' for e in store.events()) == before_starts
+        assert BudgetLedger(store).balance('affine')['committed_ms'] == before_cost
+        receipts.append({'source_artifact_id': artifact['artifact_id'], 'state_order': source['state_order'],
+                         'computation_receipt': viewed['computation_receipt'], 'figure_index': viewed['figure_index'],
+                         'source_qualification': 'owner-published-synthetic-display-fixture'})
+    return receipts
+
+
 def main():
     from playwright.sync_api import sync_playwright, expect
     root = Path(tempfile.mkdtemp(prefix="pirc38-ui-acceptance-"))
@@ -295,10 +392,14 @@ def main():
             manifest = json.loads(Path(downloaded.value.path()).read_bytes())
             assert manifest["bindings"]["spec_hash"] == digest(spec)
             assert "forecast" not in manifest and "samples" not in json.dumps(manifest)
-            with page.expect_download() as downloaded:
-                page.get_by_role("button", name="Export case figure", exact=True).click()
-            content = Path(downloaded.value.path()).read_text(encoding="utf-8")
-            assert '"horizon":2' in content and '"artifact_id"' in content and digest(spec) in content
+            # Legacy source has no supervised graph: retain saved values, no fabrication.
+            expect(page.locator('#case-chart')).to_contain_text('Frozen case figure unavailable')
+            expect(page.locator('#case-chart img, #case-chart svg')).to_have_count(0)
+            case_downloads = []
+            page.on('download', lambda download: case_downloads.append(download))
+            page.get_by_role('button', name='Export case figure', exact=True).click()
+            expect(page.locator('#error')).to_contain_text('Frozen case figure unavailable')
+            assert not case_downloads
             page.locator("#filter-model").fill("candidate")
             page.locator("#filter-seed").fill("2")
             page.get_by_role("button", name="Apply filters", exact=True).click()
@@ -371,12 +472,14 @@ def main():
             assert not errors, errors
             check_failure_states(browser, root, expect)
             managed_adjudication = check_managed_adjudication(browser, root, expect)
+            managed_cases = check_managed_cases(browser, root, expect)
             browser_version = browser.version
             browser.close()
         end_refs = refs()
         assert start_refs == end_refs, "Source refs changed during browser acceptance"
         receipt = {"status": "passed", "spec_hash": digest(spec), "aggregate_hash": aggregate["aggregate_hash"],
                    "managed_adjudication": managed_adjudication,
+                   "managed_cases": managed_cases,
                    "scientific_qualification": "not-granted", "root": str(root), "repositories": end_refs,
                    "python": platform.python_version(), "browser": browser_version}
         (root / "receipt.json").write_bytes(encode(receipt))
