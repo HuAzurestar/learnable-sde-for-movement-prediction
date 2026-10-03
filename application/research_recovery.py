@@ -156,7 +156,17 @@ class SharedRecovery:
                                        reason="resume from verified " + checkpoint_id)
         self.store.append("RESUME", {"attempt_id": retry, "parent_attempt_id": attempt_id,
                                     "checkpoint_id": checkpoint_id, "resume_level": prepared["plugin"].resume_level})
+
+        def command(output):
+            # prepare's grant cannot authorize handing state to a plugin after
+            # retry/resume/admission I/O. The distinct input grant is not a
+            # substitute for current permission to read this checkpoint state.
+            # A denial here follows the supervisor's normal failed-preflight
+            # settlement, before the builder writes state or launches a worker.
+            self.store.verify_artifact_read(checkpoint_id, purpose="resume", authorization=authorization)
+            return prepared["adapter"].command_builder(output, prepared["spec"], prepared["cell"], prepared["state"])
+
         return AdmissionGate(self.store).run(retry, prepared["spec"], prepared["cell"], prepared["plugin"],
-            lambda output: prepared["adapter"].command_builder(output, prepared["spec"], prepared["cell"], prepared["state"]),
+            command,
             budget, recovery_builder=prepared["adapter"].command_builder,
             checkpoint_handler=self.checkpoint_handler(retry))

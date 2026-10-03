@@ -273,6 +273,12 @@ a completed boundary. Affine adapters declare restart-only. Child packages own
 their optimizer/Brownian/sampling state and qualification. Checkpoints never
 restore budget balances.
 
+The actual recovery command handoff revalidates the checkpoint's resume grant
+after retry/resume/admission I/O, before passing method state to the registered
+builder. A distinct data/execution grant cannot replace this restore permission.
+Denial uses failed-preflight settlement with zero new worker charge, retains the
+parent's spent cost and creates neither a resume-state file nor a native worker.
+
 ## Frozen evidence and read-only UI
 
 PSDE exports the complete expected-cell matrix through an export grant. TSDE owns
