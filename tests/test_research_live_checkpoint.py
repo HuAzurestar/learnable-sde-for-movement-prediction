@@ -47,7 +47,11 @@ start = time.monotonic()
 for step in range(position, 300):
     for index in range(4):
         accumulator[index] += math.sqrt(0.01) * rng.gauss(0., 1.)
-    time.sleep(0.01)
+    # Keep this synthetic 300-step workload on its three-second schedule.
+    # Windows sleep rounding must not accumulate into another workload or
+    # consume the owner's result/checkpoint margin. Budget deadlines are fixed.
+    target_elapsed = (step + 1 - position) * 0.01
+    time.sleep(max(0., target_elapsed - (time.monotonic() - start)))
     if control is not None and control.poll() is not None:
         saved = {'step': step + 1, 'data_position': step + 1,
             'method_state': {'accumulator': accumulator},

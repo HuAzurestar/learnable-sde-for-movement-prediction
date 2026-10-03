@@ -187,6 +187,62 @@ for scenario in ("normal", "normal_dotdot", "initial", "open"):
     setattr(NativeRootParents, "test_parent_" + scenario, check)
 
 
+class NativeMetadataReads(unittest.TestCase):
+    def exercise(self, entry, scenario):
+        with tempfile.TemporaryDirectory(prefix="pirc38-metadata-read-") as directory:
+            base = Path(directory).resolve()
+            store = STORE.ResearchStore(base, "metadata-read", initialize=True)
+            expected = {"scope": "synthetic owner metadata"}
+            store.publish("synthetic-metadata", expected)
+            target = (store.path / "events" / "0000000000000001.json" if entry == "event"
+                else store.path / "manifests" / "synthetic-metadata.json")
+            outside = base / "outside"
+            outside.mkdir()
+            external = outside / target.name
+            external.write_bytes(target.read_bytes())
+            touched = []
+            def change():
+                self.assertFalse(touched)
+                touched.append(True)
+                if scenario == "replace":
+                    os.replace(external, target)
+                elif scenario == "symlink":
+                    target.unlink()
+                    target.symlink_to(external)
+                else:
+                    target.parent.rename(base / "original-metadata")
+                    target.parent.symlink_to(outside, target_is_directory=True)
+            try:
+                if scenario == "root_initial":
+                    change()
+                with ExitStack() as patches:
+                    observer = SimpleNamespace(setattr=lambda obj, name, value: patches.enter_context(patch.object(obj, name, value)))
+                    reads, _ = observe_file(observer, target,
+                        before_open=change if scenario in {"replace", "symlink", "root_open"} else None)
+                    if scenario == "normal":
+                        self.assertEqual(store.manifest("synthetic-metadata"), expected)
+                        self.assertTrue(reads, "metadata check did not reach a real read")
+                    else:
+                        with self.assertRaisesRegex(STORE.ResearchError, "UNAUTHORIZED_DATA|CORRUPT_ARTIFACT"):
+                            store.manifest("synthetic-metadata")
+                        self.assertEqual(touched, [True])
+                        self.assertEqual(reads, [], "redirected or replaced metadata bytes were consumed")
+            finally:
+                if target.is_symlink():
+                    target.unlink()
+                if target.parent.is_symlink():
+                    target.parent.unlink()
+
+
+for entry in ("manifest", "event"):
+    for scenario in ("normal", "replace", "symlink", "root_initial", "root_open"):
+        def check(self, entry=entry, scenario=scenario):
+            self.exercise(entry, scenario)
+        if os.name == "nt" and scenario in {"symlink", "root_initial", "root_open"}:
+            check = unittest.skip("POSIX-native metadata file/directory symlink")(check)
+        setattr(NativeMetadataReads, "test_" + entry + "_" + scenario, check)
+
+
 if __name__ == "__main__":
     for module in (STORE, DATA):
         print(module.__name__ + "_sha256=" + hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest(), flush=True)
