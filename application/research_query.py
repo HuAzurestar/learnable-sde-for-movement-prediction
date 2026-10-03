@@ -33,6 +33,13 @@ class ResearchQuery:
         return grant
 
     def _objects(self, kind, grant):
+        # Rebuild and every page must see the same physical authority chain.
+        # Another read's disclosure journal is not a data change, but must not
+        # land between these index operations and invalidate their watermark.
+        with self.store._read_transaction():
+            return self._project_objects(kind, grant)
+
+    def _project_objects(self, kind, grant):
         index = ResearchIndex(self.store)
         index.rebuild()
         items, after = [], ""
