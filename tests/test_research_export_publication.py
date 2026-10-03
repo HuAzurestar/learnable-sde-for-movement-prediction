@@ -303,3 +303,28 @@ def test_native_publication_probe_remains_executable():
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert 'Production SHA256:' in completed.stdout
     assert 'Ran 7 tests' in completed.stderr
+
+
+@pytest.mark.parametrize('immutable', [False, True] if store_module.os.name == 'nt' else [False])
+def test_moved_staging_path_reused_by_another_writer_is_not_deleted(tmp_path, monkeypatch, immutable):
+    # Default replace moves on every platform; immutable rename moves on
+    # Windows, while POSIX link retains this writer's staging until cleanup.
+    output = tmp_path / 'moved.json'
+    staging = output.with_name('.moved.json.fixed.staging')
+    monkeypatch.setattr(store_module.uuid, 'uuid4', lambda: SimpleNamespace(hex='fixed'))
+    original_sync = store_module._sync_directory
+    touched = []
+
+    def sync(path):
+        original_sync(path)
+        assert output.read_bytes() == b'completed immutable export'
+        assert not staging.exists(), 'publication must have moved the original staging'
+        with staging.open('xb') as stream:
+            stream.write(b'new writer owns this reused staging name')
+        touched.append(True)
+
+    monkeypatch.setattr(store_module, '_sync_directory', sync)
+    store_module.atomic_write(output, b'completed immutable export', immutable=immutable)
+    assert touched
+    assert output.read_bytes() == b'completed immutable export'
+    assert staging.read_bytes() == b'new writer owns this reused staging name'
