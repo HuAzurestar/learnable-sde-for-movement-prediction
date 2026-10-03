@@ -119,6 +119,45 @@ def test_valid_raw_read_keeps_original_bytes_and_durable_three_event_journal(tmp
     assert store._read_snapshot() is None
 
 
+def fault_after_final_chain(store, grant, fault, reads, clock, monkeypatch):
+    original = store._events
+    touched = []
+
+    def physical():
+        result = original()
+        if reads and store._read_snapshot() is None and not touched:
+            touched.append(True)
+            if fault == 'grant':
+                path = store.path / 'manifests' / ('authorization-' + grant['authorization_id'] + '.json')
+                path.write_bytes(encode({**grant, 'purposes': []}))
+            else:
+                clock[0] = True
+        return result
+
+    monkeypatch.setattr(store, '_events', physical)
+    return touched
+
+
+@pytest.mark.parametrize('purpose', ['preview', 'export', 'evaluate', 'resume'])
+def test_raw_read_rehashes_grant_after_real_final_physical_validation(tmp_path, monkeypatch, read_clock, purpose):
+    store, artifact, grant, _ = raw_source(tmp_path)
+    reads = []
+    original = store._verified_artifact_content
+
+    def read(metadata):
+        result = original(metadata)
+        reads.append(True)
+        return result
+
+    monkeypatch.setattr(store, '_verified_artifact_content', read)
+    touched = fault_after_final_chain(store, grant, 'grant', reads, read_clock, monkeypatch)
+    with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+        store.read_artifact(artifact['artifact_id'], purpose=purpose, authorization=grant)
+    assert touched and len(reads) == 1
+    assert store.events()[-1]['event_kind'] == 'EXPOSURE_DENIED'
+    assert store._read_snapshot() is None
+
+
 def provider_source(tmp_path, purpose):
     store, content, protocol = final_eval(tmp_path, None)
     block = protocol['blocks'][0]
@@ -169,6 +208,29 @@ def test_valid_provider_read_keeps_role_scope_bytes_and_frozen_evidence(tmp_path
     if purpose == 'evaluate':
         assert events[-1]['payload']['preregistration_hash']
         assert events[-1]['payload']['frozen_sequence'] < events[-1]['sequence']
+
+
+@pytest.mark.parametrize('purpose', ['fit', 'select', 'validate', 'evaluate'])
+@pytest.mark.parametrize('fault', ['grant', 'expiry'])
+def test_provider_revalidates_after_real_final_physical_validation(tmp_path, monkeypatch, read_clock, purpose, fault):
+    store, ledger, grant, _ = provider_source(tmp_path, purpose)
+    original = Path.read_bytes
+    reads = []
+
+    def read(path):
+        result = original(path)
+        if path == tmp_path / 'block.bin':
+            reads.append(True)
+        return result
+
+    monkeypatch.setattr(Path, 'read_bytes', read)
+    touched = fault_after_final_chain(store, grant, fault, reads, read_clock, monkeypatch)
+    with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+        ledger.read('reserved', 'test-block', purpose=purpose,
+                    authorization_id=grant['authorization_id'], data_root=tmp_path)
+    assert touched and len(reads) == 1
+    assert store.events()[-1]['event_kind'] == 'EXPOSURE_DENIED'
+    assert store._read_snapshot() is None
 
 
 @pytest.mark.parametrize('level', ['exact', 'chunk'])
