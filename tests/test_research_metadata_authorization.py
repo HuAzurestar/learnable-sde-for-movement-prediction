@@ -218,3 +218,84 @@ def test_expiry_in_final_permission_journal_cannot_disclose_metadata(metadata, p
         query.list('run')
     assert len(allowed) == 3
     assert store.events()[-1]['event_kind'] == 'DISCLOSURE_DENIED'
+
+
+@pytest.mark.parametrize('view', ['study', 'run', 'comparison', 'run-detail'])
+def test_modified_grant_after_projection_cannot_disclose_metadata(metadata, permission_clock,
+                                                                monkeypatch, view):
+    store, _, query, run, _ = metadata
+    original = query._objects
+
+    def corrupt_after_projection(*args, **kwargs):
+        result = original(*args, **kwargs)
+        grant = store.manifest('authorization-ui')
+        (store.path / 'manifests/authorization-ui.json').write_bytes(encode({**grant, 'purposes': []}))
+        return result
+
+    monkeypatch.setattr(query, '_objects', corrupt_after_projection)
+    with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+        query.run(run) if view == 'run-detail' else query.list(view)
+    assert store.events()[-1]['event_kind'] == 'DISCLOSURE_DENIED'
+
+
+@pytest.mark.parametrize('view', ['study', 'run', 'comparison', 'run-detail'])
+def test_unavailable_final_disclosure_journal_never_returns_metadata(metadata, permission_clock,
+                                                                   monkeypatch, view):
+    store, _, query, run, _ = metadata
+    original = store.append
+    allowed = []
+
+    def fail_final_journal(kind, *args, **kwargs):
+        if kind == 'DISCLOSURE_ALLOWED':
+            allowed.append(True)
+            if len(allowed) == 3:
+                raise OSError('final disclosure journal unavailable')
+        return original(kind, *args, **kwargs)
+
+    monkeypatch.setattr(store, 'append', fail_final_journal)
+    with pytest.raises(OSError, match='final disclosure journal unavailable'):
+        query.run(run) if view == 'run-detail' else query.list(view)
+    assert len(allowed) == 3
+    assert store._read_snapshot() is None
+
+
+def test_metadata_pagination_ignores_only_disclosures_and_retains_current_budget(metadata, permission_clock):
+    from application.research_budget import BudgetLedger, BudgetSpec
+    store, _, query, run, _ = metadata
+    first = query.list('run', limit=2)
+    assert len(first['items']) == 2 and first['next_cursor']
+    second = query.list('run', limit=2, cursor=first['next_cursor'])
+    assert len(second['items']) == 2 and second['next_cursor'] is None
+    assert first['watermark'] == second['watermark']
+    assert len({row['object_id'] for row in first['items'] + second['items']}) == 4
+    attempt = store.new_attempt(run)
+    BudgetLedger(store).reserve(attempt, BudgetSpec(1))
+    with pytest.raises(ResearchError, match='CURSOR_STALE'):
+        query.list('run', limit=2, cursor=first['next_cursor'])
+    fresh = query.list('run')
+    assert fresh['watermark'] > first['watermark']
+    assert all(row['budget']['committed_ms'] == 1000 for row in fresh['items'])
+
+
+def test_metadata_query_retains_bounded_physical_checks_and_every_permission_journal(metadata,
+                                                                                   permission_clock,
+                                                                                   monkeypatch):
+    store, _, query, _, _ = metadata
+    original_json = store._json
+    reads = []
+
+    def observe_json(path):
+        if path.parent == store.path / 'events':
+            reads.append(path)
+        return original_json(path)
+
+    monkeypatch.setattr(store, '_json', observe_json)
+    before = len(store.events())
+    reads.clear()
+    result = query.list('run')
+    physical_reads = len(reads)
+    after = store.events()
+    assert len(result['items']) == 4
+    assert physical_reads <= 2 * len(after)
+    assert [event['event_kind'] for event in after[before:]] == ['DISCLOSURE_ALLOWED'] * 3
+    assert store._read_snapshot() is None

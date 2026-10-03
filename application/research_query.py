@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import json
 
-from .research_evidence import authorize_study
+from .research_evidence import authorize_study, require_unexpired_disclosure
 from .research_budget import BudgetLedger
 from .research_dimensions import comparison_dimensions
 from infrastructure.research_index import ResearchIndex
@@ -57,7 +57,11 @@ class ResearchQuery:
             authorize_study(self.store, grant['study_id'], grant, 'preview')
             if self._data_watermark() != watermark:
                 raise ResearchError('INDEX_STALE', 'authority changed while assembling query snapshot; retry the request')
-            return result
+        # The outer scope revalidates the physical chain before releasing its
+        # lock. That I/O may take time, so expiry must be checked afterwards,
+        # with no further valid-path I/O before returning this frozen snapshot.
+        require_unexpired_disclosure(self.store, grant['study_id'], grant, 'preview')
+        return result
 
     def _project_objects(self, kind, grant):
         index = ResearchIndex(self.store)

@@ -37,6 +37,27 @@ def authorize_study(store, study_id, authorization, purpose):
         "study_id": study_id, "purpose": purpose, "authorization_hash": digest(authorization)})
     if not allowed:
         raise ResearchError("UNAUTHORIZED_DATA", "study disclosure is not authorized")
+    # Flushing the permission journal can itself cross the expiry boundary.
+    # A successful pre-I/O check is not permission to read after that write.
+    require_unexpired_disclosure(store, study_id, authorization, purpose)
+
+
+def require_unexpired_disclosure(store, study_id, authorization, purpose):
+    """Last clock guard for an already authenticated immutable study grant.
+
+    This is not a replacement for authorize_study: that function must verify
+    the actual manifest, study and purpose first. The valid path performs no
+    I/O so final journal/physical-integrity work cannot follow its clock check.
+    An expired grant is durably denied before any value can be disclosed.
+    """
+    try:
+        current = datetime.fromisoformat(authorization['expires_at']) > datetime.now(timezone.utc)
+    except (KeyError, ValueError, TypeError):
+        current = False
+    if not current:
+        store.append('DISCLOSURE_DENIED', {'study_id': study_id, 'purpose': purpose,
+            'authorization_hash': digest(authorization)})
+        raise ResearchError('UNAUTHORIZED_DATA', 'study disclosure authorization expired')
 
 
 def require_export_visibility(store, spec, cells, authorization):
