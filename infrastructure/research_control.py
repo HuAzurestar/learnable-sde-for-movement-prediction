@@ -4,6 +4,7 @@ Stdlib-only so a numerical worker can poll without importing model packages.
 This is a trusted-worker protocol, not an OS sandbox or a data authorization.
 """
 
+from functools import lru_cache
 import json
 import math
 import os
@@ -90,13 +91,13 @@ def canonical(value, limit):
     return content
 
 
-def _windows_frame_content(path, limit):
-    """Preserve native IPC errors that the CRT collapses into errno13.
+@lru_cache(maxsize=1)
+def _windows_frame_api(load_library):
+    """Reuse only native ABI definitions, not a handle or control-frame fact.
 
-    Only an actual sharing/byte-lock conflict defers this poll. No deadline
-    or retry loop is added here; the existing owner/worker fuse stays in charge.
-    https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
-    https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-readfile
+    The loader is part of the definition identity: replacing the native
+    binding (including forwarded fault observations) must not borrow an older
+    binding. Ordinary owner/worker polls use the same ctypes loader.
     """
     import ctypes
     from ctypes import wintypes
@@ -104,7 +105,7 @@ def _windows_frame_content(path, limit):
     class AttributeTag(ctypes.Structure):
         _fields_ = [("FileAttributes", wintypes.DWORD), ("ReparseTag", wintypes.DWORD)]
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel = load_library("kernel32", use_last_error=True)
     kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
         ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
     kernel.CreateFileW.restype = wintypes.HANDLE
@@ -116,6 +117,19 @@ def _windows_frame_content(path, limit):
     kernel.ReadFile.restype = wintypes.BOOL
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel.CloseHandle.restype = wintypes.BOOL
+    return ctypes, wintypes, AttributeTag, kernel
+
+
+def _windows_frame_content(path, limit):
+    """Preserve native IPC errors that the CRT collapses into errno13.
+
+    Only an actual sharing/byte-lock conflict defers this poll. No deadline
+    or retry loop is added here; the existing owner/worker fuse stays in charge.
+    https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
+    https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-readfile
+    """
+    import ctypes
+    ctypes, wintypes, AttributeTag, kernel = _windows_frame_api(ctypes.WinDLL)
     # Read/write/delete sharing accommodates actual atomic control publication;
     # OPEN_EXISTING never creates a missing frame, OPEN_REPARSE_POINT never
     # follows a final link swapped after the caller's lexical link check.
