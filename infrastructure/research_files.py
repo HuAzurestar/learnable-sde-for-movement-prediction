@@ -35,12 +35,16 @@ def _source_in_root(root, path):
 
 
 @contextmanager
-def opened_regular_file(root, path, *, expected_size=None):
+def opened_regular_file(root, path, *, expected_size=None, maximum_bytes=None, root_identity=None):
     # Normalize ordinary relative/.. spellings without following symlinks.
     root, path = Path(os.path.abspath(root)), Path(os.path.abspath(path))
+    if maximum_bytes is not None and (type(maximum_bytes) is not int or maximum_bytes < 0):
+        raise ResearchError("RESOURCE_PLAN_REJECTED", "invalid source byte quota")
     root_information = root.lstat()
     if not stat.S_ISDIR(root_information.st_mode):
         raise ResearchError("UNAUTHORIZED_DATA", "authorized root or its parent was redirected")
+    if root_identity is not None and (root_information.st_dev, root_information.st_ino) != root_identity:
+        raise ResearchError("UNAUTHORIZED_DATA", "source root differs from the original opened directory")
     before = path.lstat()
     # The complete resolved source must retain the lexical root prefix. This
     # also detects redirects of the root or ANY ancestor; separately resolving
@@ -48,6 +52,8 @@ def opened_regular_file(root, path, *, expected_size=None):
     if (not stat.S_ISREG(before.st_mode)
             or not _source_in_root(root, path)):
         raise ResearchError("UNAUTHORIZED_DATA", "source is not a regular file inside its authorized root")
+    if maximum_bytes is not None and before.st_size > maximum_bytes:
+        raise ResearchError("RESOURCE_PLAN_REJECTED", "source exceeds its declared byte quota")
     if expected_size is not None and before.st_size != expected_size:
         raise ResearchError("CORRUPT_ARTIFACT", "source frozen size differs before read")
     if os.name == "nt":
@@ -73,14 +79,20 @@ def opened_regular_file(root, path, *, expected_size=None):
 
         def verify_identity():
             current, current_root = path.lstat(), root.lstat()
+            held = os.fstat(stream.fileno())
             if (not stat.S_ISREG(current.st_mode)
                     or not stat.S_ISREG(opened.st_mode)
                     or not stat.S_ISDIR(current_root.st_mode)
                     or not _source_in_root(root, path)
                     or (current_root.st_dev, current_root.st_ino) != (root_information.st_dev, root_information.st_ino)):
                 raise ResearchError("UNAUTHORIZED_DATA", "source or authorized root changed at opened handle")
+            # Preserve package quota classification at EVERY actual metadata
+            # boundary. Late growth above an admitted quota is a quota error,
+            # before identity/parse checks and before any new payload bytes.
+            if maximum_bytes is not None and any(info.st_size > maximum_bytes for info in (opened, current, held)):
+                raise ResearchError("RESOURCE_PLAN_REJECTED", "source exceeds its declared byte quota")
             if (_identity(before) != _identity(opened) or _identity(current) != _identity(opened)
-                    or _identity(os.fstat(stream.fileno())) != _identity(opened)):
+                    or _identity(held) != _identity(opened)):
                 raise ResearchError("CORRUPT_ARTIFACT", "source identity changed during read")
             if os.name == "nt" and descriptor_change_time(stream.fileno()) != before_change:
                 raise ResearchError("CORRUPT_ARTIFACT", "native source change identity differs during read")

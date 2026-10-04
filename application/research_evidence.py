@@ -342,62 +342,49 @@ def expected_paper_index(aggregate, table, figure_index=None):
             **{name: aggregate[name] for name in ("adjudication", "computation_ref") if name in aggregate}}
 
 
-def _package_file_bytes(root, name, limit):
+def _package_file_bytes(root, name, limit, *, root_identity=None):
     """Read one stable regular package file without a stat/read allocation race."""
+    from infrastructure.research_files import opened_regular_file
+    root = Path(os.path.abspath(root))
     path = root / name
     if type(limit) is not int or limit < 0:
         raise ResearchError("RESOURCE_PLAN_REJECTED", "invalid evidence package byte quota")
-    before = path.lstat()
-    if not stat.S_ISREG(before.st_mode) or not path.resolve().is_relative_to(root):
-        raise ResearchError("UNAUTHORIZED_DATA", "evidence package path is not a regular file inside root")
-    if before.st_size > limit:
-        raise ResearchError("RESOURCE_PLAN_REJECTED", "evidence package file exceeds byte quota")
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-    flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        fd = os.open(path, flags)
-    except OSError as exc:
-        if exc.errno == errno.ELOOP:
-            raise ResearchError("UNAUTHORIZED_DATA", "evidence package path became a symbolic link") from exc
-        raise
-    try:
-        stream = os.fdopen(fd, "rb")
-    except BaseException:
-        os.close(fd)
-        raise
-    identity = lambda info: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
-    with stream:
-        opened = os.fstat(stream.fileno())
-        if not stat.S_ISREG(opened.st_mode):
-            raise ResearchError("UNAUTHORIZED_DATA", "evidence package handle is not a regular file")
-        if opened.st_size > limit:
-            raise ResearchError("RESOURCE_PLAN_REJECTED", "evidence package file exceeds byte quota")
-        current = path.lstat()
-        if current.st_size > limit:
-            raise ResearchError("RESOURCE_PLAN_REJECTED", "evidence package file exceeds byte quota")
-        if (not path.resolve().is_relative_to(root)
-                or identity(before) != identity(opened) or identity(current) != identity(opened)):
-            raise ResearchError("CORRUPT_ARTIFACT", "evidence package file changed before read")
+    with opened_regular_file(root, path, maximum_bytes=limit, root_identity=root_identity) as (stream, size, _):
         # Bound allocation to the actually admitted size, not just the larger
         # quota. One extra byte detects growth even after the handle check.
-        content = stream.read(opened.st_size + 1)
-        after = os.fstat(stream.fileno())
-        current = path.lstat()
-        if len(content) > limit or after.st_size > limit or current.st_size > limit:
-            raise ResearchError("RESOURCE_PLAN_REJECTED", "evidence package file exceeds byte quota")
-        if (len(content) != opened.st_size or identity(opened) != identity(after)
-                or identity(after) != identity(current) or not stat.S_ISREG(current.st_mode)
-                or not path.resolve().is_relative_to(root)):
-            raise ResearchError("CORRUPT_ARTIFACT", "evidence package file changed during read")
+        content = stream.read(size + 1)
+        # The shared context verifies native/ctime identity and quota BEFORE
+        # classifying short/grown returned content, including after real I/O.
+    if len(content) > limit:
+        raise ResearchError("RESOURCE_PLAN_REJECTED", "evidence package file exceeds byte quota")
+    if len(content) != size:
+        raise ResearchError("CORRUPT_ARTIFACT", "evidence package file changed during read")
     return content
 
 
 def accept_evidence_package(store, directory, expected_hash):
     """Import the same frozen JSON/CSV/evidence files that TSDE produced."""
-    root = Path(directory).resolve()
+    from infrastructure.research_publication import opened_directory
+    root = Path(os.path.abspath(directory))
+    with opened_directory(root) as binding:
+        package = _accept_evidence_package(store, root, expected_hash, binding)
+        binding[2]()
+        return package
+
+
+def _accept_evidence_package(store, root, expected_hash, binding):
+    original_root = os.fstat(binding[1])
+    root_identity = original_root.st_dev, original_root.st_ino
+
+    def read_member(name, limit):
+        binding[2]()
+        content = _package_file_bytes(root, name, limit, root_identity=root_identity)
+        binding[2]()
+        return content
+
     contents = {}
     for name in ("manifest.json", "aggregate.json", "metrics.csv", "PaperEvidenceIndex.json"):
-        contents[name] = _package_file_bytes(root, name, 64 * 1024 * 1024)
+        contents[name] = read_member(name, 64 * 1024 * 1024)
     manifest = json.loads(contents["manifest.json"])
     if manifest.get("schema_version") != "pirc25-evidence-package-v1" or manifest.get("aggregate_hash") != expected_hash:
         raise ResearchError("CONTRACT_MISMATCH", "evidence package version/hash mismatch")
@@ -414,7 +401,7 @@ def accept_evidence_package(store, directory, expected_hash):
         if (path.is_symlink() or not path.resolve().is_relative_to(root) or not path.is_file()
                 or path.stat().st_size > 1024 * 1024):
             raise ResearchError("CONTRACT_MISMATCH", "managed comparison requires a bounded computation receipt")
-        contents["ComputationReceipt.json"] = _package_file_bytes(root, "ComputationReceipt.json", 1024 * 1024)
+        contents["ComputationReceipt.json"] = read_member("ComputationReceipt.json", 1024 * 1024)
         if hashlib.sha256(contents["ComputationReceipt.json"]).hexdigest() != manifest["files"].get("ComputationReceipt.json"):
             raise ResearchError("CORRUPT_ARTIFACT", "computation receipt differs from package manifest")
         receipt = json.loads(contents["ComputationReceipt.json"])
@@ -433,7 +420,7 @@ def accept_evidence_package(store, directory, expected_hash):
                 if (path.is_symlink() or not path.resolve().is_relative_to(root) or not path.is_file() or
                         path.stat().st_size > 2 * 1024 * 1024):
                     raise ResearchError("CONTRACT_MISMATCH", "frozen figure file is missing or outside quota")
-                content = _package_file_bytes(root, name, 2 * 1024 * 1024)
+                content = read_member(name, 2 * 1024 * 1024)
                 if content != expected_content or hashlib.sha256(content).hexdigest() != manifest["files"].get(name):
                     raise ResearchError("CORRUPT_ARTIFACT", "figure is not the exact managed worker output")
                 contents[name] = content
@@ -452,6 +439,7 @@ def accept_evidence_package(store, directory, expected_hash):
         if isinstance(exc, ResearchError):
             raise
         raise ResearchError("CONTRACT_MISMATCH", "incomplete frozen evidence package") from exc
+    binding[2]()
     artifact = accept_aggregate(store, aggregate, aggregate["study_id"])
     attachments = {}
     for name, role in (("metrics.csv", "table"), ("PaperEvidenceIndex.json", "evidence-index")):
