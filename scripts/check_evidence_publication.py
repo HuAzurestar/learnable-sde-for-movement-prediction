@@ -1,14 +1,15 @@
 """Native stdlib-only checks of the actual production publication primitives.
 
 Run on Windows or a Linux Python image with this checkout mounted read-only.
-Loading the production module by file avoids unrelated torch package imports;
-this proves file operations, not the complete CLI or package wiring.
+The actual production package keeps these imports stdlib-only. Its shared
+opened-handle guard must retain the package context and the same error class;
+this proves file operations, not the complete CLI or scientific wiring.
 """
 
 import hashlib
-import importlib.util
 import os
 from pathlib import Path
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -16,9 +17,8 @@ from unittest.mock import patch
 
 
 SOURCE = Path(__file__).resolve().parents[1] / 'infrastructure' / 'research_store.py'
-SPEC = importlib.util.spec_from_file_location('publication_production', SOURCE)
-STORE = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(STORE)
+sys.path.insert(0, str(SOURCE.parents[1]))
+from infrastructure import research_store as STORE
 
 
 class NativePublication(unittest.TestCase):
@@ -149,4 +149,6 @@ class NativePublication(unittest.TestCase):
 if __name__ == '__main__':
     print('Production SHA256:', hashlib.sha256(SOURCE.read_bytes()).hexdigest(), flush=True)
     print('Native platform:', os.name, flush=True)
+    assert not any(name.split('.')[0] in {'torch', 'numpy', 'pandas', 'pyarrow', 'duckdb'}
+                   for name in sys.modules), 'publication import unexpectedly loaded scientific dependencies'
     unittest.main(verbosity=2)

@@ -174,8 +174,6 @@ class ComparisonRunner:
             path = directory / name
             if path.is_symlink() or not path.resolve().is_relative_to(directory):
                 raise ResearchError("UNAUTHORIZED_DATA", "comparison package path escapes root")
-            if path.exists():
-                if path.read_bytes() != content:
-                    raise ResearchError("IDENTITY_CONFLICT", "comparison package cannot be overwritten")
-            else:
-                atomic_write(path, content)
+            # Publish without replacing another writer's target; identical
+            # retries use the shared bounded, freshly verified comparator.
+            atomic_write(path, content, immutable=True)

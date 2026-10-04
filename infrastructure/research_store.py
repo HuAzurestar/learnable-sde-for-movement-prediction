@@ -85,26 +85,23 @@ def _sync_directory(path: Path):
 def _matches_file_content(path: Path, content: bytes) -> bool:
     """Compare a regular target using one bounded, non-following file handle.
 
-    Size checks are against the opened file, not a pre-open pathname stat. A
-    growing file cannot turn this into an unbounded read. Nonblocking/no-follow
-    flags also prevent a raced POSIX FIFO or symlink from becoming a read.
+    Reuse the fresh lexical-root/opened-descriptor boundary, including Windows
+    native change identity. Neither a large existing file nor a legitimate
+    large expected value requires allocating another entire source buffer.
     """
     try:
-        if not stat.S_ISREG(path.lstat().st_mode):
-            return False
-        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-        flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(path, flags)
-        with os.fdopen(fd, "rb") as stream:
-            before = os.fstat(stream.fileno())
-            if not stat.S_ISREG(before.st_mode) or before.st_size != len(content):
-                return False
-            equal = stream.read(len(content) + 1) == content
-            after = os.fstat(stream.fileno())
-            current = path.lstat()
-            identity = lambda info: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
-            return equal and identity(before) == identity(after) == identity(current)
-    except FileNotFoundError:
+        from .research_files import opened_regular_file
+        with opened_regular_file(path.parent, path, expected_size=len(content)) as (stream, _, _):
+            offset = 0
+            while offset < len(content):
+                chunk = stream.read(min(64 * 1024, len(content) - offset))
+                if not chunk or chunk != content[offset:offset + len(chunk)]:
+                    return False
+                offset += len(chunk)
+            return not stream.read(1)
+    except (FileNotFoundError, ResearchError):
+        # Invalid/nonregular/redirected/changed targets cannot establish an
+        # identical immutable publication. Preserve the caller's conflict code.
         return False
 
 

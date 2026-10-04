@@ -1,5 +1,6 @@
 """Actual immutable comparison publication and existing-target read boundaries."""
 import os
+import json
 
 import pytest
 
@@ -92,3 +93,44 @@ def test_new_managed_package_and_identical_retry_remain_valid(tmp_path):
     comparison.ComparisonRunner._write_files(directory, files)
     assert {name: (directory / name).read_bytes() for name in files} == files
     assert not list(directory.glob('.*.staging'))
+
+
+@pytest.mark.parametrize('case', ['competing-publication', 'oversized-existing'])
+def test_actual_managed_cli_refuses_conflict_without_extra_job_or_unbounded_read(
+        tmp_path, monkeypatch, capsys, case):
+    from application.research_budget import BudgetLedger
+    from experiments.pirc25.__main__ import main
+    from tests.test_research_comparison import comparison_source, compute
+    source = comparison_source(tmp_path / 'fixture')
+    store, _, _, paper, package = source
+    computed = compute(source)
+    assert computed['state'] == 'SUCCEEDED' and computed['exit_code'] == 0
+    before, attempts = BudgetLedger(store).balance('affine'), store.attempts()
+    directory = tmp_path / 'output'
+    directory.mkdir()
+    target, old = directory / 'metrics.csv', b'actual competing publisher bytes\n'
+    if case == 'oversized-existing':
+        old = b'x' * (8 * 1024 * 1024)
+        target.write_bytes(old)
+    original, touched = comparison.atomic_write, []
+    def publish(path, content, *args, **kwargs):
+        if path == target and case == 'competing-publication':
+            assert not target.exists()
+            target.write_bytes(old)
+            touched.append(True)
+        return original(path, content, *args, **kwargs)
+    monkeypatch.setattr(comparison, 'atomic_write', publish)
+    reads, handles = observe_file(monkeypatch, target)
+    arguments = ['--root', str(store.path.parent), '--store-id', store.store_id,
+        'compare', 'synthetic', package['aggregate_hash'], '--paper-root', str(paper),
+        '--authorization-id', 'viewer', '--seconds', '10', '--output', str(directory)]
+    exit_code = main(arguments)
+    response = json.loads(capsys.readouterr().out)
+    observed = {'arguments': arguments, 'exit_code': exit_code, 'response': response,
+        'reads': list(reads), 'handles': list(handles), 'touched': list(touched)}
+    (tmp_path / 'managed-cli-conflict-observed.json').write_bytes(encode(observed))
+    assert exit_code == 1 and response['error']['code'] == 'IDENTITY_CONFLICT', observed
+    assert reads == [], 'different frozen size must reject before existing payload bytes'
+    assert target.read_bytes() == old and not list(directory.glob('.*.staging'))
+    assert touched == ([True] if case == 'competing-publication' else [])
+    assert BudgetLedger(store).balance('affine') == before and store.attempts() == attempts
