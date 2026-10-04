@@ -1,6 +1,7 @@
 """Recovery observes executing workers, not unreaped Linux process records."""
 
 import json
+import io
 import os
 from pathlib import Path
 import subprocess
@@ -9,7 +10,8 @@ import time
 
 import pytest
 
-from infrastructure.process_tree import ProcessTree, process_may_be_alive
+import infrastructure.process_tree as process_tree
+from infrastructure.process_tree import ProcessTree, _linux_group_active, process_may_be_alive
 
 
 LINUX = sys.platform.startswith("linux") and Path("/proc").is_dir()
@@ -140,3 +142,64 @@ def test_unknown_group_observation_never_proves_exit(monkeypatch, failure):
 @pytest.mark.parametrize("pid", [None, 1, True, -1, "123"])
 def test_invalid_worker_identity_never_proves_exit(pid):
     assert process_may_be_alive(pid) is True
+
+
+@pytest.mark.skipif(not LINUX, reason="actual Linux live PID outside recorded group")
+def test_live_pid_outside_expected_group_keeps_recovery_hold():
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        assert os.getpgid(child.pid) != child.pid
+        assert process_may_be_alive(child.pid) is True
+    finally:
+        child.kill()
+        child.wait(timeout=5)
+
+
+def test_group_scan_allows_unrelated_kernel_group_and_parentheses(tmp_path, monkeypatch):
+    monkeypatch.setattr(process_tree, "_linux_proc_visible", lambda: None)
+    kernel, zombie = tmp_path / "2", tmp_path / "42"
+    kernel.mkdir()
+    zombie.mkdir()
+    (kernel / "stat").write_text("2 (kernel) S 0 0 0", encoding="utf-8")
+    (zombie / "stat").write_text("42 (comm) with) parentheses) Z 1 42 42", encoding="utf-8")
+    original_iter = Path.iterdir
+    monkeypatch.setattr(Path, "iterdir", lambda path:
+                        iter((kernel, zombie)) if path == Path("/proc") else original_iter(path))
+    assert _linux_group_active(42, include_pid=True) is False
+
+
+@pytest.mark.skipif(not LINUX, reason="actual Linux kernel probe with omitted visible record")
+@pytest.mark.parametrize("new_group", [True, False])
+def test_kernel_alive_without_enumerated_record_keeps_hold(monkeypatch, new_group):
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                             start_new_session=new_group)
+    try:
+        original_iter = Path.iterdir
+        monkeypatch.setattr(Path, "iterdir", lambda path:
+            (entry for entry in original_iter(path) if entry.name != str(child.pid))
+            if path == Path("/proc") else original_iter(path))
+        os.kill(child.pid, 0)
+        assert process_may_be_alive(child.pid) is True
+    finally:
+        child.kill()
+        child.wait(timeout=5)
+
+
+@pytest.mark.skipif(not LINUX, reason="Linux observation mount restrictions")
+@pytest.mark.parametrize("mount", ["proc /proc proc rw,hidepid=1 0 0\n",
+    "proc /proc proc rw,hidepid=2 0 0\n", "proc /proc proc rw,hidepid=ptraceable 0 0\n",
+    "proc /proc proc rw,pidns=other 0 0\n", "invalid mount observation",
+    "x" * 1_048_577], ids=["hidepid1", "hidepid2", "ptraceable", "pidns", "malformed", "quota"])
+def test_restricted_or_unknown_proc_mount_keeps_hold(monkeypatch, mount):
+    child = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+    try:
+        wait_for_zombie(child.pid)
+        original_open = Path.open
+        monkeypatch.setattr(Path, "open", lambda path, *args, **kwargs:
+            io.StringIO(mount) if path == Path("/proc/self/mounts")
+            else original_open(path, *args, **kwargs))
+        assert process_may_be_alive(child.pid) is True
+        with pytest.raises(OSError):
+            ProcessTree(child).active()
+    finally:
+        child.wait(timeout=5)

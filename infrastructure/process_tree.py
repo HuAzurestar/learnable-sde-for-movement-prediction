@@ -12,6 +12,70 @@ import time
 from pathlib import Path
 
 
+def _linux_proc_visible():
+    """A filtered procfs cannot establish that every group member has exited.
+
+    https://docs.kernel.org/filesystems/proc.html#mount-options
+    Restricted/unknown configurations conservatively retain reservations.
+    """
+    try:
+        with Path("/proc/self/mounts").open(encoding="utf-8") as stream:
+            mounts = stream.read(1_048_577)
+        if len(mounts) > 1_048_576:
+            raise OSError("process mount observation quota exceeded")
+        records = [line.split() for line in mounts.splitlines()]
+        records = [fields for fields in records if len(fields) >= 4 and fields[1] == "/proc"]
+        if len(records) != 1 or records[0][2] != "proc":
+            raise OSError("cannot establish process observation mount")
+        for option in records[0][3].split(","):
+            if option.startswith("hidepid=") and option not in {"hidepid=0", "hidepid=off"}:
+                raise OSError("filtered process observation mount")
+            if option.startswith("pidns="):
+                raise OSError("alternate process observation namespace")
+    except UnicodeError as exc:
+        raise OSError("cannot parse process observation mount") from exc
+
+
+def _linux_group_active(pid, *, include_pid=False):
+    """Observe executing group members; unreadable records are not exit proof.
+
+    Recovery also considers the recorded PID itself, conservatively retaining
+    a hold if that identity is now executing outside the expected group.
+    """
+    _linux_proc_visible()
+    observed_group, observed_pid = False, False
+    for count, path in enumerate(Path("/proc").iterdir()):
+        if count > 100_000:
+            raise OSError("process observation quota exceeded")
+        if not path.name.isdecimal():
+            continue
+        try:
+            # stat: pid (comm) state ppid pgrp ...; comm may contain ')'.
+            fields = (path / "stat").read_text().rsplit(")", 1)[1].split()
+            group = int(fields[2])
+            if len(fields[0]) != 1 or group < 0:
+                raise ValueError("invalid process state/group")
+            matches = group == pid or (include_pid and int(path.name) == pid)
+            observed_group = observed_group or group == pid
+            observed_pid = observed_pid or int(path.name) == pid
+            if matches and fields[0] not in {"Z", "X"}:
+                return True
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        except (ValueError, IndexError) as exc:
+            raise OSError("cannot parse process group observation") from exc
+    _linux_proc_visible()  # Fresh restriction check before using exit evidence.
+    for observed, probe in ((observed_group, "killpg"),
+                            (observed_pid or not include_pid, "kill")):
+        if not observed:
+            try:
+                getattr(os, probe)(pid, 0)
+            except ProcessLookupError:
+                continue
+            raise OSError("kernel process exists without an observable record")
+    return False
+
+
 def process_may_be_alive(pid):
     """Read-only conservative probe; errors never count as proof of exit."""
     if type(pid) is not int or pid <= 1:
@@ -32,6 +96,11 @@ def process_may_be_alive(pid):
             return not kernel.GetExitCodeProcess(handle, ctypes.byref(code)) or code.value == 259
         finally:
             kernel.CloseHandle(handle)
+    if sys.platform.startswith("linux") and Path("/proc").is_dir():
+        try:
+            return _linux_group_active(pid, include_pid=True)
+        except OSError:
+            return True  # Unknown group observations keep recovery reserved.
     try:
         os.kill(pid, 0)
         return True
@@ -151,21 +220,7 @@ class ProcessTree:
                 raise OSError(ctypes.get_last_error(), "cannot confirm whole-job stop")
             return data.ActiveProcesses != 0
         if sys.platform.startswith("linux") and Path("/proc").is_dir():
-            for count, path in enumerate(Path("/proc").iterdir()):
-                if count > 100_000:
-                    raise OSError("process observation quota exceeded")
-                if not path.name.isdecimal():
-                    continue
-                try:
-                    # stat: pid (comm) state ppid pgrp ...; comm may contain ')'.
-                    fields = (path / "stat").read_text().rsplit(")", 1)[1].split()
-                    if int(fields[2]) == self.process.pid and fields[0] not in {"Z", "X"}:
-                        return True
-                except (FileNotFoundError, ProcessLookupError):
-                    continue
-                except (ValueError, IndexError) as exc:
-                    raise OSError("cannot parse process group observation") from exc
-            return False
+            return _linux_group_active(self.process.pid)
         try:
             os.killpg(self.process.pid, 0)
             return True
