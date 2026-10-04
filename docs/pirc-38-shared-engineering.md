@@ -687,6 +687,13 @@ does not. Whole-request complexity, real upstream fields/full compatibility and
 final clean-pair acceptance remain separate obligations.
 
 Mandatory exposure/disclosure event or journal-head publication I/O failures raise
+`EXPOSURE_AUDIT_UNAVAILABLE`. Checkpoint saves alone coalesce consecutive
+MANIFEST/CHECKPOINT/CHECKPOINT_SAVED head updates within one owned writer phase:
+every event still receives its own flushed atomic publication, and the final
+head is flushed before uncached physical/budget checks and ACK. A lagging head
+after an interrupted phase is not rollback; reopening verifies all durable
+events. Ordinary appends and exposure/disclosure heads remain immediate.
+Mandatory exposure/disclosure journal I/O failures still raise
 `EXPOSURE_AUDIT_UNAVAILABLE`. The CLI returns a typed error envelope and nonzero
 exit; HTTP returns 503 with safe details and a trace ID, never result bytes or
 metadata rows. This is not an automatic retry instruction: restore journal

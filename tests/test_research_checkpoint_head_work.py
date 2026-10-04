@@ -14,7 +14,8 @@ import pytest
 
 import infrastructure.research_store as store_module
 from infrastructure.research_store import ResearchError, ResearchStore, encode
-from tests.research_audit_fixtures import audit_fault
+from tests.research_audit_fixtures import audit_fault, payload_opens
+from tests.test_research_artifact_read_bounds import published
 from tests.test_research_checkpoint_save_work import owner
 
 
@@ -153,3 +154,82 @@ raise AssertionError('actual owner crash hook was not reached')
     next_event = reopened.append("AFTER_CRASH", {"fixture": True})
     assert next_event["sequence"] == len(events) + 1
     assert reopened.events()[-2] == events[-1]
+
+
+def test_nested_owner_save_and_saved_event_share_final_head(tmp_path, monkeypatch):
+    """Owner-publication unit control, not live supervisor deadline evidence."""
+    store, recovery, attempt, receipt, state, progress, _ = owner(tmp_path, "exact")
+    original, heads = store_module.atomic_write, []
+
+    def write(path, content, **options):
+        result = original(path, content, **options)
+        if Path(path) == store.path / "head.json":
+            heads.append(json.loads(content))
+        return result
+
+    monkeypatch.setattr(store_module, "atomic_write", write)
+    with store._checkpoint_publication():
+        reference = recovery.checkpoint_handler(attempt)(state, progress, receipt, None)
+        assert not heads, "nested handler published a head before the owner save phase ended"
+        saved = store.append("CHECKPOINT_SAVED", {"attempt_id": attempt,
+            "request_id": "synthetic-owner-phase", **reference, "progress": progress})
+        assert not heads
+    assert heads == [{"sequence": saved["sequence"], "hash": saved["hash"]}]
+    assert [event["event_kind"] for event in store.events()[-3:]] == ["MANIFEST", "CHECKPOINT", "CHECKPOINT_SAVED"]
+    released(store)
+
+
+def test_ordinary_read_transaction_does_not_coalesce_checkpoint_named_events(tmp_path, monkeypatch):
+    store, _, _ = published(tmp_path)
+    original, heads = store_module.atomic_write, []
+
+    def write(path, content, **options):
+        result = original(path, content, **options)
+        if Path(path) == store.path / "head.json":
+            heads.append(json.loads(content))
+        return result
+
+    monkeypatch.setattr(store_module, "atomic_write", write)
+    with store._read_transaction():
+        first = store.append("CHECKPOINT", {"synthetic_store_control": 1})
+        assert len(heads) == 1 and heads[-1]["hash"] == first["hash"]
+        second = store.append("CHECKPOINT_SAVED", {"synthetic_store_control": 2})
+        assert len(heads) == 2 and heads[-1]["hash"] == second["hash"]
+    released(store)
+
+
+def test_actual_read_audit_head_failure_is_immediate_inside_checkpoint_phase(tmp_path, monkeypatch):
+    store, artifact, grant = published(tmp_path)
+    with payload_opens([store.path / "artifacts" / artifact["artifact_id"]]) as opened:
+        with store._checkpoint_publication():
+            store.append("CHECKPOINT", {"synthetic_store_control": True})
+            with audit_fault(store, "READ_STARTED", monkeypatch, stage="head-fsync") as fired:
+                with pytest.raises(ResearchError, match="EXPOSURE_AUDIT_UNAVAILABLE"):
+                    store.read_artifact(artifact["artifact_id"], purpose="preview", authorization=grant)
+                assert len(fired) == 1 and not opened
+    assert [event["event_kind"] for event in store.events()[-3:]] == ["CHECKPOINT", "EXPOSURE_ALLOWED", "READ_STARTED"]
+    released(store)
+
+
+def test_caught_immediate_head_failure_cannot_republish_older_pending_head(tmp_path, monkeypatch):
+    store, _, _ = published(tmp_path)
+    initial = json.loads((store.path / "head.json").read_bytes())
+    original, attempts = store_module.atomic_write, []
+
+    def write(path, content, **options):
+        if Path(path) == store.path / "head.json":
+            attempts.append(json.loads(content))
+        return original(path, content, **options)
+
+    monkeypatch.setattr(store_module, "atomic_write", write)
+    with store._checkpoint_publication():
+        store.append("CHECKPOINT", {"synthetic_store_control": True})
+        with audit_fault(store, "READ_STARTED", monkeypatch, stage="head-fsync") as fired:
+            with pytest.raises(ResearchError, match="EXPOSURE_AUDIT_UNAVAILABLE"):
+                store.append("READ_STARTED", {"synthetic_store_control": True})
+        assert fired
+    events = store.events()
+    assert len(attempts) == 1 and attempts[0]["hash"] == events[-1]["hash"]
+    assert json.loads((store.path / "head.json").read_bytes()) == initial
+    assert [event["event_kind"] for event in events[-2:]] == ["CHECKPOINT", "READ_STARTED"]
+    released(store)
