@@ -11,6 +11,7 @@ import hashlib
 import os
 from pathlib import Path
 import stat
+import sys
 
 from .research_store import ResearchError
 
@@ -30,7 +31,30 @@ def _source_in_root(root, path):
         # at every boundary, including directory/ancestor redirects.
         final = Path(nt._getfinalpathname(str(path)))
         return final.is_relative_to(Path("\\\\?\\" + str(root)))
-    # Keep existing behavior for POSIX and explicit device/UNC spellings.
+    if sys.platform == "linux" and getattr(os, "O_PATH", 0):
+        # Query the CURRENT lexical name at every original boundary, not the
+        # older payload descriptor: a parent can redirect to an external
+        # hardlink while that older descriptor still has a name inside root.
+        flags = os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC
+        try:
+            fd = os.open(path, flags)
+        except OSError:
+            # Query-only opens are an optimization, not admission authority.
+            # Keep the original fresh canonical check on unsupported systems.
+            return path.resolve().is_relative_to(root)
+        try:
+            information = os.fstat(fd)
+            if not (stat.S_ISREG(information.st_mode) or stat.S_ISDIR(information.st_mode)):
+                return False
+            try:
+                final = Path(os.readlink("/proc/self/fd/" + str(fd)))
+            except OSError:
+                # Restricted/missing procfs must not turn into cached approval.
+                return path.resolve().is_relative_to(root)
+            return final.is_absolute() and final.is_relative_to(root)
+        finally:
+            os.close(fd)
+    # Keep existing behavior for other POSIX and explicit device/UNC spellings.
     return path.resolve().is_relative_to(root)
 
 
