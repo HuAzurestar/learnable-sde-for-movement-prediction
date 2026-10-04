@@ -192,6 +192,20 @@ class ResearchSupervisor:
                     if expired.is_set() or now >= deadline:
                         outcome, error_code = "TIMEOUT", "TIMEOUT"
                         break
+                    if saved_checkpoint is not None:
+                        # ACK follows complete physical/save/budget validation.
+                        # The worker is now closing, not admitted to another job.
+                        # Observe its real exit before further budget I/O; retain
+                        # the reservation, independent fuse and heartbeat veto.
+                        # Fresh terminal budget authority is checked after stop.
+                        if now - start >= 15 and (not heartbeat.exists() or time.time() - heartbeat.stat().st_mtime > 15):
+                            outcome, error_code = "INTERRUPTED", "HEARTBEAT_LOST"
+                            break
+                        try:
+                            process.wait(timeout=min(0.025, deadline - now))
+                        except subprocess.TimeoutExpired:
+                            pass
+                        continue
                     # A ready response checks current budget in its short fresh
                     # save scope. With no response, retain the ordinary fresh
                     # poll; no budget decision is borrowed by another iteration.
@@ -242,6 +256,11 @@ class ResearchSupervisor:
                 # Stop and confirm them before any owner-side result handling.
                 stop_tree()
                 record_tree_stopped()
+                if saved_checkpoint is not None:
+                    # A fast exit must not skip a closure/hold occurring after
+                    # ACK. This fresh read also verifies the actual final chain;
+                    # no poll approval or pre-ACK snapshot is reused here.
+                    budget_stop_requested |= self.budget.balance(run["arm_id"])["closed"]
                 if completed_code is not None:
                     checkpoint_stopped = (completed_code == 85 and saved_checkpoint is not None
                                           and stopped_before_deadline)
