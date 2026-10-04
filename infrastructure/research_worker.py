@@ -62,4 +62,9 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # This internal wrapper owns no buffered result payload. The child's real
+    # exit has already been observed; never reenter Python's unbudgeted exit
+    # finalizers/daemon-stream cleanup after cancelling its deadline watchdog.
+    # Kernel process exit closes the self-containing Windows job and preserves
+    # the actual child status, while the owner still confirms the whole tree.
+    os._exit(main())

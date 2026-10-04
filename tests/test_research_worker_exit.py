@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -61,6 +62,61 @@ print('ACTUAL_CHILD_EXIT', exit_code, flush=True)
         tree.terminate()
         assert tree.wait_stopped(), "actual diagnostic process tree stop was not confirmed"
         process.wait(timeout=5)
+        tree.close()
+        for stream in (process.stdin, process.stdout, process.stderr):
+            stream.close()
+
+
+@pytest.mark.parametrize("exit_code", [0, 85])
+def test_actual_wrapper_exit_does_not_reenter_unbudgeted_python_cleanup(tmp_path, exit_code):
+    # Load a real delayed finalizer only in the original wrapper interpreter,
+    # not its child. No native wait result, clock, exit status or source changes.
+    # The internal wrapper has no user payload to finalize after main returns.
+    startup = tmp_path / "startup"
+    startup.mkdir()
+    marker = tmp_path / "wrapper-finalizer.txt"
+    (startup / "sitecustomize.py").write_text(
+        "import atexit,sys,time\nfrom pathlib import Path\n"
+        "if sys.argv[0].endswith('research_worker.py'):\n"
+        " def finalize():\n"
+        f"  Path({str(marker)!r}).write_text('actual wrapper finalizer')\n"
+        "  time.sleep(2)\n"
+        " atexit.register(finalize)\n", encoding="utf-8")
+    wrapper = Path(__file__).resolve().parents[1] / "infrastructure/research_worker.py"
+    heartbeat = tmp_path / "heartbeat.json"
+    start, deadline = time.monotonic(), time.monotonic() + 3
+    child = ("import sys,time; "
+             "time.sleep(max(0,float(sys.argv[1])-1.2-time.monotonic())); "
+             "sys.exit(int(sys.argv[2]))")
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = str(startup) + os.pathsep + environment.get("PYTHONPATH", "")
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    process = subprocess.Popen(
+        [sys.executable, str(wrapper), str(heartbeat), str(deadline),
+         sys.executable, "-c", child, str(deadline), str(exit_code)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment,
+        start_new_session=os.name != "nt",
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+    tree = ProcessTree(process)
+    try:
+        process.stdin.write(b"GO\n")
+        process.stdin.flush()
+        code = process.wait(timeout=5)  # Observation, not an extension of its3s fuse.
+        stopped = tree.wait_stopped()
+        observed_stop = time.monotonic()
+        stderr = process.stderr.read()
+        assert code == exit_code, stderr.decode(errors="replace")
+        assert stopped, "actual whole native wrapper tree did not stop"
+        assert heartbeat.is_file(), "real original wrapper/child execution was not reached"
+        assert observed_stop < deadline, (
+            f"wrapper cleanup escaped the3s fuse: actual stop after {observed_stop-start:.3f}s")
+        assert not marker.exists(), "internal wrapper entered Python finalizers after child completion"
+    finally:
+        tree.terminate()
+        assert tree.wait_stopped(), "actual failed wrapper tree still requires confirmed cleanup"
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=1)
         tree.close()
         for stream in (process.stdin, process.stdout, process.stderr):
             stream.close()
