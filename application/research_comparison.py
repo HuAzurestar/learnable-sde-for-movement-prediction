@@ -10,7 +10,8 @@ import sys
 from application.research_budget import BudgetSpec
 from application.research_computation import (MAX_INPUT_BYTES, MAX_OUTPUT_BYTES, MAX_OPERATIONS,
     comparison_plan, paper_identity, verified_computation)
-from application.research_evidence import (accept_evidence_package, authorize_study, evidence_visibility,
+from application.research_evidence import (accept_evidence_package, authorize_evidence_publication,
+    authorize_study, evidence_visibility,
     export_evidence, expected_metrics_csv, expected_paper_index)
 from application.research_supervisor import ResearchSupervisor
 from experiments.pirc25.affine import ROOT, code_hash
@@ -158,14 +159,21 @@ class ComparisonRunner:
             "aggregate_hash": value["aggregate"]["aggregate_hash"],
             "files": {name: hashlib.sha256(content).hexdigest() for name, content in files.items()}})
         directory = self.store.path / "artifacts" / (".comparison-" + attempt["attempt_id"])
-        self._write_files(directory, files)
+        def publication_guard():
+            # Reauthenticate the chosen immutable source, including foreign
+            # model grants. Earlier read/job permission cannot cover later
+            # staging fsync, identical retries or final package disclosure.
+            authorize_evidence_publication(self.store, bundle, grant)
+
+        self._write_files(directory, files, before_replace=publication_guard)
         package = accept_evidence_package(self.store, directory, value["aggregate"]["aggregate_hash"])
         if output is not None:
-            self._write_files(Path(output), files)
+            self._write_files(Path(output), files, before_replace=publication_guard)
+        publication_guard()
         return {**result, "comparison": package}
 
     @staticmethod
-    def _write_files(directory, files):
+    def _write_files(directory, files, *, before_replace=None):
         directory = directory.resolve()
         if any((parent / ".git").exists() for parent in (directory, *directory.parents)):
             raise ResearchError("UNAUTHORIZED_DATA", "generated comparison must stay outside Git")
@@ -176,4 +184,4 @@ class ComparisonRunner:
                 raise ResearchError("UNAUTHORIZED_DATA", "comparison package path escapes root")
             # Publish without replacing another writer's target; identical
             # retries use the shared bounded, freshly verified comparator.
-            atomic_write(path, content, immutable=True)
+            atomic_write(path, content, immutable=True, before_replace=before_replace)
