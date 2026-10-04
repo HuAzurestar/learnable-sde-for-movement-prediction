@@ -129,7 +129,10 @@ class ResearchSupervisor:
             # Verify one short response/save phase, including the actual final
             # saved journal. ACK must stay outside the scope: otherwise the
             # worker could accept a checkpoint before final corruption is seen.
-            with self.store._read_transaction():
+            # The three durable MANIFEST/CHECKPOINT/SAVED events need only one
+            # final head, still before uncached checks and ACK. No audit event
+            # or event fsync is deferred by this checkpoint-only owned phase.
+            with self.store._checkpoint_publication():
                 def check_current_budget():
                     nonlocal budget_stop_requested
                     budget_stop_requested |= self.budget.balance(run["arm_id"])["closed"]

@@ -79,7 +79,7 @@ class SharedRecovery:
         def save(state, progress, receipt, deadline):
             # Only this short owner save phase holds the writer lock; the
             # waiting worker and its independent hard fuse remain outside it.
-            with self.store._read_transaction():
+            with self.store._checkpoint_publication():
                 # Validate the receipt against the same fresh context used to
                 # publish, not a second full version/resource context. This is
                 # one owned save phase, never reusable admission or authority.
@@ -92,7 +92,7 @@ class SharedRecovery:
         return save
 
     def checkpoint(self, attempt_id, state: dict, *, admission_hash=None, progress=None, deadline=None):
-        with self.store._read_transaction():
+        with self.store._checkpoint_publication():
             artifact = self._checkpoint(attempt_id, state, admission_hash=admission_hash,
                                         progress=progress, deadline=deadline)
         if deadline is not None and time.monotonic() >= deadline:

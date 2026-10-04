@@ -25,6 +25,8 @@ _AUDIT_EVENT_KINDS = frozenset({
     "DISCLOSURE_ALLOWED", "DISCLOSURE_DENIED",
 })
 
+_CHECKPOINT_HEAD_KINDS = frozenset({"MANIFEST", "CHECKPOINT", "CHECKPOINT_SAVED"})
+
 
 class ResearchError(ValueError):
     def __init__(self, code: str, detail: str):
@@ -367,6 +369,33 @@ class ResearchStore:
             raise ResearchError("CONTRACT_MISMATCH", "read completion needs an owned verified scope")
         self._read_scope.completions.append((authority, expiry))
 
+    @contextmanager
+    def _checkpoint_publication(self):
+        """Publish one final head for a single locked checkpoint save phase.
+
+        Every event still uses its own actual fsync/atomic publication. A head
+        is not a commit marker: reopening already verifies the complete chain
+        and accepts a lagging head after a crash. The final head is published
+        BEFORE the outer uncached physical/budget checks and any worker ACK.
+        Ordinary/audit appends retain immediate heads and their failure codes.
+        """
+        with self._read_transaction():
+            pending = getattr(self._read_scope, "checkpoint_head", None)
+            if pending is not None and pending[0] == os.getpid():
+                yield  # Nested recovery handler shares only this owned phase.
+                return
+            pending = (os.getpid(), [])
+            self._read_scope.checkpoint_head = pending
+            try:
+                yield
+                if pending[1]:
+                    kind, content = pending[1]
+                    self._write_journal(kind, self.path / "head.json", content)
+            finally:
+                # Exceptions leave already-flushed events conservatively
+                # recoverable; neither rollback nor successful ACK is claimed.
+                del self._read_scope.checkpoint_head
+
     @staticmethod
     def _json(path):
         try:
@@ -498,7 +527,17 @@ class ResearchStore:
                 self._read_scope.snapshot = (os.getpid(), None)
                 self._discard_event_lookup()
                 raise
-        self._write_journal(kind, self.path / "head.json", encode({"sequence": event["sequence"], "hash": event["hash"]}))
+        head = encode({"sequence": event["sequence"], "hash": event["hash"]})
+        pending = getattr(self._read_scope, "checkpoint_head", None)
+        owned = (snapshot is not None and pending is not None and pending[0] == os.getpid())
+        if owned and kind in _CHECKPOINT_HEAD_KINDS:
+            pending[1][:] = [kind, head]
+        else:
+            if owned:
+                # This immediate head covers preceding checkpoint events too.
+                # Clear before I/O: a caught failure cannot later regress head.
+                pending[1].clear()
+            self._write_journal(kind, self.path / "head.json", head)
         return event
 
     @staticmethod
