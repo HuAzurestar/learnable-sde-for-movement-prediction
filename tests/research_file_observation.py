@@ -52,8 +52,13 @@ def observe_file(monkeypatch, target, *, before_open=None, before_read=None, aft
         return Stream(actual) if selected else actual
 
     def os_open(path, *args, **kwargs):
-        selected = (relative_target(kwargs['dir_fd'], os.fspath(path))
-                    if kwargs.get('dir_fd') is not None else Path(path) == target)
+        flags = args[0] if args else kwargs['flags']
+        # A Linux O_PATH descriptor queries a current name but cannot read
+        # payload. Keep mutation hooks at the actual readable open, matching
+        # the Windows observer's GENERIC_READ distinction below.
+        selected = not (flags & getattr(os, 'O_PATH', 0)) and (
+            relative_target(kwargs['dir_fd'], os.fspath(path))
+            if kwargs.get('dir_fd') is not None else Path(path) == target)
         if selected and before_open is not None:
             before_open()
         fd = original_os_open(path, *args, **kwargs)

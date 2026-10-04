@@ -1,5 +1,6 @@
 """Actual Linux path-query work, payload observation and current-name aliases."""
 import hashlib
+import errno
 import os
 from pathlib import Path
 import stat
@@ -8,6 +9,7 @@ import sys
 import pytest
 
 from infrastructure.research_files import source_file_hash
+from infrastructure import research_files
 from infrastructure.research_store import ResearchError, encode
 from tests.research_file_observation import observe_file
 
@@ -119,3 +121,121 @@ def test_actual_same_inode_external_parent_redirect_is_not_an_old_fd_name(
     finally:
         if redirect.is_symlink():
             redirect.unlink()
+
+
+def _observe_real_queries(monkeypatch, fault=None):
+    originals = os.open, os.close, os.readlink, os.fstat
+    observed = {'attempts': [], 'opened': [], 'closed': [], 'held': set(), 'faults': []}
+
+    def query_open(path, flags, *args, **kwargs):
+        selected = bool(flags & os.O_PATH)
+        if selected:
+            observed['attempts'].append(Path(path))
+            if fault == 'open-unsupported':
+                observed['faults'].append(fault)
+                raise OSError(errno.EOPNOTSUPP, 'injected unsupported query-only open')
+        fd = originals[0](path, flags, *args, **kwargs)
+        if selected:
+            observed['opened'].append(fd)
+            observed['held'].add(fd)
+        return fd
+
+    def close(fd):
+        originals[1](fd)
+        if fd in observed['held']:
+            observed['closed'].append(fd)
+            observed['held'].remove(fd)
+
+    def readlink(path, *args, **kwargs):
+        if os.fspath(path).startswith('/proc/self/fd/') and fault in {'readlink-missing', 'readlink-denied'}:
+            observed['faults'].append(fault)
+            raise OSError(errno.ENOENT if fault == 'readlink-missing' else errno.EACCES,
+                          'injected unavailable current FD name')
+        return originals[2](path, *args, **kwargs)
+
+    def fstat(fd):
+        if fd in observed['held'] and fault == 'fstat-error':
+            observed['faults'].append(fault)
+            raise OSError(errno.EIO, 'injected query descriptor metadata failure')
+        return originals[3](fd)
+
+    monkeypatch.setattr(os, 'open', query_open)
+    monkeypatch.setattr(os, 'close', close)
+    monkeypatch.setattr(os, 'readlink', readlink)
+    monkeypatch.setattr(os, 'fstat', fstat)
+    return observed
+
+
+@pytest.mark.parametrize('fault', ['open-unsupported', 'readlink-missing', 'readlink-denied'])
+@pytest.mark.parametrize('redirect', [False, True])
+def test_real_fallback_rechecks_current_external_same_inode_name(tmp_path, monkeypatch, fault, redirect):
+    root = tmp_path / 'source'
+    path = root / 'nested' / 'source.py'
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b'# original synthetic source\n')
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    os.link(path, outside / path.name)
+    original_resolve, resolutions = Path.resolve, []
+
+    def resolve(path, *args, **kwargs):
+        resolutions.append(path)
+        return original_resolve(path, *args, **kwargs)
+
+    def change(*_):
+        if not path.parent.is_symlink():
+            path.parent.rename(root / 'parked')
+            path.parent.symlink_to(outside, target_is_directory=True)
+
+    observed = _observe_real_queries(monkeypatch, fault)
+    monkeypatch.setattr(Path, 'resolve', resolve)
+    reads, handles = observe_file(monkeypatch, path, after_read=change if redirect else None)
+    try:
+        if redirect:
+            with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
+                source_file_hash(root, path)
+        else:
+            assert source_file_hash(root, path) == hashlib.sha256(path.read_bytes()).hexdigest()
+        assert observed['attempts'] == [path, path, path]
+        assert observed['faults'] == [fault, fault, fault]
+        assert resolutions == [path, path, path], 'unavailable FD names must use real fresh canonical checks'
+        assert not observed['held'] and observed['closed'] == observed['opened']
+        assert reads and handles == [True]
+    finally:
+        if path.parent.is_symlink():
+            path.parent.unlink()
+
+
+@pytest.mark.parametrize('fault', [None, 'fstat-error'])
+def test_actual_query_descriptors_close_on_success_and_metadata_error(tmp_path, monkeypatch, fault):
+    path = tmp_path / 'source.py'
+    path.write_bytes(b'# synthetic source\n')
+    observed = _observe_real_queries(monkeypatch, fault)
+    reads, handles = observe_file(monkeypatch, path)
+    if fault is None:
+        assert source_file_hash(tmp_path, path) == hashlib.sha256(b'# synthetic source\n').hexdigest()
+        assert observed['attempts'] == [path, path, path]
+        assert reads and handles == [True]
+    else:
+        with pytest.raises(OSError) as failure:
+            source_file_hash(tmp_path, path)
+        assert failure.value.errno == errno.EIO
+        assert observed['attempts'] == [path]
+        assert reads == [] and handles == []
+    assert not observed['held'] and observed['closed'] == observed['opened']
+    for fd in observed['opened']:
+        with pytest.raises(OSError) as closed:
+            os.fstat(fd)
+        assert closed.value.errno == errno.EBADF
+
+
+def test_current_query_accepts_actual_directory_but_refuses_leaf_symlink(tmp_path):
+    root = tmp_path / 'root'
+    root.mkdir()
+    path = root / 'source.py'
+    path.write_bytes(b'# synthetic\n')
+    alias = root / 'alias.py'
+    alias.symlink_to(path)
+    assert research_files._source_in_root(root, root)
+    assert research_files._source_in_root(root, path)
+    assert not research_files._source_in_root(root, alias)
