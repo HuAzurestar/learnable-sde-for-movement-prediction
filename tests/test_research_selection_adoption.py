@@ -2,6 +2,7 @@
 from copy import deepcopy
 import json
 import hashlib
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -182,7 +183,8 @@ print(json.dumps(selection_documents(inputs['selection'],inputs,resolved,list(in
         assert result.returncode != 0 and 'invalid admission evidence: upstream' in result.stderr, result.stderr
 
 
-def test_matrix_descriptor_remains_held_through_original_consumer_semantics(tmp_path, monkeypatch):
+@pytest.mark.parametrize('change', ['size-change', 'restored-mtime'])
+def test_matrix_descriptor_remains_held_through_original_consumer_semantics(tmp_path, monkeypatch, change):
     import experiments.pirc22.consumer as original
     before = public_fingerprints()
     _, manifest, accepted = selection_fixture(tmp_path)
@@ -190,13 +192,29 @@ def test_matrix_descriptor_remains_held_through_original_consumer_semantics(tmp_
     def change_after_validation(payload, **kwargs):
         result = validator(payload, **kwargs)
         path = tmp_path / 'matrix.json'
+        before = path.stat()
         content = path.read_bytes()
-        path.write_bytes(content.replace(b'FROZEN', b'CHANGED', 1))
+        changed = content.replace(b'FROZEN', b'BROKEN' if change == 'restored-mtime' else b'CHANGED', 1)
+        assert changed != content
+        path.write_bytes(changed)
+        if change == 'restored-mtime':
+            assert len(changed) == len(content)
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        after = path.stat()
+        (tmp_path / 'source-stat-observed.json').write_bytes(encode({
+            'platform': os.name, 'change': change,
+            'before': {key: getattr(before, key) for key in ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns')},
+            'after': {key: getattr(after, key) for key in ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns')},
+            'original_hash': hashlib.sha256(content).hexdigest(),
+            'changed_hash': hashlib.sha256(path.read_bytes()).hexdigest()}))
         return result
     monkeypatch.setattr(original, 'validate_benchmark_selection_binding', change_after_validation)
     rows, value = resolved(tmp_path, manifest, accepted)
+    after_public = public_fingerprints()
+    (tmp_path / 'publisher-observed.json').write_bytes(encode({'before': before, 'after': after_public}))
+    assert after_public == before
     assert rows['dependent']['status'] == 'rejected', value
-    assert rows['independent']['status'] == 'ready' and public_fingerprints() == before
+    assert rows['independent']['status'] == 'ready'
 
 
 def test_legal_large_formatted_selection_keeps_full_semantics_without_encoded_file_buffer(tmp_path):
