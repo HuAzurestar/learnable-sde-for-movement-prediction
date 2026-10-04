@@ -9,6 +9,7 @@ import pytest
 from application.research_budget import BudgetSpec
 from application.research_evidence import accept_evidence_package
 from infrastructure.research_store import ResearchError
+from tests.research_file_observation import is_query_only_open
 from tests.test_research_comparison import comparison_source, compute
 
 
@@ -70,7 +71,7 @@ def observe_target(monkeypatch, target, *, grow_to=None, after_read=None):
 
     def descriptor_open(path, *args, **kwargs):
         fd = original_os_open(path, *args, **kwargs)
-        if Path(path) == target:
+        if Path(path) == target and not is_query_only_open(args, kwargs):
             descriptors.add(fd)
         return fd
 
@@ -131,7 +132,7 @@ def test_file_growing_at_actual_open_is_rejected_without_content_read(managed_pa
     original = os.open
 
     def grow(path, *args, **kwargs):
-        if Path(path) == target:
+        if Path(path) == target and not is_query_only_open(args, kwargs):
             with target.open("r+b") as writer:
                 writer.truncate(limit + 1)
         return original(path, *args, **kwargs)
@@ -153,7 +154,7 @@ def test_replaced_path_at_actual_open_is_rejected_before_read(managed_package, t
     original = os.open
 
     def replace(path, *args, **kwargs):
-        if Path(path) == target:
+        if Path(path) == target and not is_query_only_open(args, kwargs):
             os.replace(replacement, target)
         return original(path, *args, **kwargs)
 
@@ -231,7 +232,7 @@ def test_growth_between_actual_handle_stat_and_path_recheck_is_quota_error(manag
 
     def track(path, *args, **kwargs):
         fd = original_open(path, *args, **kwargs)
-        if Path(path) == target:
+        if Path(path) == target and not is_query_only_open(args, kwargs):
             descriptors.add(fd)
         return fd
 

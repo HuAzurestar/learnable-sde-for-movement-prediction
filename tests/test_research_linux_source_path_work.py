@@ -239,3 +239,23 @@ def test_current_query_accepts_actual_directory_but_refuses_leaf_symlink(tmp_pat
     assert research_files._source_in_root(root, root)
     assert research_files._source_in_root(root, path)
     assert not research_files._source_in_root(root, alias)
+
+
+def test_bespoke_package_observer_never_attributes_reused_query_fd_to_payload(tmp_path, monkeypatch):
+    from tests.test_research_package_read_bounds import observe_target
+    path, other = tmp_path / 'source.py', tmp_path / 'unrelated.py'
+    content = b'# synthetic source\n'
+    path.write_bytes(content)
+    other.write_bytes(b'# unrelated actual bytes\n')
+    mutations = []
+    reads = observe_target(monkeypatch, path, after_read=lambda: mutations.append(True))
+    queried = os.open(path, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC)
+    os.close(queried)
+    reused = os.open(other, os.O_RDONLY | os.O_CLOEXEC)
+    # No intervening opens: the actual kernel reuses its lowest free FD.
+    assert reused == queried
+    with os.fdopen(reused, 'rb') as stream:
+        assert stream.read(64) == b'# unrelated actual bytes\n'
+    assert reads == [] and mutations == [], 'closed query FD was mistaken for an unrelated payload'
+    assert source_file_hash(tmp_path, path) == hashlib.sha256(content).hexdigest()
+    assert reads == [len(content) + 1, 1] and mutations == [True, True]

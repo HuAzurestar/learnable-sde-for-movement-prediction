@@ -9,6 +9,7 @@ import time
 import pytest
 
 from infrastructure.research_store import ResearchError, ResearchStore, encode
+from tests.research_file_observation import is_query_only_open
 from tests.test_research_metadata_prefix_reads import prepared
 
 
@@ -24,7 +25,7 @@ def test_prefix_enumerates_and_opens_actual_members_relative_to_original_directo
 
     def opened(path, *args, **kwargs):
         member = Path(path)
-        if member.is_absolute() and member.suffix == ".json" and member.parent in {
+        if not is_query_only_open(args, kwargs) and member.is_absolute() and member.suffix == ".json" and member.parent in {
                 store.path, store.path / "events"}:
             absolute_members.append(str(member))
         return original_open(path, *args, **kwargs)
@@ -135,7 +136,7 @@ def test_plain_standalone_json_on_another_thread_keeps_its_own_source_boundary(t
     original_open = os.open
 
     def opened(path, *args, **kwargs):
-        if Path(path) == target:
+        if Path(path) == target and not is_query_only_open(args, kwargs):
             observed.append(str(path))
         return original_open(path, *args, **kwargs)
 

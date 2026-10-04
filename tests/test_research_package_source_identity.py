@@ -10,6 +10,7 @@ import application.research_evidence as evidence
 from application.research_budget import BudgetSpec
 from experiments.pirc25.__main__ import main
 from infrastructure.research_store import ResearchError, encode
+from tests.research_file_observation import is_query_only_open
 from tests.test_research_comparison import comparison_source, compute
 from tests.test_research_package_read_bounds import FILES, observe_target
 from tests.test_research_publication_paths import redirected_directory
@@ -53,7 +54,7 @@ def test_real_restored_mtime_package_source_is_rejected_before_return(tmp_path, 
         original = os.open
 
         def opened(path, *args, **kwargs):
-            if Path(path) == target:
+            if Path(path) == target and not is_query_only_open(args, kwargs):
                 change()
             return original(path, *args, **kwargs)
 

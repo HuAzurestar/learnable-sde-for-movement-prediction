@@ -4,6 +4,12 @@ import os
 from pathlib import Path
 
 
+def is_query_only_open(args, kwargs):
+    """Distinguish Linux name queries from the original payload-open hooks."""
+    flags = args[0] if args else kwargs['flags']
+    return bool(flags & getattr(os, 'O_PATH', 0))
+
+
 def observe_file(monkeypatch, target, *, before_open=None, before_read=None, after_read=None):
     target = Path(target)
     original_path_open, original_os_open, original_fdopen = Path.open, os.open, os.fdopen
@@ -52,11 +58,10 @@ def observe_file(monkeypatch, target, *, before_open=None, before_read=None, aft
         return Stream(actual) if selected else actual
 
     def os_open(path, *args, **kwargs):
-        flags = args[0] if args else kwargs['flags']
         # A Linux O_PATH descriptor queries a current name but cannot read
         # payload. Keep mutation hooks at the actual readable open, matching
         # the Windows observer's GENERIC_READ distinction below.
-        selected = not (flags & getattr(os, 'O_PATH', 0)) and (
+        selected = not is_query_only_open(args, kwargs) and (
             relative_target(kwargs['dir_fd'], os.fspath(path))
             if kwargs.get('dir_fd') is not None else Path(path) == target)
         if selected and before_open is not None:
