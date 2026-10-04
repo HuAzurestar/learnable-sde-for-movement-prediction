@@ -38,23 +38,31 @@ class ResearchError(ValueError):
 
 
 class _PhysicalMetadataPath(type(Path())):
-    """One call's original parent identity, never metadata or permission bytes."""
+    """One call's owned parent scope, never metadata or permission bytes."""
 
     @classmethod
-    def pinned(cls, value, root_identity):
+    def pinned(cls, value, parent):
         # Ordinary Path construction on every supported Python version; do not
         # pass private keywords through pathlib's version-specific constructor.
         path = cls(value)
-        path._metadata_root_identity = root_identity
+        path._metadata_parent = parent
         return path
+
+    def __reduce__(self):
+        raise TypeError('physical metadata paths cannot leave their read scope')
 
 
 @contextmanager
-def _opened_metadata_directory(path):
+def _opened_metadata_directory(path, *, read_contents=False):
     from .research_publication import opened_directory
+    from .research_metadata import DirectoryMembers
     try:
-        with opened_directory(path) as directory:
-            yield directory
+        with opened_directory(path, read_contents=read_contents) as (root, fd, _):
+            members = DirectoryMembers(root, fd)
+            try:
+                yield members
+            finally:
+                members.finish()
     except OSError as error:
         raise ResearchError("CORRUPT_ARTIFACT", "invalid authoritative directory") from error
 
@@ -347,12 +355,14 @@ class ResearchStore:
         try:
             from .research_files import opened_regular_file
             from .research_json import read_json
-            root_identity = getattr(path, "_metadata_root_identity", None)
+            parent = getattr(path, "_metadata_parent", None)
             path = Path(path)
             # Authoritative metadata has the same lexical root and opened-file
             # boundary as artifacts. Do not follow replaced event/manifests
             # directories, even when their copied contents retain valid hashes.
-            with opened_regular_file(path.parent, path, root_identity=root_identity) as (stream, size, verify):
+            boundary = (parent.opened_member(path) if parent is not None
+                        else opened_regular_file(path.parent, path))
+            with boundary as (stream, size, verify):
                 return read_json(stream, size, verify_identity=verify)
         except (OSError, ValueError) as exc:
             raise ResearchError("CORRUPT_ARTIFACT", "invalid authoritative object") from exc
@@ -362,22 +372,18 @@ class ResearchStore:
         if snapshot is not None and snapshot[1] is not None:
             # Do not let a caller mutate the verified prefix or appended payloads.
             return json.loads(encode(snapshot[1]))
-        # Keep both original directories until AFTER the head and complete chain
-        # have been validated. Each actual member read must still identify that
-        # same parent; admitting a new valid directory per _json is not enough.
-        # This keeps the existing opened-file/native-change checks and performs
-        # no metadata, authorization or physical-prefix caching.
-        with _opened_metadata_directory(self.path) as (_, store_fd, _), \
-                _opened_metadata_directory(self.path / "events") as (_, events_fd, _):
-            store_info, events_info = os.fstat(store_fd), os.fstat(events_fd)
-            store_identity = (store_info.st_dev, store_info.st_ino)
-            events_identity = (events_info.st_dev, events_info.st_ino)
+        # Borrow original handles only within this actual thread/process scope.
+        # Whole-root lexical/identity checks still surround every fresh prefix;
+        # each member retains fresh regular-file/change checks before/after I/O.
+        with _opened_metadata_directory(self.path) as store_members, \
+                _opened_metadata_directory(self.path / "events", read_contents=True) as events_members:
             events = []
             previous = "0" * 64
-            for sequence, path in enumerate(sorted((self.path / "events").glob("*.json")), 1):
+            for sequence, name in enumerate(events_members.names(), 1):
+                path = self.path / "events" / name
                 if path.name != f"{sequence:016d}.json":
                     raise ResearchError("CORRUPT_ARTIFACT", "event sequence gap")
-                event = self._json(_PhysicalMetadataPath.pinned(path, events_identity))
+                event = self._json(_PhysicalMetadataPath.pinned(path, events_members))
                 if not isinstance(event, dict):
                     raise ResearchError("CORRUPT_ARTIFACT", "event is not an object")
                 claimed = event.get("hash")
@@ -387,7 +393,7 @@ class ResearchStore:
                     raise ResearchError("CORRUPT_ARTIFACT", "event hash chain mismatch")
                 previous = claimed
                 events.append(event)
-            head = self._json(_PhysicalMetadataPath.pinned(self.path / "head.json", store_identity))
+            head = self._json(_PhysicalMetadataPath.pinned(self.path / "head.json", store_members))
             n = head.get("sequence", -1) if isinstance(head, dict) else -1
             if (not isinstance(n, int) or n < 0 or n > len(events)
                     or head.get("hash") != (events[n - 1]["hash"] if n else "0" * 64)):

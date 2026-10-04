@@ -66,10 +66,10 @@ def _descriptor(handle, flags):
         raise
 
 
-def directory_descriptor(path):
+def directory_descriptor(path, *, read_contents=False):
     api = _api()
     # READ_ATTRIBUTES | TRAVERSE | SYNCHRONIZE; all share modes, no reparse follow.
-    handle = api.create(str(path), 0x1000a0, 7, None, 3, 0x02200000, None)
+    handle = api.create(str(path), 0x1000a0 | int(read_contents), 7, None, 3, 0x02200000, None)
     if handle in (None, api.c.c_void_p(-1).value):
         raise api.c.WinError(api.c.get_last_error())
     return _descriptor(handle, os.O_RDONLY)

@@ -8,7 +8,13 @@ def observe_file(monkeypatch, target, *, before_open=None, before_read=None, aft
     target = Path(target)
     original_path_open, original_os_open, original_fdopen = Path.open, os.open, os.fdopen
     descriptors = set()
+    parent = target.parent.stat()
+    parent_identity = parent.st_dev, parent.st_ino
     reads, handles = [], []
+
+    def relative_target(fd, name):
+        information = os.fstat(fd)
+        return name == target.name and (information.st_dev, information.st_ino) == parent_identity
 
     class Stream:
         def __init__(self, actual):
@@ -46,7 +52,8 @@ def observe_file(monkeypatch, target, *, before_open=None, before_read=None, aft
         return Stream(actual) if selected else actual
 
     def os_open(path, *args, **kwargs):
-        selected = Path(path) == target
+        selected = (relative_target(kwargs['dir_fd'], os.fspath(path))
+                    if kwargs.get('dir_fd') is not None else Path(path) == target)
         if selected and before_open is not None:
             before_open()
         fd = original_os_open(path, *args, **kwargs)
@@ -63,4 +70,28 @@ def observe_file(monkeypatch, target, *, before_open=None, before_read=None, aft
     monkeypatch.setattr(Path, "open", path_open)
     monkeypatch.setattr(os, "open", os_open)
     monkeypatch.setattr(os, "fdopen", fdopen)
+    if os.name == 'nt':
+        from infrastructure import research_windows_publication as native
+        original_relative, original_descriptor = native._relative, native._descriptor
+        native_handles = set()
+
+        def relative(fd, name, access, disposition, **kwargs):
+            selected = bool(access & 0x80000000) and relative_target(fd, name)
+            if selected and before_open is not None:
+                before_open()
+            handle = original_relative(fd, name, access, disposition, **kwargs)
+            if selected:
+                native_handles.add(handle)
+            return handle
+
+        def descriptor(handle, flags):
+            selected = handle in native_handles
+            native_handles.discard(handle)
+            fd = original_descriptor(handle, flags)
+            if selected:
+                descriptors.add(fd)
+            return fd
+
+        monkeypatch.setattr(native, '_relative', relative)
+        monkeypatch.setattr(native, '_descriptor', descriptor)
     return reads, handles

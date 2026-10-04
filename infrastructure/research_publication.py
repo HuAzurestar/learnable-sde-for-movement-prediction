@@ -27,11 +27,11 @@ def lexical_directory(path):
 
 
 @contextmanager
-def opened_directory(path):
+def opened_directory(path, *, read_contents=False):
     path, original = lexical_directory(path)
     if os.name == 'nt':
         from .research_windows_publication import directory_descriptor
-        fd = directory_descriptor(path)
+        fd = directory_descriptor(path, read_contents=read_contents)
     else:
         fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:

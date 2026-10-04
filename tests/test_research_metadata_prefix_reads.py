@@ -224,10 +224,10 @@ def test_physical_prefix_closes_actual_original_directory_descriptors(tmp_path, 
     original_directory, closed = publication.opened_directory, []
 
     @contextmanager
-    def directory(path):
+    def directory(path, **kwargs):
         fd = None
         try:
-            with original_directory(path) as value:
+            with original_directory(path, **kwargs) as value:
                 fd = value[1]
                 yield value
         finally:
