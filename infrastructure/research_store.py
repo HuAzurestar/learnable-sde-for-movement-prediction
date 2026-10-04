@@ -75,6 +75,9 @@ def authorization_key_for_grant(grant):
 
 def _sync_directory(path: Path):
     if os.name != "nt":
+        if hasattr(path, 'parent_fd'):
+            os.fsync(path.parent_fd)
+            return
         fd = os.open(path, os.O_RDONLY)
         try:
             os.fsync(fd)
@@ -106,15 +109,11 @@ def _matches_file_content(path: Path, content: bytes) -> bool:
 
 
 def _publish_no_replace(temporary: Path, path: Path):
-    # Windows rename refuses an existing destination; POSIX rename overwrites.
-    # Hard-link publication is atomic/no-clobber on POSIX. Staging is beside
-    # the target, on the same filesystem; unsupported operations fail closed.
-    if os.name == "nt":
-        os.rename(temporary, path)
-        return False  # The staging pathname is no longer owned by this writer.
-    else:
-        os.link(temporary, path)
-        return True  # The fully flushed staging link still needs cleanup.
+    return temporary.publish(replace=False)
+
+
+def _publish_replace(publication, path):
+    return publication.publish(replace=True)
 
 
 def atomic_write(path: Path, content: bytes, *, before_replace=None, immutable=False):
@@ -126,31 +125,41 @@ def atomic_write(path: Path, content: bytes, *, before_replace=None, immutable=F
     Immutable external exports never replace another publisher's target;
     identical content is accepted only after a bounded read and a fresh guard.
     """
+    from .research_publication import Publication, opened_directory
+    path = Path(os.path.abspath(path))
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.staging")
-    created = False
-    try:
-        with temporary.open("xb") as stream:
-            created = True
+    with opened_directory(path.parent) as (_, parent_fd, verify_directory):
+        publication = Publication(path, temporary, parent_fd, verify_directory, content)
+        try:
+            stream = publication.create_stage()
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        if before_replace is not None:
-            before_replace()
-        if immutable:
-            try:
-                created = _publish_no_replace(temporary, path)
-            except FileExistsError:
-                if not _matches_file_content(path, content):
-                    raise ResearchError("IDENTITY_CONFLICT", "export exists with different content") from None
-                if before_replace is not None:
+            publication.freeze()
+            if before_replace is not None:
+                try:
                     before_replace()
-        else:
-            os.replace(temporary, path)
-            created = False
-        _sync_directory(path.parent)
-    finally:
-        if created:
-            temporary.unlink(missing_ok=True)
+                except PermissionError as error:
+                    # Native Windows can deny a directory move while the
+                    # original child is held. Reject this operation, clean
+                    # only our original stage, and preserve the target.
+                    raise ResearchError('UNAUTHORIZED_DATA', 'publication boundary operation was denied') from error
+            publication.verify()
+            if immutable:
+                try:
+                    _publish_no_replace(publication, path)
+                except FileExistsError:
+                    if not _matches_file_content(path, content):
+                        raise ResearchError("IDENTITY_CONFLICT", "export exists with different content") from None
+                    if before_replace is not None:
+                        before_replace()
+                    publication.verify()
+            else:
+                _publish_replace(publication, path)
+            _sync_directory(publication)
+            verify_directory()
+        finally:
+            publication.close()
 
 
 @contextmanager

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -174,10 +175,11 @@ class ComparisonRunner:
 
     @staticmethod
     def _write_files(directory, files, *, before_replace=None):
-        directory = directory.resolve()
+        from infrastructure.research_publication import prepare_directory
+        directory = Path(os.path.abspath(directory))
         if any((parent / ".git").exists() for parent in (directory, *directory.parents)):
             raise ResearchError("UNAUTHORIZED_DATA", "generated comparison must stay outside Git")
-        directory.mkdir(parents=True, exist_ok=True)
+        directory = prepare_directory(directory)
         for name, content in files.items():
             path = directory / name
             if path.is_symlink() or not path.resolve().is_relative_to(directory):

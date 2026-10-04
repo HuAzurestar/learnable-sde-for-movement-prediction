@@ -12,7 +12,8 @@ import infrastructure.research_store as store_module
 
 @contextmanager
 def audit_fault(store, kind, monkeypatch, *, stage="event-fsync", occurrence=1):
-    original_write, original_fsync, original_replace = store_module.atomic_write, os.fsync, os.replace
+    original_write, original_fsync = store_module.atomic_write, os.fsync
+    original_replace = store_module._publish_replace
     current, pending, fired = [None], [False], []
     seen = [0]
     def write(path, content, **options):
@@ -46,13 +47,15 @@ def audit_fault(store, kind, monkeypatch, *, stage="event-fsync", occurrence=1):
         return original_fsync(fd)
     def replace(source, target):
         if not fired and current[0] == "event" and stage == "event-rename":
-            assert Path(source).is_file() and Path(source).stat().st_size > 0
-            fail("event", Path(source).stat().st_size)
+            info = os.fstat(source.stream.fileno())
+            assert stat.S_ISREG(info.st_mode) and info.st_size > 0
+            assert source.temporary.is_file()
+            fail("event", info.st_size)
         return original_replace(source, target)
     with monkeypatch.context() as changes:
         changes.setattr(store_module, "atomic_write", write)
         changes.setattr(os, "fsync", fsync)
-        changes.setattr(os, "replace", replace)
+        changes.setattr(store_module, "_publish_replace", replace)
         yield fired
 
 

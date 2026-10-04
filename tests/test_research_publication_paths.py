@@ -25,7 +25,16 @@ def redirected_directory(tmp_path, directory=None):
         assert Path(os.path.abspath(directory)).is_relative_to(tmp_path.resolve())
         assert moved.resolve().is_relative_to(tmp_path.resolve())
         assert outside.resolve().is_relative_to(tmp_path.resolve())
-        directory.rename(moved)
+        try:
+            directory.rename(moved)
+        except PermissionError as error:
+            # Retain the actual syscall: Windows prohibits moving a parent
+            # with our original child handle open. This is no skip or mocked
+            # denial; assert the original namespace really stayed intact.
+            assert os.name == 'nt' and error.winerror == 5
+            assert directory.is_dir() and not moved.exists() and list(outside.iterdir()) == []
+            installed.append(False)
+            raise
         try:
             if os.name == 'nt':
                 env = dict(os.environ, PIRC_TEST_JUNCTION_PATH=str(directory),
@@ -45,7 +54,7 @@ def redirected_directory(tmp_path, directory=None):
     try:
         yield directory, outside, moved, redirect, installed
     finally:
-        if installed:
+        if installed == [True]:
             assert Path(os.path.abspath(directory)).is_relative_to(tmp_path.resolve())
             assert moved.resolve().is_relative_to(tmp_path.resolve())
             if os.name == 'nt':
@@ -70,6 +79,26 @@ def test_managed_publication_rejects_actual_directory_redirect(tmp_path, monkeyp
             return original_open(path, mode, *args, **kwargs)
 
         monkeypatch.setattr(Path, 'open', opened)
+        if phase == 'before-staging-open':
+            if os.name == 'nt':
+                from infrastructure import research_windows_publication as native
+                original_create = native.create_stage
+
+                def create(parent_fd, name):
+                    if not installed:
+                        redirect()
+                    return original_create(parent_fd, name)
+
+                monkeypatch.setattr(native, 'create_stage', create)
+            else:
+                original_create = os.open
+
+                def create(path, flags, *args, **kwargs):
+                    if kwargs.get('dir_fd') is not None and flags & os.O_EXCL and not installed:
+                        redirect()
+                    return original_create(path, flags, *args, **kwargs)
+
+                monkeypatch.setattr(os, 'open', create)
         try:
             comparison.ComparisonRunner._write_files(directory, {'metrics.csv': expected},
                 before_replace=redirect if phase == 'after-fsync' else None)
@@ -79,9 +108,10 @@ def test_managed_publication_rejects_actual_directory_redirect(tmp_path, monkeyp
             outside_target_exists=(outside / 'metrics.csv').exists(),
             moved_staging=[path.name for path in moved.glob('.*.staging')])
         (tmp_path / 'publication-root-observed.json').write_bytes(encode(observed))
-        assert installed == [True], observed
+        assert installed == [True] or (phase == 'after-fsync' and installed == [False]), observed
         assert observed['error'] == 'UNAUTHORIZED_DATA', observed
         assert not observed['outside_files'] and not observed['moved_staging'], observed
+        assert not list(directory.glob('.*.staging')), observed
 
 
 @pytest.mark.parametrize('immutable', [False, True])
@@ -109,7 +139,12 @@ def test_actual_root_redirect_cannot_publish_or_delete_foreign_staging(tmp_path,
             moved_staging=[path.name for path in moved.glob('.*.staging')])
         (tmp_path / 'staging-root-ownership-observed.json').write_bytes(encode(observed))
         assert observed['error'] == 'UNAUTHORIZED_DATA', observed
-        assert foreign_path.read_bytes() == foreign and not observed['outside_target_exists'], observed
+        if installed == [True]:
+            assert foreign_path.read_bytes() == foreign, observed
+        else:
+            assert installed == [False] and not foreign_path.exists() and not moved.exists(), observed
+            assert not list(directory.glob('.*.staging')), observed
+        assert not observed['outside_target_exists'], observed
         assert not observed['moved_staging'], observed
 
 
