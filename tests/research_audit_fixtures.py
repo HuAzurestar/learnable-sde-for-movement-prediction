@@ -11,14 +11,17 @@ import infrastructure.research_store as store_module
 
 
 @contextmanager
-def audit_fault(store, kind, monkeypatch, *, stage="event-fsync"):
+def audit_fault(store, kind, monkeypatch, *, stage="event-fsync", occurrence=1):
     original_write, original_fsync, original_replace = store_module.atomic_write, os.fsync, os.replace
     current, pending, fired = [None], [False], []
+    seen = [0]
     def write(path, content, **options):
         location = None
         if Path(path).parent == store.path / "events" and json.loads(content).get("event_kind") == kind:
-            location = "event"
-            pending[0] = True
+            seen[0] += 1
+            if seen[0] == occurrence:
+                location = "event"
+                pending[0] = True
         elif Path(path) == store.path / "head.json" and pending[0]:
             location = "head"
         current[0] = location

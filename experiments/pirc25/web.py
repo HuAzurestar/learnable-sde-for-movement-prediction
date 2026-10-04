@@ -90,7 +90,9 @@ def make_server(store, authorization_id, *, port=0, authorization_version=None):
                     return
                 self.send(200, json.dumps(value, allow_nan=False).encode())
             except ResearchError as exc:
-                self.send(403 if exc.code.startswith("UNAUTHORIZED") else 409, json.dumps({"error": exc.envelope()}).encode())
+                status = (503 if exc.code == "EXPOSURE_AUDIT_UNAVAILABLE" else
+                          403 if exc.code.startswith("UNAUTHORIZED") else 409)
+                self.send(status, json.dumps({"error": exc.envelope()}).encode())
             except (ValueError, KeyError, OSError):
                 self.send(400, b'{"error":{"code":"INVALID_OR_UNAVAILABLE_RESULT"}}')
 

@@ -683,5 +683,17 @@ The view never opens provider, result, upstream or qualification bytes. Physical
 metadata/grant corruption, journal failure or final expiry cannot return rows;
 failed refresh clears previous rows. Scope facts and grants are request-local only.
 New read events invalidate data-access cursors; its own metadata disclosure journal
-does not. Whole-request complexity, typed audit-unavailable errors, real upstream
-fields/full compatibility and final clean-pair acceptance remain separate obligations.
+does not. Whole-request complexity, real upstream fields/full compatibility and
+final clean-pair acceptance remain separate obligations.
+
+Mandatory exposure/disclosure event or journal-head publication I/O failures raise
+`EXPOSURE_AUDIT_UNAVAILABLE`. The CLI returns a typed error envelope and nonzero
+exit; HTTP returns 503 with safe details and a trace ID, never result bytes or
+metadata rows. This is not an automatic retry instruction: restore journal
+availability and inspect the original events before an explicit authorized retry.
+An event already renamed before directory-sync/head failure remains conservative
+possible-exposure evidence; an unsuccessful response cannot erase an earlier
+read. External export guards also refuse publication after target fsync, preserving
+existing output and any already published private evidence candidate. Corrupt
+authority/identity conflicts retain their original refusal codes; unrelated
+lifecycle I/O failures are not classified as exposure audit failures.

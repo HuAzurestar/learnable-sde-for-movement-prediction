@@ -20,6 +20,12 @@ import time
 import uuid
 
 
+_AUDIT_EVENT_KINDS = frozenset({
+    "EXPOSURE_ALLOWED", "EXPOSURE_DENIED", "READ_STARTED", "READ_COMPLETED", "READ_FAILED",
+    "DISCLOSURE_ALLOWED", "DISCLOSURE_DENIED",
+})
+
+
 class ResearchError(ValueError):
     def __init__(self, code: str, detail: str):
         self.code = code
@@ -406,7 +412,7 @@ class ResearchStore:
                 "writer_epoch": self.writer_epoch}
         event = {**body, "hash": digest(body)}
         try:
-            atomic_write(self.path / "events" / f"{event['sequence']:016d}.json", encode(event))
+            self._write_journal(kind, self.path / "events" / f"{event['sequence']:016d}.json", encode(event))
         except BaseException:
             if self._read_snapshot() is not None:
                 # Rename may have succeeded before a directory-sync failure.
@@ -425,8 +431,21 @@ class ResearchStore:
                 self._read_scope.snapshot = (os.getpid(), None)
                 self._discard_event_lookup()
                 raise
-        atomic_write(self.path / "head.json", encode({"sequence": event["sequence"], "hash": event["hash"]}))
+        self._write_journal(kind, self.path / "head.json", encode({"sequence": event["sequence"], "hash": event["hash"]}))
         return event
+
+    @staticmethod
+    def _write_journal(kind: str, path: Path, content: bytes):
+        try:
+            atomic_write(path, content)
+        except OSError as exc:
+            if kind not in _AUDIT_EVENT_KINDS:
+                raise
+            # Never return data after uncertain publication. The existing
+            # physical recovery retains any event published before this failure;
+            # neither its disappearance nor a successful read can be assumed.
+            raise ResearchError("EXPOSURE_AUDIT_UNAVAILABLE",
+                                "mandatory exposure audit could not be persisted; no data returned") from exc
 
     def append(self, kind: str, payload: dict, event_id=None) -> dict:
         with self.lock():
