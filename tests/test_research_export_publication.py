@@ -1,6 +1,7 @@
 """Actual CLI publication must not overwrite a racing immutable export."""
 
 import json
+import stat
 from pathlib import Path
 import subprocess
 import sys
@@ -244,8 +245,15 @@ def test_actual_cli_publication_io_failure_preserves_complete_target_and_retry(
             original = getattr(owner, operation)
 
             def failed(*op_args, **op_kwargs):
-                if failure == 'directory-sync' and op_args[0] != output.parent:
-                    return original(*op_args, **op_kwargs)
+                if failure == 'directory-sync':
+                    directory = op_args[0]
+                    if hasattr(directory, 'parent_fd'):
+                        assert stat.S_ISDIR(store_module.os.fstat(directory.parent_fd).st_mode)
+                        selected = directory.path.parent
+                    else:
+                        selected = directory
+                    if selected != output.parent:
+                        return original(*op_args, **op_kwargs)
                 # Exercise the real flush or real directory sync first. A
                 # publish fault must happen before any target exists.
                 if failure != 'publish':
