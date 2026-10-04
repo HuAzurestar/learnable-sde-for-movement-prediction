@@ -110,18 +110,21 @@ def test_inspection_uses_one_bounded_physical_source_read(monkeypatch, tmp_path)
     assert reads and all(0 < size <= 4 * 1024 * 1024 + 1 for _, size, _ in reads), reads
 
 
-@pytest.mark.parametrize('mutation', ['grow', 'same-size'])
+@pytest.mark.parametrize('mutation', ['grow', 'same-size', 'restored-mtime'])
 def test_actual_source_change_after_bounded_read_is_denied(monkeypatch, tmp_path, mutation):
     path = tmp_path / 'source' / 'factory.py'
     module = load_source(monkeypatch, path)
 
     def change():
+        before = path.stat()
         payload = SOURCE.replace(b'return 1', b'return 2')
         if mutation == 'grow':
             payload += b'#' + b'x' * (4 * 1024 * 1024) + b'\n'
         path.write_bytes(payload)
         information = path.stat()
-        os.utime(path, ns=(information.st_atime_ns, information.st_mtime_ns + 10_000_000))
+        times = ((before.st_atime_ns, before.st_mtime_ns) if mutation == 'restored-mtime'
+                 else (information.st_atime_ns, information.st_mtime_ns + 10_000_000))
+        os.utime(path, ns=times)
 
     _, reads = observe_reads(monkeypatch, path, change)
     with pytest.raises(ResearchError):
@@ -129,16 +132,20 @@ def test_actual_source_change_after_bounded_read_is_denied(monkeypatch, tmp_path
     assert reads and all(0 < size <= 4 * 1024 * 1024 + 1 for _, size, _ in reads), reads
 
 
-def test_actual_source_change_during_code_identity_is_denied(monkeypatch, tmp_path):
+@pytest.mark.parametrize('restore_mtime', [False, True])
+def test_actual_source_change_during_code_identity_is_denied(monkeypatch, tmp_path, restore_mtime):
     path = tmp_path / 'source' / 'factory.py'
     module = load_source(monkeypatch, path)
     original = core._function_identity
 
     def capture(function, *args):
         result = original(function, *args)
+        before = path.stat()
         path.write_bytes(SOURCE.replace(b'return 1', b'return 2'))
         information = path.stat()
-        os.utime(path, ns=(information.st_atime_ns, information.st_mtime_ns + 10_000_000))
+        times = ((before.st_atime_ns, before.st_mtime_ns) if restore_mtime
+                 else (information.st_atime_ns, information.st_mtime_ns + 10_000_000))
+        os.utime(path, ns=times)
         return result
 
     monkeypatch.setattr(core, '_function_identity', capture)

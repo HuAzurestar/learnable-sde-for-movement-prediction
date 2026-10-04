@@ -50,6 +50,12 @@ def opened_regular_file(root, path, *, expected_size=None):
         raise ResearchError("UNAUTHORIZED_DATA", "source is not a regular file inside its authorized root")
     if expected_size is not None and before.st_size != expected_size:
         raise ResearchError("CORRUPT_ARTIFACT", "source frozen size differs before read")
+    if os.name == "nt":
+        from .research_windows_files import path_change_time, descriptor_change_time
+        # st_ctime is creation time on supported Windows Python versions.
+        # Capture native change identity BEFORE os.open, then query the held
+        # descriptor at each complete boundary. Restoring mtime is not enough.
+        before_change = path_change_time(path)
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
         fd = os.open(path, flags)
@@ -76,6 +82,8 @@ def opened_regular_file(root, path, *, expected_size=None):
             if (_identity(before) != _identity(opened) or _identity(current) != _identity(opened)
                     or _identity(os.fstat(stream.fileno())) != _identity(opened)):
                 raise ResearchError("CORRUPT_ARTIFACT", "source identity changed during read")
+            if os.name == "nt" and descriptor_change_time(stream.fileno()) != before_change:
+                raise ResearchError("CORRUPT_ARTIFACT", "native source change identity differs during read")
             if expected_size is not None and opened.st_size != expected_size:
                 raise ResearchError("CORRUPT_ARTIFACT", "source frozen size differs at opened handle")
 

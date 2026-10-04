@@ -5,7 +5,7 @@ import os
 import pytest
 
 from infrastructure.research_files import opened_regular_file, source_file_hash
-from infrastructure.research_store import ResearchError, encode
+from infrastructure.research_store import ResearchError, ResearchStore, encode
 from tests.research_file_observation import observe_file
 
 
@@ -90,3 +90,42 @@ def test_ordinary_source_reads_seek_and_hash_remain_valid(tmp_path):
         assert stream.read(size + 1) == ORIGINAL
         verify()
     assert source_file_hash(tmp_path, path) == hashlib.sha256(ORIGINAL).hexdigest()
+
+
+def test_actual_metadata_loader_rejects_same_size_write_after_read_with_restored_mtime(tmp_path, monkeypatch):
+    store = ResearchStore(tmp_path, 'metadata-change', initialize=True)
+    store.publish('synthetic', {'number': 1})
+    path = store.path / 'manifests/synthetic.json'
+    before, touched = path.stat(), []
+    def change(*_):
+        if not touched:
+            touched.append(True)
+            path.write_bytes(encode({'number': 2}))
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    reads, handles = observe_file(monkeypatch, path, after_read=change)
+    with pytest.raises(ResearchError, match='CORRUPT_ARTIFACT'):
+        store._json(path)
+    assert path.stat().st_size == before.st_size and path.stat().st_ino == before.st_ino
+    assert touched == [True] and reads and handles == [True]
+
+
+@pytest.mark.parametrize('purpose', ['fit', 'select', 'validate', 'evaluate'])
+@pytest.mark.parametrize('operation', ['read', 'verify'])
+def test_actual_authorized_provider_never_completes_after_same_size_restored_mtime_write(
+        tmp_path, monkeypatch, purpose, operation):
+    from tests.test_research_read_authorization import provider_source
+    store, ledger, grant, content = provider_source(tmp_path, purpose)
+    path = tmp_path / 'block.bin'
+    before, touched = path.stat(), []
+    def change(*_):
+        if not touched:
+            touched.append(True)
+            path.write_bytes(bytes([content[0] ^ 1]) + content[1:])
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    reads, handles = observe_file(monkeypatch, path, after_read=change)
+    with pytest.raises(ResearchError, match='CORRUPT_ARTIFACT'):
+        getattr(ledger, operation)('reserved', 'test-block', purpose=purpose,
+            authorization_id=grant['authorization_id'], data_root=tmp_path)
+    assert path.stat().st_size == before.st_size and path.stat().st_ino == before.st_ino
+    assert touched == [True] and reads and handles == [True]
+    assert store.events()[-1]['event_kind'] == 'READ_FAILED'
