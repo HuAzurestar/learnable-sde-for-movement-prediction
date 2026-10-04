@@ -4,15 +4,18 @@ All file operations and parsers execute. Replacements contain the original
 valid bytes: a refusal cannot be explained by a synthetic hash-chain failure.
 """
 
+from contextlib import contextmanager
+import json
 import os
-from pathlib import Path
 import shutil
 
 import pytest
 
 import infrastructure.research_files as files
 import infrastructure.research_json as json_reader
+import infrastructure.research_publication as publication
 from infrastructure.research_store import ResearchError, ResearchStore, encode
+from tests.research_file_observation import observe_file
 
 
 def prepared(tmp_path, count=8):
@@ -132,3 +135,119 @@ def test_unchanged_physical_prefix_remains_compatible(tmp_path, count):
     store, expected = prepared(tmp_path, count)
     assert store.events() == expected
     assert ResearchStore(tmp_path / "runtime", "metadata-prefix").events() == expected
+
+
+def test_physical_prefix_retains_native_same_inode_restored_mtime_rejection(tmp_path, monkeypatch):
+    store, _ = prepared(tmp_path)
+    target = store.path / "events" / "0000000000000001.json"
+    before, changed = target.stat(), []
+    original = target.read_bytes()
+    replacement = original.replace(b'"number":0', b'"number":1')
+    assert replacement != original and len(replacement) == len(original)
+
+    def change(*_):
+        if not changed:
+            target.write_bytes(replacement)
+            os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns))
+            changed.append(True)
+
+    reads, handles = observe_file(monkeypatch, target, after_read=change)
+    with pytest.raises(ResearchError, match="CORRUPT_ARTIFACT"):
+        store.events()
+    after = target.stat()
+    assert changed == [True] and reads and handles == [True]
+    assert (after.st_ino, after.st_size, after.st_mtime_ns) == (
+        before.st_ino, before.st_size, before.st_mtime_ns)
+
+
+@pytest.mark.parametrize("replacement", ["regular", "symlink"])
+def test_physical_prefix_rejects_actual_leaf_replacement_before_payload(tmp_path, monkeypatch, replacement):
+    store, _ = prepared(tmp_path)
+    target = store.path / "events" / "0000000000000001.json"
+    incoming = tmp_path / "incoming.json"
+    incoming.write_bytes(target.read_bytes())
+    changed = []
+
+    def change():
+        target.rename(tmp_path / "original.json")
+        if replacement == "regular":
+            incoming.rename(target)
+        else:
+            try:
+                target.symlink_to(incoming)
+            except OSError as error:
+                if os.name == "nt" and error.winerror == 1314:
+                    pytest.skip("actual native symlink creation denied: WinError1314")
+                raise
+        changed.append(True)
+
+    reads, _ = observe_file(monkeypatch, target, before_open=change)
+    with pytest.raises(ResearchError, match="CORRUPT_ARTIFACT|UNAUTHORIZED_DATA"):
+        store.events()
+    assert changed == [True] and reads == [], "replacement payload bytes must not be consumed"
+
+
+def test_physical_prefix_keeps_large_formatted_head_and_lagging_head_compatibility(tmp_path, monkeypatch):
+    store, expected = prepared(tmp_path)
+    target = store.path / "head.json"
+    # Actual valid legacy formatting above the JSON streaming threshold. No
+    # new aggregate prefix or blanket metadata cap is introduced by root pins.
+    content = b" \r\n\t" * (512 * 1024) + encode({"sequence": 0, "hash": "0" * 64})
+    target.write_bytes(content)
+    reads, handles = observe_file(monkeypatch, target)
+    assert store.events() == expected
+    assert reads and all(0 <= row["size"] <= 64 * 1024 for row in reads)
+    assert handles == [True]
+
+
+@pytest.mark.parametrize("damage", ["gap", "hash", "head", "invalid-json"])
+def test_physical_prefix_still_refuses_real_corruption(tmp_path, damage):
+    store, _ = prepared(tmp_path)
+    target = store.path / "events" / "0000000000000001.json"
+    if damage == "gap":
+        target.rename(target.with_name("0000000000000000.json"))
+    elif damage == "hash":
+        event = json.loads(target.read_bytes())
+        event["hash"] = "f" * 64
+        target.write_bytes(encode(event))
+    elif damage == "head":
+        (store.path / "head.json").write_bytes(encode({"sequence": 99, "hash": "0" * 64}))
+    else:
+        target.write_bytes(b'{"damaged":')
+    with pytest.raises(ResearchError, match="CORRUPT_ARTIFACT"):
+        store.events()
+
+
+@pytest.mark.parametrize("damaged", [False, True])
+def test_physical_prefix_closes_actual_original_directory_descriptors(tmp_path, monkeypatch, damaged):
+    store, expected = prepared(tmp_path)
+    original_directory, closed = publication.opened_directory, []
+
+    @contextmanager
+    def directory(path):
+        fd = None
+        try:
+            with original_directory(path) as value:
+                fd = value[1]
+                yield value
+        finally:
+            if fd is not None:
+                with pytest.raises(OSError):
+                    os.fstat(fd)  # Actual native/CRT fd closure, not a Boolean substitute.
+                closed.append(str(path))
+
+    monkeypatch.setattr(publication, "opened_directory", directory)
+    if damaged:
+        (store.path / "events" / "0000000000000001.json").write_bytes(b"{}")
+        with pytest.raises(ResearchError, match="CORRUPT_ARTIFACT"):
+            store.events()
+    else:
+        assert store.events() == expected
+    assert sorted(closed) == sorted([str(store.path), str(store.path / "events")])
+
+
+def test_physical_prefix_missing_original_events_directory_is_typed_refusal(tmp_path):
+    store, _ = prepared(tmp_path, 0)
+    (store.path / "events").rename(tmp_path / "parked-events")
+    with pytest.raises(ResearchError, match="CORRUPT_ARTIFACT"):
+        store.events()
