@@ -123,15 +123,16 @@ def main(argv=None):
         elif args.command == "export":
             from application.research_evidence import export_evidence, authorize_evidence_publication
             from infrastructure.research_store import atomic_write, encode
+            from infrastructure.research_publication import prepare_directory, opened_directory
             grant = store.authorization(args.authorization_id, version=args.authorization_version)
             bundle = export_evidence(store, args.study, grant)
-            output = args.output.resolve()
+            output = Path(os.path.abspath(args.output))
             if any((parent / ".git").exists() for parent in (output.parent, *output.parents)):
                 raise ResearchError("UNAUTHORIZED_DATA", "export must stay outside Git")
             content = encode(bundle)
-            output.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write(output, content, immutable=True,
-                before_replace=lambda: authorize_evidence_publication(store, bundle, grant))
+            with opened_directory(prepare_directory(output.parent)) as binding:
+                atomic_write(output, content, immutable=True, _directory=binding,
+                    before_replace=lambda: authorize_evidence_publication(store, bundle, grant))
             result = {"bundle_hash": bundle["bundle_hash"]}
         elif args.command == "import-evidence":
             from application.research_evidence import accept_evidence_package

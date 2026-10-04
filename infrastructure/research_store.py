@@ -116,7 +116,7 @@ def _publish_replace(publication, path):
     return publication.publish(replace=True)
 
 
-def atomic_write(path: Path, content: bytes, *, before_replace=None, immutable=False):
+def atomic_write(path: Path, content: bytes, *, before_replace=None, immutable=False, _directory=None):
     """Flush staging, optionally recheck disclosure, then atomically publish.
 
     Authority-store callers hold their lock and use the ordinary two-argument
@@ -128,7 +128,11 @@ def atomic_write(path: Path, content: bytes, *, before_replace=None, immutable=F
     from .research_publication import Publication, opened_directory
     path = Path(os.path.abspath(path))
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.staging")
-    with opened_directory(path.parent) as (_, parent_fd, verify_directory):
+    parent_context = opened_directory(path.parent) if _directory is None else nullcontext(_directory)
+    with parent_context as (parent, parent_fd, verify_directory):
+        if parent != path.parent:
+            raise ResearchError('UNAUTHORIZED_DATA', 'publication member leaves its opened directory')
+        verify_directory()
         publication = Publication(path, temporary, parent_fd, verify_directory, content)
         try:
             stream = publication.create_stage()
@@ -149,6 +153,7 @@ def atomic_write(path: Path, content: bytes, *, before_replace=None, immutable=F
                 try:
                     _publish_no_replace(publication, path)
                 except FileExistsError:
+                    verify_directory()
                     if not _matches_file_content(path, content):
                         raise ResearchError("IDENTITY_CONFLICT", "export exists with different content") from None
                     if before_replace is not None:

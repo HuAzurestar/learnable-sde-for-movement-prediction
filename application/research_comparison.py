@@ -175,15 +175,18 @@ class ComparisonRunner:
 
     @staticmethod
     def _write_files(directory, files, *, before_replace=None):
-        from infrastructure.research_publication import prepare_directory
+        from infrastructure.research_publication import prepare_directory, opened_directory
         directory = Path(os.path.abspath(directory))
         if any((parent / ".git").exists() for parent in (directory, *directory.parents)):
             raise ResearchError("UNAUTHORIZED_DATA", "generated comparison must stay outside Git")
         directory = prepare_directory(directory)
-        for name, content in files.items():
-            path = directory / name
-            if path.is_symlink() or not path.resolve().is_relative_to(directory):
-                raise ResearchError("UNAUTHORIZED_DATA", "comparison package path escapes root")
-            # Publish without replacing another writer's target; identical
-            # retries use the shared bounded, freshly verified comparator.
-            atomic_write(path, content, immutable=True, before_replace=before_replace)
+        with opened_directory(directory) as binding:
+            for name, content in files.items():
+                binding[2]()
+                path = directory / name
+                if path.is_symlink() or not path.resolve().is_relative_to(directory):
+                    raise ResearchError("UNAUTHORIZED_DATA", "comparison package path escapes root")
+                # One original parent stays bound across ALL members; a new
+                # real directory at the same lexical name is not our root.
+                atomic_write(path, content, immutable=True, before_replace=before_replace, _directory=binding)
+                binding[2]()
