@@ -1,6 +1,11 @@
 """Full original consumer semantics and common frozen primary conditioning."""
 from copy import deepcopy
 import json
+import hashlib
+from pathlib import Path
+import subprocess
+import sys
+import tracemalloc
 
 import pytest
 
@@ -11,6 +16,8 @@ from experiments.pirc25.snapshot import UpstreamSnapshot
 from infrastructure.research_store import ResearchError, digest, encode
 from tests.research_audit_fixtures import payload_opens
 from tests.research_selection_fixtures import public_fingerprints, selection_admission, selection_fixture
+from application.research_evidence import export_evidence
+from tests.test_research_upstream_paper import invoke_paper, reseal as reseal_receipt
 
 
 def reseal(consumer):
@@ -105,3 +112,113 @@ def test_actual_formal_runner_refuses_bad_or_unshared_selection_before_provider_
     assert observed["error"] in {"IDENTITY_MISMATCH", "UNACCEPTED_VERSION"}, observed
     assert not opened and not observed["worker_started"]
     assert public_fingerprints() == before
+
+
+@pytest.fixture(scope='module')
+def actual_selection_bundle(tmp_path_factory):
+    root = tmp_path_factory.mktemp('actual-shared-selection')
+    store, spec, runner, grant = selection_admission(root)
+    for cell in spec['cells']:
+        outcome = runner.run_cell(spec['study_id'], digest(cell), budget=BudgetSpec(10))
+        assert outcome['state'] == 'SUCCEEDED', outcome
+    return export_evidence(store, spec['study_id'], grant)
+
+
+def test_actual_shared_primary_selection_is_preserved_in_independent_paper_evidence(actual_selection_bundle, tmp_path):
+    result = invoke_paper(deepcopy(actual_selection_bundle), tmp_path)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize('change', ['semantic-dimension', 'missing-document', 'unbound-extra'])
+def test_independent_paper_refuses_resealed_actual_selection_content(actual_selection_bundle, tmp_path, change):
+    bundle = deepcopy(actual_selection_bundle)
+    row = bundle['cells'][0]
+    resolved = row['admission']['documents']['upstream_snapshot']['validation']['resolved']
+    selection = next(item for item in resolved if item['kind'] == 'terrain-selection')
+    if change == 'semantic-dimension':
+        selection['semantic_document']['selected_configuration']['model_input_dim'] += 1
+        reseal(selection['semantic_document'])
+    elif change == 'missing-document':
+        selection.pop('semantic_document')
+    else:
+        selection['extra_unbound_semantics'] = {'conditioner_id': 'other'}
+    # Only disposable validation/transport envelopes. Original registration,
+    # catalog, grants, READ receipts and stores are neither resealed nor edited.
+    reseal_receipt(row, record_events=True)
+    result = invoke_paper(bundle, tmp_path)
+    assert result.returncode != 0 and 'invalid admission evidence: upstream' in result.stderr, result.stderr
+
+
+@pytest.mark.parametrize('change', ['valid', 'identity', 'dimension', 'conditioner', 'training', 'matrix'])
+def test_stdlib_paper_checks_original_consumer_semantics_without_runtime_imports(tmp_path, change):
+    # Pure contract controls. Modified catalog-bound documents below are NOT
+    # admissions, accepted scientific outputs or real data authorization.
+    documents, manifest, _ = selection_fixture(tmp_path, lambda d: damage(d, change))
+    source = tmp_path / 'pure-contract.json'
+    source.write_bytes(encode({'inputs': manifest['inputs'], 'documents': documents}))
+    paper = Path(__file__).resolve().parents[2] / 'TSDE-SDE'
+    code = """
+import importlib.abc,json,sys
+class NoRuntime(importlib.abc.MetaPathFinder):
+    def find_spec(self,fullname,path=None,target=None):
+        if fullname.split('.')[0] in {'application','infrastructure','experiments','torch','pyarrow','numpy'}:
+            raise RuntimeError('offline contract attempted to import runtime/training')
+sys.meta_path.insert(0,NoRuntime())
+sys.path.insert(0,sys.argv[1])
+from scripts.pirc25.selection import selection_documents
+with open(sys.argv[2],encoding='utf-8') as stream:
+    value=json.load(stream)
+inputs={row['object_id']:row for row in value['inputs']}
+resolved={name:{'semantic_document':doc} for name,doc in value['documents'].items()}
+print(json.dumps(selection_documents(inputs['selection'],inputs,resolved,list(inputs))[0],sort_keys=True))
+"""
+    command = [sys.executable, '-I', '-B', '-c', code, str(paper), str(source)]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    (tmp_path / 'pure-paper-observed.json').write_bytes(encode({'command': command,
+        'exit_code': result.returncode, 'stdout': result.stdout, 'stderr': result.stderr}))
+    if change == 'valid':
+        assert result.returncode == 0, result.stderr
+    else:
+        assert result.returncode != 0 and 'invalid admission evidence: upstream' in result.stderr, result.stderr
+
+
+def test_matrix_descriptor_remains_held_through_original_consumer_semantics(tmp_path, monkeypatch):
+    import experiments.pirc22.consumer as original
+    before = public_fingerprints()
+    _, manifest, accepted = selection_fixture(tmp_path)
+    validator = original.validate_benchmark_selection_binding
+    def change_after_validation(payload, **kwargs):
+        result = validator(payload, **kwargs)
+        path = tmp_path / 'matrix.json'
+        content = path.read_bytes()
+        path.write_bytes(content.replace(b'FROZEN', b'CHANGED', 1))
+        return result
+    monkeypatch.setattr(original, 'validate_benchmark_selection_binding', change_after_validation)
+    rows, value = resolved(tmp_path, manifest, accepted)
+    assert rows['dependent']['status'] == 'rejected', value
+    assert rows['independent']['status'] == 'ready' and public_fingerprints() == before
+
+
+def test_legal_large_formatted_selection_keeps_full_semantics_without_encoded_file_buffer(tmp_path):
+    _, manifest, accepted = selection_fixture(tmp_path)
+    path = tmp_path / 'selection.json'
+    body = path.read_bytes()
+    with path.open('wb') as stream:
+        stream.write(body)
+        for _ in range(12):
+            stream.write(b' ' * (1024 * 1024))
+    record = manifest['inputs'][0]
+    hasher = hashlib.sha256()
+    with path.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(64 * 1024), b''):
+            hasher.update(chunk)
+    record.update(artifact_hash=hasher.hexdigest(), artifact_size_bytes=path.stat().st_size)
+    accepted[0]['input'] = deepcopy(record)
+    tracemalloc.start()
+    try:
+        rows, _ = resolved(tmp_path, manifest, accepted)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert rows['dependent']['status'] == 'ready'
+    assert peak < 4 * 1024 * 1024, peak

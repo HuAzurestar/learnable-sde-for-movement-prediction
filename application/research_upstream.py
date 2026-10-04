@@ -112,6 +112,12 @@ def _prepare_upstream(store, spec, cell, package, prereg=None, *, attempt_id, ru
         "rejected_inputs": selected["rejected_inputs"]})
     if selected["status"] != "ready":
         raise ResearchError(selected["rejected_inputs"][0]["code"], "selected frozen upstream cell rejected")
+    cutover = study["pirc22_cutover"]
+    if cutover["mode"] == "adopted_primary" and selected["role"] == "primary":
+        rows = {item["cell_id"]: item for item in frozen_cells}
+        if any(item.get("conditioner_binding") != cutover.get("conditioner_binding")
+               for item in spec["cells"] if rows[digest(item)]["role"] == "primary"):
+            raise ResearchError("IDENTITY_MISMATCH", "actual primary model cells differ from frozen common conditioner")
     # Attach observed immutable event objects, never manufactured timestamps or
     # sequence defaults. The Paper consumer verifies their cross-object order
     # without importing a provider or reopening protected source data.

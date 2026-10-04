@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 
 from infrastructure.research_files import opened_regular_file
-from infrastructure.research_json import read_metadata_header
+from infrastructure.research_json import read_json, read_metadata_header
 from infrastructure.research_store import ResearchError, digest, encode, identifier, utc_now
 
 
@@ -78,6 +78,10 @@ def _validate_input(record):
                 or checks.get('immutability_policy') != 'new_selection_version_required'
                 or checks.get('source_selection_identity_sha256') != record['selection_hash']):
             raise ResearchError('UNACCEPTED_VERSION', 'immutable zero-final-eval selection binding required')
+        binding = record.get('benchmark_binding')
+        if (not isinstance(binding, dict) or set(binding) != {'matrix_object_id', 'matrix_lock_object_id'}
+                or any(not isinstance(value, str) or not value for value in binding.values())):
+            raise ResearchError('MISSING_ARTIFACT', 'explicit frozen selection matrix/lock references required')
 
 
 def _failure(object_id, exception):
@@ -104,7 +108,7 @@ def _held_input(root, record, failures):
         failures.setdefault(record['object_id'], _failure(record['object_id'], exc))
 
 
-def _verify_input(stream, size, verify, record):
+def _verify_input(stream, size, verify, record, *, semantic=False):
     hasher, remaining = hashlib.sha256(), size
     while remaining:
         chunk = stream.read(min(1024 * 1024, remaining))
@@ -122,6 +126,40 @@ def _verify_input(stream, size, verify, record):
            for key, expected in record['metadata_checks'].items()):
         raise ResearchError('IDENTITY_MISMATCH', 'snapshot metadata schema/status/selection fields differ')
     verify()
+    if semantic:
+        if not _hash(record.get('canonical_hash')):
+            raise ResearchError('MISSING_ARTIFACT', 'accepted semantic metadata content identity required')
+        stream.seek(0)
+        # Large encoded sources are validated first, never buffered wholesale.
+        # Original decoded values retain their natural cost; no small-file cap.
+        document = read_json(stream, size, encoding='utf-8', verify_identity=verify)
+        verify()
+        if digest(document) != record['canonical_hash']:
+            raise ResearchError('IDENTITY_MISMATCH', 'semantic metadata canonical identity differs')
+        return document
+
+
+def _selection_contract(record, inputs, documents, dependencies):
+    try:
+        from experiments.pirc22.consumer import validate_benchmark_selection_binding
+        from experiments.pirc22.representations import validate_representation_matrix
+    except ImportError as exc:
+        raise ResearchError('MISSING_ARTIFACT', 'original selection validator dependencies unavailable') from exc
+
+    binding = record['benchmark_binding']
+    references = [binding['matrix_object_id'], binding['matrix_lock_object_id']]
+    if (len(set([record['object_id'], *references])) != 3
+            or any(name not in dependencies or name not in inputs or name not in documents for name in references)):
+        raise ResearchError('MISSING_ARTIFACT', 'complete declared selection matrix/lock inputs required')
+    try:
+        matrix = validate_representation_matrix(documents[references[0]], documents[references[1]])
+        consumer = validate_benchmark_selection_binding(documents[record['object_id']], matrix=matrix)
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ResearchError('IDENTITY_MISMATCH', 'original frozen BenchmarkSelection contract refused') from exc
+    return {'selection_hash': consumer['source_selection_identity_sha256'],
+            'consumer_identity_sha256': consumer['consumer_identity_sha256'],
+            'matrix_identity_sha256': consumer['matrix_identity_sha256'],
+            'configuration': _clone(consumer['selected_configuration'])}
 
 
 class UpstreamSnapshot:
@@ -180,7 +218,15 @@ class UpstreamSnapshot:
                     catalog[key] = {'status': 'ambiguous'}
                 continue
             catalog[key] = _clone(entry)
-        failures, checked, held = {}, {}, []
+        inputs = {record['object_id']: record for record in self._manifest['inputs']}
+        semantic_ids = set()
+        for record in selected_inputs:
+            if record.get('kind') == 'terrain-selection':
+                semantic_ids.add(record['object_id'])
+                binding = record.get('benchmark_binding')
+                if isinstance(binding, dict):
+                    semantic_ids.update(value for value in binding.values() if isinstance(value, str))
+        failures, checked, held, documents, selections = {}, {}, [], {}, {}
         with ExitStack() as stack:
             for record in selected_inputs:
                 object_id = record['object_id']
@@ -193,11 +239,21 @@ class UpstreamSnapshot:
                     if _identity(record) != _identity(entry['input']):
                         raise ResearchError('IDENTITY_MISMATCH', 'input differs from its frozen accepted identity')
                     stream, size, verify = stack.enter_context(_held_input(root, record, failures))
-                    _verify_input(stream, size, verify, record)
+                    document = _verify_input(stream, size, verify, record, semantic=object_id in semantic_ids)
+                    if object_id in semantic_ids:
+                        documents[object_id] = document
                     held.append((object_id, verify))
-                    checked[object_id] = {**_clone(record), 'physical_size_bytes': size}
+                    checked[object_id] = {**_clone(record), 'physical_size_bytes': size,
+                        **({'semantic_document': document} if object_id in semantic_ids else {})}
                 except (OSError, ResearchError, ValueError, UnicodeError) as exc:
                     failures.setdefault(object_id, _failure(object_id, exc))
+            for record in selected_inputs:
+                name = record['object_id']
+                if record.get('kind') == 'terrain-selection' and name not in failures:
+                    try:
+                        selections[name] = _selection_contract(record, inputs, documents, {r['object_id'] for r in selected_inputs})
+                    except (ResearchError, ValueError, TypeError, KeyError) as exc:
+                        failures.setdefault(name, _failure(name, exc))
             # Pin every admitted descriptor through all other input checks;
             # input1 cannot be changed during inputN and retain a ready cell.
             for object_id, verify in held:
@@ -233,6 +289,20 @@ class UpstreamSnapshot:
                     or mode == 'adopted_primary' and cell.get('role') == 'primary' and
                     (len(terrain) != 1 or terrain[0].get('selection_hash') != cutover.get('selection_hash'))):
                 errors.append({'code': 'IDENTITY_MISMATCH', 'detail': 'cell differs from explicit frozen pirc22_cutover'})
+            if mode == 'adopted_primary' and cell.get('role') == 'primary':
+                common = cutover.get('conditioner_binding')
+                primary = [row for row in self._manifest['cells']
+                           if row.get('study_id') == cell.get('study_id') and row.get('role') == 'primary']
+                binding = terrain[0].get('benchmark_binding') if len(terrain) == 1 else None
+                references = ({terrain[0]['object_id'], *binding.values()} if isinstance(binding, dict)
+                              and all(isinstance(value, str) for value in binding.values()) else None)
+                if (not isinstance(common, dict) or len(terrain) != 1 or references is None
+                        or selections.get(terrain[0]['object_id']) != common
+                        or any(row.get('conditioner_binding') != common
+                               or not isinstance(row.get('upstream_ids'), list)
+                               or any(not isinstance(name, str) for name in row['upstream_ids'])
+                               or not references <= set(row['upstream_ids']) for row in primary)):
+                    errors.append({'code': 'IDENTITY_MISMATCH', 'detail': 'primary cells lack common frozen selection conditioner'})
             cell_results.append({**_clone(cell), 'status': 'rejected' if errors else 'ready', 'rejected_inputs': _clone(errors)})
         return {'schema_version': 'pirc25-upstream-validation-v1', 'snapshot_hash': self.snapshot_hash,
                 'data_authorization': 'none', 'resolved': resolved, 'rejected_inputs': list(failures.values()),

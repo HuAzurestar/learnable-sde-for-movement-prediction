@@ -92,6 +92,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
         "visibility": upstream_visibility,
         "studies": [study], "cells": [{"cell_id": digest(cell), "study_id": value["study_id"],
             "role": cell.get("study_role", "primary"),
+            **({"conditioner_binding": cell["conditioner_binding"]} if "conditioner_binding" in cell else {}),
             "upstream_ids": (list(upstream_dependencies[cell["arm_id"]]) if upstream_dependencies is not None
                              else [record["object_id"] for record in upstream_inputs])} for cell in value["cells"]]})
     snapshot_hash = store.publish("upstream-snapshot-" + snapshot.snapshot_hash, snapshot.definition)
