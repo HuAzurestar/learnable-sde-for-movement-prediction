@@ -7,6 +7,7 @@ from .research_admission import data_binding
 from .research_data import EvaluationExposureLedger
 from .research_preregistration import source_identity, same_source, validate_history
 from infrastructure.research_store import ResearchError, digest
+from infrastructure.research_artifact_scope import source_scope_keys, query_scope_keys
 
 _READS = {"READ_STARTED", "READ_COMPLETED", "READ_FAILED"}
 
@@ -36,6 +37,7 @@ class DataAccessView:
         self.metadata = {}
         self.checks = []
         self.histories, self.history_flags, self.artifacts, self.protocol_sources = {}, {}, {}, {}
+        self.result_reads = {}
         if not self.settings.get("protocol_id"):
             return
         protocol = self._manifest("protocol-" + self.settings["protocol_id"])
@@ -53,8 +55,9 @@ class DataAccessView:
                 raise
             self.grant_error = exc.code
 
-    def _manifest(self, object_id):
-        value = self.store.manifest(object_id)
+    def _manifest(self, object_id, *, frozen_exposure=False):
+        value = (self.store._frozen_exposure_scope(object_id) if frozen_exposure
+                 else self.store.manifest(object_id))
         content_hash = digest(value)
         require(object_id not in self.metadata or self.metadata[object_id] == content_hash)
         self.metadata[object_id] = content_hash
@@ -80,17 +83,27 @@ class DataAccessView:
         # metadata, not result bytes. Frozen protocols retain source aliases
         # across studies and renamed block IDs. Do not return foreign payloads.
         for event in self.store._manifest_events("protocol-"):
-            protocol = self._manifest(event["payload"]["object_id"])
+            protocol = self._manifest(event["payload"]["object_id"], frozen_exposure=True)
             require(protocol.get("schema_version") == "pirc25-data-protocol-v1"
                     and isinstance(protocol.get("blocks"), list))
             for block in protocol["blocks"]:
-                self.protocol_sources.setdefault((protocol["study_id"], block["block_id"]), []).append(source_identity(block))
+                self.protocol_sources.setdefault((protocol["study_id"], block["block_id"]), set()).update(
+                    source_scope_keys(source_identity(block)))
         for event in self.events:
             artifact_id = event["payload"].get("artifact_id") if isinstance(event["payload"], dict) else None
             if event["event_kind"] in _READS and artifact_id and artifact_id not in self.artifacts:
-                metadata = self._manifest("artifact-" + artifact_id)
-                require(metadata.get("artifact_id") == artifact_id and isinstance(metadata.get("block_ids"), list))
-                self.artifacts[artifact_id] = metadata
+                metadata = self._manifest("artifact-" + artifact_id, frozen_exposure=True)
+                require(metadata.get("artifact_id") == artifact_id and isinstance(metadata.get("block_ids"), list)
+                        and all(isinstance(block, str) and block for block in metadata["block_ids"]))
+                self.artifacts[artifact_id] = {"study_id": metadata["study_id"],
+                                               "block_ids": tuple(metadata["block_ids"])}
+            if event["event_kind"] in _READS and artifact_id:
+                artifact = self.artifacts[artifact_id]
+                keys = {("block", name) for name in artifact["block_ids"]}
+                for name in artifact["block_ids"]:
+                    keys.update(self.protocol_sources.get((artifact["study_id"], name), ()))
+                for key in keys:
+                    self.result_reads.setdefault(key, []).append(event)
 
     def _exposure(self, block, history):
         identity = source_identity(block)
@@ -103,20 +116,16 @@ class DataAccessView:
         statuses = set().union(*(self.history_flags.get(scope, set()) for scope in (
             ("hash", identity["sha256"]), ("source", identity["dataset_id"], identity["source_block_id"]))))
         unknown = unknown or "unknown" in statuses
-        related, raw, results = [], [], []
-        for event in self.store._prior_read_events(identity, len(self.events) + 1):
+        raw = []
+        for event in self.store._source_read_events(identity, len(self.events) + 1):
             payload = event["payload"]
-            if payload.get("artifact_id"):
-                artifact = self.artifacts[payload["artifact_id"]]
-                reaches = (block["block_id"] in artifact["block_ids"] or any(
-                    same_source(source, identity) for name in artifact["block_ids"]
-                    for source in self.protocol_sources.get((artifact["study_id"], name), [])))
-                if reaches:
-                    results.append(event)
-                    related.append(event)
-            elif same_source(payload, identity):
+            if not payload.get("artifact_id") and same_source(payload, identity):
                 raw.append(event)
-                related.append(event)
+        matched = {event["sequence"]: event
+                   for key in query_scope_keys(block["block_id"], identity)
+                   for event in self.result_reads.get(key, ())}
+        results = [matched[sequence] for sequence in sorted(matched)]
+        related = sorted(raw + results, key=lambda event: event["sequence"])
         exposed = bool(related) or "exposed" in statuses
         def first(rows, kind):
             return event_ref(next((event for event in rows if event["event_kind"] == kind), None))

@@ -56,6 +56,7 @@ class VerifiedEventLookup:
         self.size = len(events)
         self.last_hash = events[-1]["hash"] if events else "0" * 64
         self._history = None
+        self._artifact_facts = None
 
     def source_history(self):
         if self._history is None:
@@ -98,7 +99,7 @@ class VerifiedEventLookup:
         rows = [event for group in self._rows[start:stop] for event in group]
         return sorted(rows, key=lambda event: event["sequence"])
 
-    def prior_reads(self, identity, before):
+    def prior_reads(self, identity, before, *, include_artifacts=True):
         # Preserve same_source's content alias, same source-block and unknown
         # legacy-dataset rules, plus legacy artifact disclosures. The caller
         # still applies the original predicate and rehashes actual manifests.
@@ -110,10 +111,33 @@ class VerifiedEventLookup:
             raise ResearchError("UNAUTHORIZED_DATA", "historical read scope is malformed")
         keys = [("read-hash", identity["sha256"]),
                 ("read-source", identity["dataset_id"], identity["source_block_id"]),
-                ("read-unknown", identity["dataset_id"]), ("read-artifact",)]
+                ("read-unknown", identity["dataset_id"])]
+        if include_artifacts:
+            keys.append(("read-artifact",))
         rows = {event["sequence"]: event for key in keys
                 for event in self.matching(key, before=before)}
         return [rows[sequence] for sequence in sorted(rows)]
+
+    def first_source_read(self, identity, before):
+        if self.get(("read-malformed",)) is not None:
+            from .research_store import ResearchError
+            raise ResearchError("UNAUTHORIZED_DATA", "historical read scope is malformed")
+        keys = [("read-hash", identity["sha256"]),
+                ("read-source", identity["dataset_id"], identity["source_block_id"]),
+                ("read-unknown", identity["dataset_id"])]
+        # Each group is already in authoritative sequence order. Only its
+        # earliest row can matter for existence before a frozen boundary.
+        rows = [row for key in keys if (row := self.get(key)) is not None and row["sequence"] < before]
+        return min(rows, key=lambda row: row["sequence"], default=None)
+
+    def artifact_read_before(self, block_id, identity, before, manifest_loader):
+        if self._artifact_facts is None:
+            from .research_artifact_scope import ArtifactExposureFacts
+            # Publish only a completely constructed source-bound projection.
+            facts = ArtifactExposureFacts(self._group(("read-artifact",)), manifest_loader,
+                                          self.manifests("protocol-"))
+            self._artifact_facts = facts
+        return self._artifact_facts.before(block_id, identity, before)
 
     def append(self, event):
         # Only called after the actual event file is durably published. Lists
@@ -124,6 +148,15 @@ class VerifiedEventLookup:
                 self._keys.insert(position, key)
                 self._rows.insert(position, [])
             self._rows[position].append(event)
+        if self._artifact_facts is not None:
+            try:
+                self._artifact_facts.append(event)
+            except BaseException:
+                # A caller may handle interrupted maintenance. Never expose a
+                # partially mutated derived scope on its next query. The store
+                # also drops the owned prefix after uncertain publication.
+                self._artifact_facts = None
+                raise
         if event['event_kind'] == 'MANIFEST':
             payload = event['payload']
             if (not isinstance(payload, dict) or not isinstance(payload.get('object_id'), str)

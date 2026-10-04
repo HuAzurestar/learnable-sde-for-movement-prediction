@@ -80,7 +80,7 @@ def test_whole_public_requests_do_not_repeat_global_legacy_artifact_manifest_wor
 
 
 def test_real_unresolved_legacy_scope_denies_before_reserved_provider(tmp_path, monkeypatch):
-    store, ledger, _, _, _, artifacts, _ = admitted(tmp_path, 2)
+    store, ledger, _, protocol, _, artifacts, _ = admitted(tmp_path, 2)
     path = store.path / "manifests" / ("artifact-" + artifacts[0]["artifact_id"] + ".json")
     # This is an actual source-file change, not a fabricated lookup failure.
     path.write_bytes(encode({**artifacts[0], "block_ids": ["test-block"]}))
@@ -94,7 +94,7 @@ def test_real_unresolved_legacy_scope_denies_before_reserved_provider(tmp_path, 
 
 
 def test_real_prior_scope_change_during_provider_never_returns_content(tmp_path, monkeypatch):
-    store, ledger, _, _, _, artifacts, _ = admitted(tmp_path, 2)
+    store, ledger, _, protocol, _, artifacts, _ = admitted(tmp_path, 2)
     changed = []
     path = store.path / "manifests" / ("artifact-" + artifacts[0]["artifact_id"] + ".json")
 
@@ -108,7 +108,14 @@ def test_real_prior_scope_change_during_provider_never_returns_content(tmp_path,
         ledger.read("reserved", "test-block", purpose="evaluate",
                     authorization_id="evaluate", data_root=tmp_path)
     assert changed == [True]
-    assert [event["event_kind"] for event in store.events()][-2:] == ["EXPOSURE_DENIED", "READ_FAILED"]
+    events = store.events()
+    # Physical completion guards may reject AFTER verified input completion.
+    # Both stages must refuse a successful return and retain the actual denial;
+    # an artifact-history failure is not necessarily a raw-data read failure.
+    assert [event["event_kind"] for event in events][-2:] in (
+        ["EXPOSURE_DENIED", "READ_FAILED"], ["READ_COMPLETED", "EXPOSURE_DENIED"])
+    denial = next(event for event in reversed(events) if event["event_kind"] == "EXPOSURE_DENIED")
+    assert denial["payload"]["protocol_hash"] == digest(protocol) and denial["payload"]["allowed"] is False
 
 
 def test_actual_appended_legacy_disclosure_blocks_later_plan_in_same_owner(tmp_path, monkeypatch):

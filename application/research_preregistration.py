@@ -149,17 +149,11 @@ class PreregistrationGate:
                 self._history_facts(payload['object_id'], history)
             if history.prior_exposure(identity):
                 raise ResearchError("UNAUTHORIZED_DATA", "prior imported exposure cannot be reset")
-            for event in self.store._prior_read_events(identity, frozen["sequence"]):
-                payload = event["payload"]
-                if event["event_kind"] in {"READ_STARTED", "READ_COMPLETED", "READ_FAILED"}:
-                    # Legacy reads without a content identity cannot prove a
-                    # renamed window from that dataset is an untouched block.
-                    if same_source(payload, identity) and event["sequence"] < frozen["sequence"]:
-                        raise ResearchError("UNAUTHORIZED_DATA", "test plan was frozen after data exposure")
-                    if payload.get("artifact_id") and event["sequence"] < frozen["sequence"]:
-                        artifact = self.store._manifest("artifact-" + payload["artifact_id"])
-                        if block["block_id"] in artifact["block_ids"]:
-                            raise ResearchError("UNAUTHORIZED_DATA", "test plan was frozen after result disclosure")
+            event = self.store._first_source_read(identity, frozen["sequence"])
+            if event is not None and same_source(event["payload"], identity):
+                raise ResearchError("UNAUTHORIZED_DATA", "test plan was frozen after data exposure")
+            if self.store._artifact_read_before(block["block_id"], identity, frozen["sequence"]):
+                raise ResearchError("UNAUTHORIZED_DATA", "test plan was frozen after result disclosure")
         return {"preregistration_hash": protocol["preregistration_hash"],
                 "history_hash": protocol["history_hash"], "protocol_binding": protocol_binding(protocol),
                 "test_mode": prereg["test_mode"], "frozen_sequence": frozen["sequence"]}

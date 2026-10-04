@@ -305,6 +305,23 @@ class ResearchStore:
     def _prior_read_events(self, identity, before):
         return json.loads(encode(self._event_lookup().prior_reads(identity, before)))
 
+    def _source_read_events(self, identity, before):
+        return json.loads(encode(self._event_lookup().prior_reads(identity, before, include_artifacts=False)))
+
+    def _first_source_read(self, identity, before):
+        event = self._event_lookup().first_source_read(identity, before)
+        return json.loads(encode(event)) if event is not None else None
+
+    def _frozen_exposure_scope(self, object_id):
+        value = self._manifest(object_id)
+        first = self._manifest_event(object_id)
+        if first is None or digest(value) != first["payload"]["sha256"]:
+            raise ResearchError("CORRUPT_ARTIFACT", "immutable historical exposure source changed")
+        return value
+
+    def _artifact_read_before(self, block_id, identity, before):
+        return self._event_lookup().artifact_read_before(block_id, identity, before, self._frozen_exposure_scope)
+
     @contextmanager
     def _read_transaction(self):
         if self._read_snapshot() is not None:
