@@ -90,12 +90,82 @@ def canonical(value, limit):
     return content
 
 
+def _windows_frame_content(path, limit):
+    """Preserve native IPC errors that the CRT collapses into errno13.
+
+    Only an actual sharing/byte-lock conflict defers this poll. No deadline
+    or retry loop is added here; the existing owner/worker fuse stays in charge.
+    https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
+    https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-readfile
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    class AttributeTag(ctypes.Structure):
+        _fields_ = [("FileAttributes", wintypes.DWORD), ("ReparseTag", wintypes.DWORD)]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+        ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.GetFileInformationByHandleEx.argtypes = [wintypes.HANDLE, ctypes.c_int,
+                                                    ctypes.c_void_p, wintypes.DWORD]
+    kernel.GetFileInformationByHandleEx.restype = wintypes.BOOL
+    kernel.ReadFile.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
+                                ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+    kernel.ReadFile.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    # Read/write/delete sharing accommodates actual atomic control publication;
+    # OPEN_EXISTING never creates a missing frame, OPEN_REPARSE_POINT never
+    # follows a final link swapped after the caller's lexical link check.
+    handle = kernel.CreateFileW(str(path), 0x80000000, 7, None, 3, 0x00200000, None)
+    if handle in (None, ctypes.c_void_p(-1).value):
+        error = ctypes.get_last_error()
+        if error in {32, 33}:
+            return None
+        raise ctypes.WinError(error)
+    try:
+        attributes = AttributeTag()
+        if not kernel.GetFileInformationByHandleEx(handle, 9, ctypes.byref(attributes),
+                                                  ctypes.sizeof(attributes)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if attributes.FileAttributes & (0x400 | 0x10):
+            raise ControlError("checkpoint frame must be a regular non-reparse file")
+        # Never allocate a buffer sized from an untrusted file. Read at most
+        # the original limit+1 bytes, even on a short read or a growing frame.
+        remaining, content = limit + 1, bytearray()
+        buffer = ctypes.create_string_buffer(min(65536, remaining))
+        count = wintypes.DWORD()
+        while remaining:
+            if not kernel.ReadFile(handle, buffer, min(len(buffer), remaining), ctypes.byref(count), None):
+                error = ctypes.get_last_error()
+                if error in {32, 33}:
+                    return None  # Discard partial bytes; next poll reads afresh.
+                raise ctypes.WinError(error)
+            if not count.value:
+                break
+            content.extend(buffer.raw[:count.value])
+            remaining -= count.value
+        return bytes(content)
+    finally:
+        if not kernel.CloseHandle(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+
 def read_frame(path, limit):
+    if type(limit) is not int or not 0 < limit <= 64 * 1024 * 1024:
+        raise ControlError("checkpoint frame byte quota is invalid")
     if path.is_symlink():
         raise ControlError("checkpoint frame cannot be a symlink")
     try:
-        with path.open("rb") as stream:
-            content = stream.read(limit + 1)
+        if os.name == "nt":
+            content = _windows_frame_content(path, limit)
+            if content is None:
+                return None
+        else:
+            with path.open("rb") as stream:
+                content = stream.read(limit + 1)
     except FileNotFoundError:
         return None
     if len(content) > limit:

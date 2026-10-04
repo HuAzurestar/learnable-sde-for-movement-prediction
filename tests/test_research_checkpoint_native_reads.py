@@ -234,3 +234,117 @@ def test_other_read_failures_are_not_deferred(tmp_path, monkeypatch, kind):
     with pytest.raises(type(failure)) as observed:
         control.read_frame(path, 4096)
     assert observed.value is failure
+
+
+@pytest.mark.parametrize("value", [{"payload": ["x" * 1024] * 65},
+                                  {"payload": ["中😀"] * 10000}, {}],
+                         ids=["multiple-native-chunks", "split-utf8", "empty-object"])
+def test_actual_frame_chunks_preserve_canonical_bytes_and_exact_quota(tmp_path, value):
+    path = tmp_path / "checkpoint-response.json"
+    content = control.canonical(value, 256 * 1024)
+    control.write_frame(path, value, len(content))
+    assert control.read_frame(path, len(content)) == value
+    with pytest.raises(control.ControlError):
+        control.read_frame(path, len(content) - 1)
+
+
+@pytest.mark.parametrize("limit", [True, 0, -1, 64 * 1024 * 1024 + 1])
+def test_invalid_read_quota_never_reaches_native_or_python_io(tmp_path, monkeypatch, limit):
+    def unexpected(*args, **kwargs):
+        pytest.fail("invalid frame quota reached file I/O")
+
+    monkeypatch.setattr(Path, "open", unexpected)
+    if os.name == "nt":
+        monkeypatch.setattr(ctypes, "WinDLL", unexpected)
+    with pytest.raises(control.ControlError, match="byte quota is invalid"):
+        control.read_frame(tmp_path / "missing-frame.json", limit)
+
+
+@WINDOWS
+def test_actual_native_short_reads_are_accumulated_without_changing_bytes(tmp_path, monkeypatch):
+    path = tmp_path / "checkpoint-response.json"
+    value = {"payload": ["中😀", "ascii", "escaped\n\t"] * 16}
+    control.write_frame(path, value, 4096)
+    kernel, calls = ctypes.WinDLL("kernel32", use_last_error=True), []
+    actual_read = kernel.ReadFile
+
+    class ShortRead:
+        def __call__(self, handle, buffer, count, output, overlapped):
+            actual_read.argtypes = self.argtypes
+            actual_read.restype = self.restype
+            calls.append(count)
+            return actual_read(handle, buffer, min(count, 7), output, overlapped)
+
+    proxy = SimpleNamespace(CreateFileW=kernel.CreateFileW,
+        GetFileInformationByHandleEx=kernel.GetFileInformationByHandleEx,
+        ReadFile=ShortRead(), CloseHandle=kernel.CloseHandle)
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kwargs: proxy)
+    assert control.read_frame(path, 4096) == value
+    assert len(calls) > 1, "actual native short reads were not exercised"
+
+
+@WINDOWS
+def test_native_byte_lock_deferred_read_closes_its_actual_frame_handle(tmp_path, monkeypatch):
+    path = tmp_path / "checkpoint-ack.json"
+    control.write_frame(path, {}, 4096)
+    with NativeFrameLock(path, "byte") as held:
+        held.prove_native_denial(path)
+        kernel, opened, closed = ctypes.WinDLL("kernel32", use_last_error=True), [], []
+
+        class Forward:
+            def __init__(self, function, records):
+                self.function, self.records = function, records
+
+            def __call__(self, *args):
+                self.function.argtypes, self.function.restype = self.argtypes, self.restype
+                result = self.function(*args)
+                self.records.append(result if self.function is kernel.CreateFileW else args[0])
+                return result
+
+        proxy = SimpleNamespace(CreateFileW=Forward(kernel.CreateFileW, opened),
+            GetFileInformationByHandleEx=kernel.GetFileInformationByHandleEx,
+            ReadFile=kernel.ReadFile, CloseHandle=Forward(kernel.CloseHandle, closed))
+        monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kwargs: proxy)
+        assert control.read_frame(path, 4096) is None
+        assert len(opened) == 1 and closed == opened
+
+
+@WINDOWS
+@pytest.mark.parametrize("extended", [False, True])
+def test_native_control_reader_keeps_legal_long_path_spellings(tmp_path, extended):
+    long_directory = tmp_path / ("a" * 80) / ("b" * 80)
+    created = Path("\\\\?\\" + str(long_directory))
+    created.mkdir(parents=True)
+    value = {"actual": "long native control path"}
+    control.write_frame(created / "checkpoint-response.json", value, 4096)
+    path = (created if extended else long_directory) / "checkpoint-response.json"
+    assert len(str(path)) > 260
+    assert control.read_frame(path, 4096) == value
+
+
+def test_frame_symlink_is_never_consumed(tmp_path):
+    source, link = tmp_path / "actual-frame.json", tmp_path / "checkpoint-request.json"
+    control.write_frame(source, {}, 4096)
+    try:
+        link.symlink_to(source)
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink creation privilege unavailable")
+        raise
+    with pytest.raises(control.ControlError, match="symlink"):
+        control.read_frame(link, 4096)
+
+
+@WINDOWS
+def test_native_open_never_follows_link_after_lexical_check(tmp_path, monkeypatch):
+    source, link = tmp_path / "actual-frame.json", tmp_path / "checkpoint-response.json"
+    control.write_frame(source, {}, 4096)
+    try:
+        link.symlink_to(source)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink creation privilege unavailable")
+        raise
+    monkeypatch.setattr(Path, "is_symlink", lambda path: False)
+    with pytest.raises(control.ControlError, match="non-reparse"):
+        control.read_frame(link, 4096)
