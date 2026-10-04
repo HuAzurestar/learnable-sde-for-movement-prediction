@@ -229,6 +229,50 @@ class ResearchQuery:
     def run(self, run_id):
         return self._authorized_response(lambda grant: self._run(run_id, grant))
 
+    def data_access(self, *, limit=50, cursor=None):
+        from .research_data_view import DataAccessView, exposure_watermark
+        if type(limit) is not int or not 1 <= limit <= 200:
+            raise ResearchError("CONTRACT_MISMATCH", "invalid data access page limit")
+        views = []
+        def assemble(grant):
+            spec = self.store.manifest("study-" + grant["study_id"])["spec"]
+            watermark = exposure_watermark(self.store)
+            selector = digest({"kind": "data-access", "study_id": spec["study_id"], "spec_hash": digest(spec)})
+            cells = sorted(spec["cells"], key=digest)
+            after = ""
+            if cursor:
+                try:
+                    saved = json.loads(base64.urlsafe_b64decode(cursor.encode()))
+                except (ValueError, TypeError, AttributeError) as exc:
+                    raise ResearchError("CURSOR_STALE", "invalid data access cursor") from exc
+                if (not isinstance(saved, dict) or saved.get("selector") != selector
+                        or saved.get("watermark") != watermark or saved.get("after") not in {digest(c) for c in cells}):
+                    raise ResearchError("CURSOR_STALE", "data access scope or exposure changed")
+                after = saved["after"]
+            remaining = [c for c in cells if digest(c) > after]
+            projection = DataAccessView(self.store, spec, self.store.events(), grant)
+            views.append(projection)
+            rows = projection.rows(remaining[:limit])
+            self.store._read_completion(projection.verify_authority, projection.verify_expiry)
+            next_cursor = None
+            if len(remaining) > limit:
+                next_cursor = base64.urlsafe_b64encode(json.dumps({"selector": selector, "watermark": watermark,
+                    "after": rows[-1]["cell_id"]}).encode()).decode()
+            if exposure_watermark(self.store) != watermark:
+                raise ResearchError("INDEX_STALE", "exposure changed while assembling data access view")
+            result = {"schema_version": "pirc25-data-access-view-v1", "study_id": spec["study_id"],
+                "spec_hash": digest(spec), "permission_decision": "not-provided", "items": rows,
+                "watermark": watermark, "next_cursor": next_cursor}
+            if len(json.dumps(result).encode()) > MAX_RESPONSE:
+                raise ResearchError("TOO_LARGE", "data access view exceeds 2 MiB; lower page limit")
+            return result
+        result = self._authorized_response(assemble)
+        # No valid-path I/O may follow this final data-grant clock guard. The
+        # preview grant and the data grant are different immutable authorities.
+        for projection in views:
+            projection.verify_expiry()
+        return result
+
     def _run(self, run_id, grant):
         value = self.store.manifest("run-" + identifier(run_id))
         if value["study_id"] != grant["study_id"]:

@@ -52,12 +52,17 @@ def make_server(store, authorization_id, *, port=0, authorization_version=None):
                 return
             try:
                 parameters = parse_qs(parsed.query)
-                if path in {"/api/studies", "/api/runs", "/api/comparisons", "/api/upstream"}:
+                if path in {"/api/studies", "/api/runs", "/api/comparisons", "/api/upstream", "/api/data-access"}:
                     if "study_id" in parameters and parameters["study_id"] != [store.authorization(authorization_id, version=authorization_version)["study_id"]]:
                         raise ResearchError("UNAUTHORIZED_DATA", "requested study is outside session scope")
                     if path == "/api/upstream":
                         value = query.upstream(limit=int(parameters.get("limit", [50])[0]),
                                                cursor=parameters.get("cursor", [None])[0])
+                        self.send(200, json.dumps(value, allow_nan=False).encode())
+                        return
+                    if path == "/api/data-access":
+                        value = query.data_access(limit=int(parameters.get("limit", [50])[0]),
+                                                  cursor=parameters.get("cursor", [None])[0])
                         self.send(200, json.dumps(value, allow_nan=False).encode())
                         return
                     kind = {"/api/studies": "study", "/api/runs": "run", "/api/comparisons": "comparison"}[path]

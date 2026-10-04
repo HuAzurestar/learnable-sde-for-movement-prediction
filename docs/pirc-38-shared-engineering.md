@@ -662,6 +662,26 @@ already published authoritative object is an integrity refusal, not a missing
 optional input or a reason to loosen lineage checks. The view never resolves
 upstream paths, opens provider/source payloads, reruns benchmarks or returns raw
 metadata paths/details. Changed upstream facts invalidate cursors; a failed refresh
-clears the displayed upstream rows. This view does not replace the separately
-required purpose/authorization/exposure table, actual upstream acceptance-field
-reconciliation, complete BenchmarkSelection semantics or final paired acceptance.
+clears the displayed upstream rows. This view does not replace actual upstream
+acceptance-field reconciliation, complete BenchmarkSelection semantics or final
+paired acceptance.
+
+The **Data access & exposure** view (`GET /api/data-access?limit=50&cursor=...`,
+maximum 200) separates frozen split role/requested purpose/fit scope, the exact
+registered authorization ID/version/hash/evidence/expiry and provider scope check,
+and append-only exposure history. It is metadata only, not an execution token,
+whole-admission pass or scientific qualification. The preview grant remains a
+separate freshly verified authority; even a passed data scope cannot grant UI
+visibility. A missing legacy protocol is explicitly unknown/not configured.
+Original raw read-start/completion and result-disclosure-start/read-completion
+events have separate immutable references; interrupted/failed reads retain possible
+exposure. A result read does not prove a human viewed it. Imported same-source/content
+aliases and shared cross-study reads are inherited without exposing foreign study
+names, source paths or payloads. Unknown imported history stays unknown; no recorded
+exposure is never a blind-test certificate or a claim to detect external tools.
+The view never opens provider, result, upstream or qualification bytes. Physical
+metadata/grant corruption, journal failure or final expiry cannot return rows;
+failed refresh clears previous rows. Scope facts and grants are request-local only.
+New read events invalidate data-access cursors; its own metadata disclosure journal
+does not. Whole-request complexity, typed audit-unavailable errors, real upstream
+fields/full compatibility and final clean-pair acceptance remain separate obligations.

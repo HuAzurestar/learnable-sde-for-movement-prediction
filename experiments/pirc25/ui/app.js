@@ -14,7 +14,7 @@ function text(tag, value, className) {const node = document.createElement(tag); 
 function showError(error) {el('error').hidden = false; el('error').textContent = error.message;}
 function table(headers, values) {
   const result = document.createElement('table'), head = document.createElement('tr');
-  headers.forEach(h => head.append(text('th', h))); const thead = document.createElement('thead'); thead.append(head); result.append(thead);
+  headers.forEach(h => {const header = text('th', h); header.scope = 'col'; head.append(header);}); const thead = document.createElement('thead'); thead.append(head); result.append(thead);
   const body = document.createElement('tbody'); values.forEach(cells => {const row = document.createElement('tr'); cells.forEach(value => {const td = document.createElement('td'); td.append(value instanceof Node ? value : text('span', value)); row.append(td);}); body.append(row);}); result.append(body); return result;
 }
 function action(label, fn) {const button = text('button', label); button.onclick = () => Promise.resolve().then(fn).catch(showError); return button;}
@@ -301,6 +301,21 @@ async function detail(row) {
 }
 function render() {
   const target = el('results'); target.replaceChildren();
+  if (view === 'data-access') {
+    const context = text('p','Frozen purpose, current registered scope check, and recorded exposure are independent. Scope checks are not execution permission or scientific qualification. No recorded exposure is not proof of a blind test; external access may be unknown. Metadata viewing does not open source data or result bytes.');
+    context.id = 'data-access-context'; target.append(context);
+    const reference = value => value ? `${value.created_at} · event ${value.sequence}: ${value.hash}` : 'None recorded';
+    const grid = table(['Registered cell / block', 'Purpose', 'Authorization', 'Exposure', 'Refusal reasons', 'Raw read / result disclosure evidence'],
+      rows.map(row => [row.cell_id + ' / ' + row.block_id,
+        row.purpose ? `${row.purpose.split_role} · requested ${row.purpose.requested ?? 'Unknown'} · fit scope ${row.purpose.fit_scope}` : 'Unknown — no frozen protocol',
+        `${row.authorization.status} · ${row.authorization.authorization_id || 'Not configured'} / ${row.authorization.version ?? 'legacy unversioned'} · ${row.authorization.authorization_hash || 'No grant hash'} · expires ${row.authorization.expires_at || 'Unknown'}`,
+        `${row.exposure.status} · external coverage ${row.exposure.external_coverage || 'unknown'} · ${row.exposure.read_event_count ?? 'Unknown'} read events · ${row.exposure.read_failed_count ?? 'Unknown'} failed reads`,
+        row.authorization.reason_codes.join('; ') || 'None recorded',
+        `Raw read started: ${reference(row.exposure.raw_read_started)}; raw read completed: ${reference(row.exposure.raw_read_completed)}; result disclosure started: ${reference(row.exposure.result_disclosure_started)}; result read completed: ${reference(row.exposure.result_read_completed)}; imported history: ${row.exposure.external_history_hash || 'Unknown'}`]));
+    grid.id = 'data-access-table'; target.append(grid);
+    if (!rows.length) target.append(text('p','No registered cells in this authorized study.'));
+    return;
+  }
   if (view === 'upstream') {
     const context = text('p', `Affected study: ${upstreamContext.study_id} · Frozen snapshot: ${upstreamContext.snapshot_hash || 'Not configured'} · Recorded metadata checks, not data permission. READY describes a past check, not current source availability.`);
     context.id = 'upstream-context'; target.append(context);
@@ -319,10 +334,11 @@ function render() {
 }
 async function load(more = false) {
   const sequence = ++loadSequence, selectedView = view;
+  const metadataOnly = ['upstream','data-access'].includes(selectedView);
   el('error').hidden = true;
-  if (selectedView === 'upstream') {el('results').replaceChildren(); el('more').hidden = true;}
+  if (metadataOnly) {el('results').replaceChildren(); el('more').hidden = true;}
   if (!token) throw new Error('Open the local session link printed by the serve command.');
-  if (selectedView !== 'upstream') {
+  if (!metadataOnly) {
     const studies = await api('/api/studies');
     const study = studies.items[0]?.manifest.spec; el('study').textContent = study?.study_id || 'No study';
     el('summary').textContent = study ? `${study.cells.length} registered cells · ${study.arms.length} arms · read-only session` : 'No authorized study found.';
@@ -332,6 +348,7 @@ async function load(more = false) {
   const page = await api('/api/' + selectedView + '?' + params);
   if (sequence !== loadSequence || selectedView !== view) return;
   if (selectedView === 'upstream') {upstreamContext = page; el('study').textContent = page.study_id; el('summary').textContent = 'Recorded upstream metadata · read-only authorized session';}
+  if (selectedView === 'data-access') {el('study').textContent = page.study_id; el('summary').textContent = 'Purpose / authorization / exposure · metadata only';}
   rows = more ? rows.concat(page.items) : page.items; cursor = page.next_cursor; el('more').hidden = !cursor; render();
 }
 document.querySelectorAll('[data-view]').forEach(button => button.onclick = () => {view = button.dataset.view; document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b === button)); el('filters').hidden = view !== 'runs'; el('detail').hidden = true; cursor = null; load().catch(showError);});
