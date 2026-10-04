@@ -32,6 +32,13 @@ def _keys(event):
             yield ("manifest-malformed",)
     if kind in _READS:
         sha, dataset = payload.get("sha256"), payload.get("dataset_id")
+        artifact = payload.get("artifact_id")
+        if not ((isinstance(dataset, str) and dataset)
+                or (isinstance(artifact, str) and artifact)):
+            # An actual READ with unresolved scope is uncertainty, not proof
+            # of untouched data. Retain dataset-only and artifact-only legacy
+            # adapters; bare dictionaries must not vanish from the history.
+            yield ("read-malformed",)
         known_hash = isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{64}", sha) is not None
         if known_hash:
             yield ("read-hash", sha)
