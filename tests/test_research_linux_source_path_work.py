@@ -195,7 +195,7 @@ def test_real_fallback_rechecks_current_external_same_inode_name(tmp_path, monke
             with pytest.raises(ResearchError, match='UNAUTHORIZED_DATA'):
                 source_file_hash(root, path)
         else:
-            assert source_file_hash(root, path) == hashlib.sha256(path.read_bytes()).hexdigest()
+            assert source_file_hash(root, path) == hashlib.sha256(b'# original synthetic source\n').hexdigest()
         assert observed['attempts'] == [path, path, path]
         assert observed['faults'] == [fault, fault, fault]
         assert resolutions == [path, path, path], 'unavailable FD names must use real fresh canonical checks'
