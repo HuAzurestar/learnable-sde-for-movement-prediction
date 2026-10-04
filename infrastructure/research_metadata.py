@@ -73,12 +73,18 @@ class DirectoryMembers:
                 raise
             with stream:
                 def stamp(descriptor):
+                    if os.name == 'nt':
+                        # This fresh native stamp already queries fstat and
+                        # checks regular/reparse attributes plus ChangeTime.
+                        # Do not query the same descriptor twice per stamp.
+                        return member_stamp(descriptor)
                     information = os.fstat(descriptor)
                     if not stat.S_ISREG(information.st_mode):
                         raise ResearchError('UNAUTHORIZED_DATA', 'metadata handle is not a regular file')
-                    return member_stamp(descriptor) if os.name == 'nt' else _identity(information)
+                    return _identity(information)
 
                 opened = stamp(stream.fileno())
+                opened_size = opened[0][2] if os.name == 'nt' else opened[2]
 
                 def verify():
                     self.check()
@@ -99,7 +105,9 @@ class DirectoryMembers:
                         raise ResearchError('CORRUPT_ARTIFACT', 'metadata identity changed during read')
 
                 verify()
-                yield stream, os.fstat(stream.fileno()).st_size, verify
+                # verify() above requires the current/held sizes to equal the
+                # actual opened stamp; later changes still fail final verify.
+                yield stream, opened_size, verify
                 verify()
         finally:
             if attribute_fd is not None:
