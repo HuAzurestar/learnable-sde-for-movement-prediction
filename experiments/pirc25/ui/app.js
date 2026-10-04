@@ -337,19 +337,25 @@ async function load(more = false) {
   const metadataOnly = ['upstream','data-access'].includes(selectedView);
   el('error').hidden = true;
   if (metadataOnly) {el('results').replaceChildren(); el('more').hidden = true;}
-  if (!token) throw new Error('Open the local session link printed by the serve command.');
-  if (!metadataOnly) {
-    const studies = await api('/api/studies');
-    const study = studies.items[0]?.manifest.spec; el('study').textContent = study?.study_id || 'No study';
-    el('summary').textContent = study ? `${study.cells.length} registered cells · ${study.arms.length} arms · read-only session` : 'No authorized study found.';
+  try {
+    if (!token) throw new Error('Open the local session link printed by the serve command.');
+    if (!metadataOnly) {
+      const studies = await api('/api/studies');
+      if (sequence !== loadSequence || selectedView !== view) return;
+      const study = studies.items[0]?.manifest.spec; el('study').textContent = study?.study_id || 'No study';
+      el('summary').textContent = study ? `${study.cells.length} registered cells · ${study.arms.length} arms · read-only session` : 'No authorized study found.';
+    }
+    const params = new URLSearchParams(selectedView === 'runs' ? appliedFilters : {});
+    if (more && cursor) params.set('cursor',cursor);
+    const page = await api('/api/' + selectedView + '?' + params);
+    if (sequence !== loadSequence || selectedView !== view) return;
+    if (selectedView === 'upstream') {upstreamContext = page; el('study').textContent = page.study_id; el('summary').textContent = 'Recorded upstream metadata · read-only authorized session';}
+    if (selectedView === 'data-access') {el('study').textContent = page.study_id; el('summary').textContent = 'Purpose / authorization / exposure · metadata only';}
+    rows = more ? rows.concat(page.items) : page.items; cursor = page.next_cursor; el('more').hidden = !cursor; render();
+  } catch (error) {
+    if (sequence !== loadSequence || selectedView !== view) return;
+    throw error;
   }
-  const params = new URLSearchParams(selectedView === 'runs' ? appliedFilters : {});
-  if (more && cursor) params.set('cursor',cursor);
-  const page = await api('/api/' + selectedView + '?' + params);
-  if (sequence !== loadSequence || selectedView !== view) return;
-  if (selectedView === 'upstream') {upstreamContext = page; el('study').textContent = page.study_id; el('summary').textContent = 'Recorded upstream metadata · read-only authorized session';}
-  if (selectedView === 'data-access') {el('study').textContent = page.study_id; el('summary').textContent = 'Purpose / authorization / exposure · metadata only';}
-  rows = more ? rows.concat(page.items) : page.items; cursor = page.next_cursor; el('more').hidden = !cursor; render();
 }
 document.querySelectorAll('[data-view]').forEach(button => button.onclick = () => {view = button.dataset.view; document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b === button)); el('filters').hidden = view !== 'runs'; el('detail').hidden = true; cursor = null; load().catch(showError);});
 el('filters').onsubmit = event => {event.preventDefault(); appliedFilters = Object.fromEntries(filterKeys.map(key => [key,el('filter-' + key).value.trim()]).filter(([,value]) => value)); cursor = null; el('detail').hidden = true; load().catch(showError);};
