@@ -68,7 +68,9 @@ class ResearchSupervisor:
         outcome, artifact_id, error_code = "FAILED", None, "WORKER_FAILED"
         control_close_error, control_close_recorded = False, False
         tree_stop_recorded = False
+        stopped_at, stopped_before_deadline = None, False
         def stop_tree():
+            nonlocal stopped_at, stopped_before_deadline
             try:
                 if tree is not None:
                     tree.terminate()
@@ -78,6 +80,12 @@ class ResearchSupervisor:
                     if process.poll() is None:
                         process.kill()
                     process.wait(timeout=1)
+                if stopped_at is None and (tree is not None or process is not None):
+                    # Slot occupancy ends at the first actual whole-tree stop,
+                    # before journalling, owner validation or control cleanup.
+                    # A later watchdog tick cannot undo this native observation.
+                    stopped_at = self.monotonic()
+                    stopped_before_deadline = not expired.is_set() and stopped_at < deadline
             except (OSError, subprocess.TimeoutExpired) as exc:
                 raise ResearchError("WORKER_ACTIVE", "whole process tree stop is unconfirmed") from exc
 
@@ -97,7 +105,7 @@ class ResearchSupervisor:
             if not tree_stop_recorded:
                 self.store.append("WORKER_TREE_STOPPED", {"attempt_id": attempt_id,
                     "reservation_id": reservation["reservation_id"],
-                    "observed_elapsed_ms": math.ceil((self.monotonic() - start) * 1000),
+                    "observed_elapsed_ms": math.ceil((stopped_at - start) * 1000),
                     "confirmation": "native-job-or-process-group-no-running-descendants"})
                 tree_stop_recorded = True
         def collect_checkpoint():
@@ -235,11 +243,13 @@ class ResearchSupervisor:
                 stop_tree()
                 record_tree_stopped()
                 if completed_code is not None:
-                    if past_deadline() or completed_code == 124:
+                    checkpoint_stopped = (completed_code == 85 and saved_checkpoint is not None
+                                          and stopped_before_deadline)
+                    if (past_deadline() and not checkpoint_stopped) or completed_code == 124:
                         outcome, error_code = "TIMEOUT", "TIMEOUT"
                     elif budget_stop_requested:
                         outcome, error_code = "BUDGET_EXHAUSTED", "BUDGET_EXHAUSTED"
-                    elif completed_code == 85 and saved_checkpoint is not None:
+                    elif checkpoint_stopped:
                         outcome, error_code = "FAILED", "CHECKPOINT_SAVED"
                     elif completed_code == 0 and result_path.is_file():
                         # Registered adapters must supply a finite JSON result; no pickle.
@@ -323,7 +333,11 @@ class ResearchSupervisor:
             # including when settlement subsequently fails and retains cost.
             if stop_confirmed and tree is not None:
                 record_tree_stopped()
-            elapsed = math.ceil((self.monotonic() - start) * 1000)
+            # Unknown stop retains the reservation and current diagnostic wall
+            # time. Confirmed computation is never billed for subsequent owner
+            # work; result validation still has its original deadline vetoes.
+            end = stopped_at if stop_confirmed and stopped_at is not None else self.monotonic()
+            elapsed = math.ceil((end - start) * 1000)
             if outcome == "SUCCEEDED" and (past_deadline() or elapsed > reservation["reserved_ms"]):
                 outcome, artifact_id, error_code = "TIMEOUT", None, "TIMEOUT"
             if stop_confirmed:
