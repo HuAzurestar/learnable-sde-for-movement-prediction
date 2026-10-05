@@ -367,7 +367,13 @@ def accept_evidence_package(store, directory, expected_hash):
     from infrastructure.research_publication import opened_directory
     root = Path(os.path.abspath(directory))
     with opened_directory(root) as binding:
-        package = _accept_evidence_package(store, root, expected_hash, binding)
+        # One actual import phase, not persistent provenance/permission facts.
+        # Retain every original member read, source check and durable write,
+        # then freshly verify the complete final chain before returning IDs.
+        with store._read_transaction():
+            package = _accept_evidence_package(store, root, expected_hash, binding)
+        # Final physical authority I/O may itself replace the external root.
+        # Keep its original handle alive and verify AFTER that I/O as well.
         binding[2]()
         return package
 
