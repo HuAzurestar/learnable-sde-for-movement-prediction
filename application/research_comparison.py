@@ -50,11 +50,17 @@ class ComparisonRunner:
         except (KeyError, TypeError, ValueError) as exc:
             raise ResearchError("CONTRACT_MISMATCH", "incomplete statistical worker output") from exc
 
-    def run(self, study_id, input_aggregate_hash, *, authorization_id, budget=BudgetSpec(),
-            max_operations=MAX_OPERATIONS, formal=None, parent_attempt_id=None, reason=None, output=None,
-            authorization_version=None):
-        study_id, input_aggregate_hash = identifier(study_id), identifier(input_aggregate_hash)
-        budget.validate()
+    def _prepare(self, *args, **kwargs):
+        # One actual owner phase, not a grant or cross-poll prefix cache. Every
+        # original manifest/artifact and authorization check still runs. The
+        # outer scope rehashes the complete final chain and disclosure grants
+        # before its result can reach supervision. Never hold this lock across
+        # a worker, settlement, staging fsync or per-member publication guard.
+        with self.store._read_transaction():
+            return self._prepare_locked(*args, **kwargs)
+
+    def _prepare_locked(self, study_id, input_aggregate_hash, *, authorization_id,
+            max_operations, formal, parent_attempt_id, reason, authorization_version):
         grant = self.store.authorization(authorization_id, version=authorization_version)
         authorize_study(self.store, study_id, grant, "export")
         source = self.store.manifest("comparison-" + input_aggregate_hash)
@@ -104,18 +110,30 @@ class ComparisonRunner:
         related = [a for a in self.store.attempts().values() if a["run_id"] == run_id]
         success = next((a for a in related if a["state"] == "SUCCEEDED"), None)
         if success:
+            return grant, bundle, arm, success, None, None, None
+        attempt_id = self.store.new_attempt(run_id, parent_attempt_id=parent_attempt_id, reason=reason)
+        reference = {"manifest_id": "computation-" + attempt_id, "attempt_id": attempt_id, "run_id": run_id,
+            "computation_spec_hash": digest(derived), "request_manifest_id": "computation-request-" + attempt_id,
+            "reservation_id": digest([self.store.store_id, attempt_id]), "input_aggregate_hash": input_aggregate_hash,
+            "source_bundle_hash": bundle["bundle_hash"], "allocation": plan["allocation"]}
+        request = {"schema_version": "pirc25-computation-request-v1", "computation_ref": reference,
+            "computation_study_id": derived["study_id"], "runtime_code_hash": runtime_hash,
+            "paper_identity": paper, "resource_plan": plan, "formal": formal}
+        return grant, bundle, arm, None, attempt_id, reference, request
+
+    def run(self, study_id, input_aggregate_hash, *, authorization_id, budget=BudgetSpec(),
+            max_operations=MAX_OPERATIONS, formal=None, parent_attempt_id=None, reason=None, output=None,
+            authorization_version=None):
+        study_id, input_aggregate_hash = identifier(study_id), identifier(input_aggregate_hash)
+        budget.validate()
+        grant, bundle, arm, success, attempt_id, reference, request = self._prepare(
+            study_id, input_aggregate_hash, authorization_id=authorization_id,
+            max_operations=max_operations, formal=formal, parent_attempt_id=parent_attempt_id,
+            reason=reason, authorization_version=authorization_version)
+        if success:
             result = {"attempt_id": success["attempt_id"], "state": "SUCCEEDED",
                       "artifact_id": success["artifact_id"], "exit_code": 0, "reused": True}
         else:
-            attempt_id = self.store.new_attempt(run_id, parent_attempt_id=parent_attempt_id, reason=reason)
-            reference = {"manifest_id": "computation-" + attempt_id, "attempt_id": attempt_id, "run_id": run_id,
-                "computation_spec_hash": digest(derived), "request_manifest_id": "computation-request-" + attempt_id,
-                "reservation_id": digest([self.store.store_id, attempt_id]), "input_aggregate_hash": input_aggregate_hash,
-                "source_bundle_hash": bundle["bundle_hash"], "allocation": plan["allocation"]}
-            request = {"schema_version": "pirc25-computation-request-v1", "computation_ref": reference,
-                "computation_study_id": derived["study_id"], "runtime_code_hash": runtime_hash,
-                "paper_identity": paper, "resource_plan": plan, "formal": formal}
-
             def command(result_path):
                 self.store.publish(reference["request_manifest_id"], request)
                 atomic_write(result_path.parent / "request.json", encode(request))

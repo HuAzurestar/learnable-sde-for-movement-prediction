@@ -4,11 +4,14 @@ The entry fault below stops before any supervised job. It measures actual
 metadata reads and verifies that no preflight snapshot crosses that boundary.
 Original computation/deadline and package-publication tests remain separate.
 """
+from datetime import datetime, timedelta, timezone
+import time
+
 import pytest
 
 from application.research_comparison import ComparisonRunner
 from application.research_supervisor import ResearchSupervisor
-from infrastructure.research_store import ResearchError
+from infrastructure.research_store import ResearchError, encode
 from tests.test_research_comparison import source, compute
 
 
@@ -64,3 +67,39 @@ def test_preflight_final_chain_corruption_cannot_reach_supervision(source, monke
         compute(source)
     assert corrupted == [True] and not entered
     assert store._read_snapshot() is None
+
+
+@pytest.mark.parametrize("change", ["manifest", "actual-expiry"])
+def test_preflight_completion_rechecks_actual_grant_before_supervision(source, monkeypatch, change):
+    store, _, grant, _, _ = source
+    if change == "actual-expiry":
+        expires = datetime.now(timezone.utc) + timedelta(seconds=5)
+        grant = {**grant, "authorization_id": "short-live", "expires_at": expires.isoformat()}
+        store.authorize(grant)
+    original_attempt, changed, entered = store.new_attempt, [], []
+
+    def new_attempt(*args, **kwargs):
+        result = original_attempt(*args, **kwargs)
+        changed.append(True)
+        if change == "manifest":
+            path = store.path / "manifests" / ("authorization-" + grant["authorization_id"] + ".json")
+            path.write_bytes(encode({**grant, "purposes": ["preview"]}))
+        else:
+            # Real wall-clock expiry after the original preflight operations;
+            # no replaced clock, deadline, grant lookup or numerical result.
+            time.sleep(max(0, (expires - datetime.now(timezone.utc)).total_seconds()) + 0.01)
+        return result
+
+    def unexpected(*args, **kwargs):
+        entered.append(True)
+        raise BeforeSupervision
+
+    monkeypatch.setattr(store, "new_attempt", new_attempt)
+    monkeypatch.setattr(ResearchSupervisor, "run", unexpected)
+    with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
+        compute(source, authorization_id=grant["authorization_id"])
+    assert changed == [True] and not entered
+    assert store._read_snapshot() is None
+    events = store.events()
+    assert any(e["event_kind"] == "DISCLOSURE_DENIED" for e in events)
+    assert not any(e["event_kind"] == "WORKER_STARTED" for e in events)
