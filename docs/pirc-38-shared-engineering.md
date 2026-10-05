@@ -578,6 +578,13 @@ failure/attempt/stopping rules. A missing decision produces
 
 After importing a TSDE input package, run from the runtime repository:
 
+The standalone Paper aggregator marks its packages `qualification: descriptive`,
+even when `--formal` verifies the source admission. The comparison runner chooses
+its default formal mode from the frozen study admission, not the input package's
+qualification label. A formal aggregate without managed adjudication and a
+verified computation receipt is refused before publishing evidence artifacts;
+legacy engineering-only descriptive packages remain readable.
+
 ```console
 python -B -m experiments.pirc25 --root RUNTIME_DIR --store-id STORE_ID compare STUDY_ID INPUT_AGGREGATE_HASH --authorization-id GRANT_ID --paper-root TSDE_ROOT --seconds 7200 --output NEW_PACKAGE_DIR
 ```

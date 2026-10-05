@@ -43,12 +43,24 @@ jobs:
     name: test (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: PSDE-SDE
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: PSDE-SDE
+      - name: Check out paired Paper implementation
+        uses: actions/checkout@v7
+        with:
+          repository: HuAzurestar/learnable-sde-paper-to-predict-movement
+          ref: 260b6c78d6f6ba5198471fc2e2edbd0c71ca442e
+          path: TSDE-SDE
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}

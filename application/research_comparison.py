@@ -84,7 +84,10 @@ class ComparisonRunner:
         export_evidence(self.store, study_id, grant)
         plan = comparison_plan(bundle, max_operations)
         if formal is None:
-            formal = aggregate["qualification"] == "formal"
+            # Standalone Paper packages are descriptive inputs. Determine the
+            # execution mode from the frozen source admission, not an imported
+            # aggregate's caller-controlled qualification label.
+            formal = original.get("admission", {}).get("mode") == "formal"
         if type(formal) is not bool:
             raise ResearchError("CONTRACT_MISMATCH", "formal mode must be explicit boolean")
         paper = paper_identity(self.paper_root)

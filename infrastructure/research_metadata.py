@@ -5,6 +5,7 @@ import fnmatch
 import os
 from pathlib import Path
 import stat
+import sys
 import threading
 
 from .research_store import ResearchError
@@ -38,6 +39,30 @@ class DirectoryMembers:
             names = os.listdir(self.fd)
         self.check()
         return sorted(name for name in names if fnmatch.fnmatch(name, '*.json'))
+
+    def check_namespace(self):
+        """Check the current name before bytes, including ancestor redirects.
+
+        Relative member opens pin the old directory, but a held descriptor alone
+        does not establish that its original lexical name still owns that object.
+        Query the held Linux directory name without another ancestor walk; keep
+        the existing complete outer directory guards as well.
+        """
+        current = self.path.lstat()
+        if not stat.S_ISDIR(current.st_mode) or (current.st_dev, current.st_ino) != self.identity:
+            raise ResearchError('UNAUTHORIZED_DATA', 'metadata directory name changed before read')
+        if sys.platform == 'linux':
+            try:
+                same_name = Path(os.readlink('/proc/self/fd/' + str(self.fd))) == self.path
+            except OSError:
+                same_name = self.path.resolve() == self.path
+        elif os.name == 'nt' and len(self.path.drive) == 2:
+            import nt
+            same_name = Path(nt._getfinalpathname(str(self.path))) == Path('\\\\?\\' + str(self.path))
+        else:
+            same_name = self.path.resolve() == self.path
+        if not same_name:
+            raise ResearchError('UNAUTHORIZED_DATA', 'metadata directory or ancestor was redirected')
 
     @contextmanager
     def opened_member(self, path):
@@ -88,6 +113,7 @@ class DirectoryMembers:
 
                 def verify():
                     self.check()
+                    self.check_namespace()
                     held = stamp(stream.fileno())
                     if os.name == 'nt':
                         current_fd = member_descriptor(self.fd, path.name)

@@ -288,7 +288,17 @@ def accept_aggregate(store, aggregate, study_id):
     if (bundle["spec_hash"] != digest(spec) or aggregate.get("expected_cell_count") != len(spec["cells"])
             or aggregate.get("cell_dispositions") != bundle["cells"]):
         raise ResearchError("CONTRACT_MISMATCH", "aggregate is not bound to the frozen complete matrix")
-    if "adjudication" in aggregate or "computation_ref" in aggregate:
+    # Four-file descriptive inputs are not proof of a supervised statistical
+    # result. Removing both proof fields must never promote a fixture or an
+    # operator-rehashed summary to formal evidence.
+    managed = "adjudication" in aggregate or "computation_ref" in aggregate
+    qualification = aggregate.get("qualification")
+    if qualification == "formal" and not managed:
+        raise ResearchError("UNQUALIFIED", "formal aggregate requires its managed computation proof")
+    if not managed and qualification is not None and (
+            not isinstance(qualification, str) or qualification not in {"descriptive", "engineering-fixture"}):
+        raise ResearchError("UNQUALIFIED", "unsupported descriptive aggregate qualification")
+    if managed:
         if "adjudication" not in aggregate or "computation_ref" not in aggregate:
             raise ResearchError("CONTRACT_MISMATCH", "managed adjudication requires its computation reference")
         from application.research_computation import verified_computation

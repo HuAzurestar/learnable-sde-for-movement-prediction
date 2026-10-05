@@ -277,6 +277,7 @@ def test_actual_admitted_formal_fixture_uses_managed_comparison(tmp_path, monkey
         "--formal", "--expected-hash", bundle["bundle_hash"], "--output", str(tmp_path / "formal-evidence")],
         capture_output=True, check=True, timeout=30)
     aggregate = json.loads((tmp_path / "formal-evidence/aggregate.json").read_bytes())
+    assert aggregate["qualification"] == "descriptive", "source admission is not a computation proof"
     package = accept_evidence_package(store, tmp_path / "formal-evidence", aggregate["aggregate_hash"])
     result = ComparisonRunner(store, paper).run("synthetic", package["aggregate_hash"],
         authorization_id=grant["authorization_id"], budget=BudgetSpec(10))

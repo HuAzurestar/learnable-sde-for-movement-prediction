@@ -4,13 +4,42 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import time
 
 import pytest
 
 from infrastructure.research_store import ResearchError, ResearchStore, encode
 from tests.research_file_observation import is_query_only_open
+from tests.research_file_observation import observe_file
 from tests.test_research_metadata_prefix_reads import prepared
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory/ancestor replacement at native open")
+@pytest.mark.parametrize("directory", ["events", "store", "ancestor"])
+@pytest.mark.parametrize("replacement", ["regular", "symlink"])
+def test_original_metadata_namespace_is_checked_before_event_bytes(tmp_path, monkeypatch, directory, replacement):
+    store, _ = prepared(tmp_path, 1)
+    target = store.path / "events" / "0000000000000001.json"
+    source = {"events": target.parent, "store": store.path,
+              "ancestor": store.path.parent}[directory]
+    incoming, parked = tmp_path / "incoming", tmp_path / "parked"
+    shutil.copytree(source, incoming)
+    changed = []
+
+    def change():
+        assert not changed
+        source.rename(parked)
+        if replacement == "regular":
+            incoming.rename(source)
+        else:
+            source.symlink_to(incoming, target_is_directory=True)
+        changed.append(True)
+
+    reads, _ = observe_file(monkeypatch, target, before_open=change)
+    with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA|CORRUPT_ARTIFACT"):
+        store.events()
+    assert changed == [True] and reads == [], "refuse the changed namespace before metadata payload reads"
 
 
 def test_prefix_enumerates_and_opens_actual_members_relative_to_original_directories(tmp_path, monkeypatch):
