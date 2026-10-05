@@ -62,15 +62,21 @@ class ResearchSupervisor:
         saved_checkpoint = None
         budget_stop_requested = False
         wrapper = Path(__file__).resolve().parents[1] / "infrastructure/research_worker.py"
-        process, tree, deadline_monitor = None, None, None
+        process, tree, deadline_monitor, soft_monitor = None, None, None, None
         expired = threading.Event()
         monitor_errors = []
+        soft_done, soft_cancelled = threading.Event(), threading.Event()
+        soft_errors, soft_started = [], None
+        warned = False
         outcome, artifact_id, error_code = "FAILED", None, "WORKER_FAILED"
         control_close_error, control_close_recorded = False, False
         tree_stop_recorded = False
         stopped_at, stopped_before_deadline = None, False
         def stop_tree():
             nonlocal stopped_at, stopped_before_deadline
+            soft_cancelled.set()
+            if soft_monitor is not None:
+                soft_monitor.cancel()
             try:
                 if tree is not None:
                     tree.terminate()
@@ -100,6 +106,56 @@ class ResearchSupervisor:
 
         def past_deadline():
             return expired.is_set() or self.monotonic() >= deadline
+        def signal_checkpoint():
+            nonlocal soft_started
+            # Like the hard fuse, the actual80% signal must not wait behind
+            # owner journal/budget I/O. This writes only bounded worker control,
+            # never authority or an ACK. The owner still journals the request
+            # before handling its response and performs all fresh save checks.
+            try:
+                # A Timer wakeup is not clock evidence (notably with Windows
+                # monotonic tick rounding). Wait cancellably until the actual
+                # threshold; never move the original signal before80%.
+                threshold = deadline - budget.job_seconds * 0.2
+                while True:
+                    remaining = threshold - self.monotonic()
+                    if remaining <= 0:
+                        break
+                    if soft_cancelled.wait(remaining):
+                        return
+                if (soft_cancelled.is_set() or past_deadline()
+                        or process.poll() is not None):
+                    return
+                soft_started = self.monotonic()
+                channel.request()
+            except BaseException as exc:
+                soft_errors.append(exc)
+            finally:
+                soft_done.set()
+        def record_checkpoint_request():
+            nonlocal warned
+            if warned:
+                return True
+            if channel is not None:
+                # request_id alone is not proof of completed frame publication.
+                if not soft_done.is_set():
+                    return False
+                if soft_errors:
+                    raise soft_errors[0]
+                if soft_started is None:
+                    return False
+                issued = soft_started
+                request_id = channel.request_id
+            else:
+                issued = self.monotonic()
+                if issued - start < budget.job_seconds * 0.8:
+                    return False
+                request_id = None
+            self.store.append("CHECKPOINT_REQUESTED", {"attempt_id": attempt_id,
+                "remaining_seconds": max(0, deadline - issued), "request_id": request_id,
+                "supported": channel is not None})
+            warned = True
+            return True
         def record_tree_stopped():
             nonlocal tree_stop_recorded
             if not tree_stop_recorded:
@@ -111,6 +167,8 @@ class ResearchSupervisor:
         def collect_checkpoint():
             nonlocal saved_checkpoint, budget_stop_requested
             if budget_stop_requested or channel is None or saved_checkpoint is not None or past_deadline():
+                return False
+            if not record_checkpoint_request():
                 return False
             try:
                 frame = channel.response()
@@ -181,6 +239,11 @@ class ResearchSupervisor:
                 deadline_monitor = threading.Timer(max(0, deadline - self.monotonic()), hard_stop)
                 deadline_monitor.daemon = True
                 deadline_monitor.start()
+                if channel is not None:
+                    soft_monitor = threading.Timer(
+                        max(0, start + budget.job_seconds * 0.8 - self.monotonic()), signal_checkpoint)
+                    soft_monitor.daemon = True
+                    soft_monitor.start()
                 with self.store.lock():
                     if self.store._attempts()[attempt_id]["state"] != "RUNNING":
                         raise ResearchError("IDENTITY_CONFLICT", "attempt reconciled before worker launch")
@@ -188,7 +251,6 @@ class ResearchSupervisor:
                                        "reservation_id": reservation["reservation_id"], "deadline_monotonic": deadline})
                     process.stdin.write(b"GO\n")
                     process.stdin.flush()
-                warned = False
                 last_logged = start
                 while process.poll() is None:
                     now = self.monotonic()
@@ -216,7 +278,13 @@ class ResearchSupervisor:
                     if past_deadline():
                         outcome, error_code = "TIMEOUT", "TIMEOUT"
                         break
-                    if budget_stop_requested or (not budget_checked and self.budget.balance(run["arm_id"])["closed"]):
+                    current_budget_closed = budget_stop_requested or (
+                        not budget_checked and self.budget.balance(run["arm_id"])["closed"])
+                    # Record an actual signal even when the fresh blocked read
+                    # returns closed. It is trace evidence, not funded work or
+                    # permission to save/ACK against that closed authority.
+                    record_checkpoint_request()
+                    if current_budget_closed:
                         outcome, error_code = "BUDGET_EXHAUSTED", "BUDGET_EXHAUSTED"
                         break
                     # Authority I/O may cross the soft or hard threshold. Do
@@ -229,10 +297,7 @@ class ResearchSupervisor:
                         outcome, error_code = "INTERRUPTED", "HEARTBEAT_LOST"
                         break
                     if now - start >= budget.job_seconds * 0.8 and not warned:
-                        request_id = channel.request() if channel is not None else None
-                        self.store.append("CHECKPOINT_REQUESTED", {"attempt_id": attempt_id,
-                            "remaining_seconds": max(0, deadline - now), "request_id": request_id, "supported": channel is not None})
-                        warned = True
+                        record_checkpoint_request()
                     collect_checkpoint()
                     if budget_stop_requested:
                         outcome, error_code = "BUDGET_EXHAUSTED", "BUDGET_EXHAUSTED"
@@ -327,6 +392,12 @@ class ResearchSupervisor:
                 stop_tree()
             except (OSError, ResearchError, subprocess.TimeoutExpired):
                 stop_confirmed = False
+            if soft_monitor is not None:
+                # Native containment comes first; do not wait for a blocked
+                # control writer before killing/stopping the actual worker.
+                soft_monitor.join(timeout=1)
+                if soft_monitor.is_alive():
+                    outcome, artifact_id, error_code = "INTERRUPTED", None, "CHECKPOINT_SIGNAL_UNCONFIRMED"
             if tree is not None:
                 tree.close()
             if process is not None:

@@ -11,6 +11,7 @@ import pytest
 from application.research_budget import BudgetLedger, BudgetSpec
 from application.research_contracts import CapabilityRegistry
 from application.research_recovery import RecoveryPlugin, RecoveryRegistry
+import application.research_supervisor as supervisor_module
 from experiments.pirc25.runner import SharedRunner
 from infrastructure.research_control import CheckpointExchange, read_frame
 from infrastructure.research_store import ResearchStore, atomic_write, digest, encode
@@ -96,3 +97,43 @@ def test_actual_soft_signal_reaches_worker_while_owner_budget_read_is_blocked(
         assert not acknowledgements
         assert not (channels[0].directory / 'checkpoint-ack.json').exists()
         assert BudgetLedger(store).balance('affine')['closed']
+
+
+def test_soft_signal_rechecks_real_threshold_after_early_timer_wakeup(tmp_path, monkeypatch):
+    original_timer = supervisor_module.threading.Timer
+    early = []
+
+    def timer(interval, function, *args, **kwargs):
+        if function.__name__ == 'signal_checkpoint':
+            early.append(interval)
+            interval = 0.02  # Actual early scheduling; clocks/frames stay real.
+        return original_timer(interval, function, *args, **kwargs)
+
+    monkeypatch.setattr(supervisor_module.threading, 'Timer', timer)
+    test_actual_soft_signal_reaches_worker_while_owner_budget_read_is_blocked(
+        tmp_path, monkeypatch, 'exact', 'none')
+    assert len(early) == 1 and early[0] > 0.02
+
+
+def test_finished_worker_cancels_early_woken_signal_wait_without_late_control(tmp_path, monkeypatch):
+    from tests.test_research_live_checkpoint import prepared
+    store, value, registry, adapters, _ = prepared(tmp_path / 'owner', 'exact', 'owner')
+    original_timer = supervisor_module.threading.Timer
+    monitors = []
+
+    def timer(interval, function, *args, **kwargs):
+        if function.__name__ == 'signal_checkpoint':
+            monitor = original_timer(0.02, function, *args, **kwargs)
+            monitors.append(monitor)
+            return monitor
+        return original_timer(interval, function, *args, **kwargs)
+
+    monkeypatch.setattr(supervisor_module.threading, 'Timer', timer)
+    result = SharedRunner(store, registry, recovery_registry=adapters).run_cell(
+        'owner', digest(value['cells'][0]), budget=BudgetSpec(6))
+    assert result['state'] == 'SUCCEEDED', result
+    assert len(monitors) == 1 and not monitors[0].is_alive()
+    assert not [event for event in store.events() if event['event_kind'] == 'CHECKPOINT_REQUESTED']
+    work = store.path / 'artifacts' / ('.attempt-' + result['attempt_id'])
+    assert not (work / 'checkpoint-request.json').exists()
+    assert not (work / 'checkpoint-ack.json').exists()
