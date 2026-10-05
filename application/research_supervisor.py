@@ -168,29 +168,27 @@ class ResearchSupervisor:
             nonlocal saved_checkpoint, budget_stop_requested
             if budget_stop_requested or channel is None or saved_checkpoint is not None or past_deadline():
                 return False
-            if not record_checkpoint_request():
+            if not soft_done.is_set():
+                if self.monotonic() < deadline - budget.job_seconds * 0.2:
+                    return False
+                # A published request can already have a response while the
+                # sending call is still completing. Wait OUTSIDE the authority
+                # lock, bounded by the original deadline and independent fuse.
+                # A sender/other writer must remain able to publish a closure.
+                soft_done.wait(max(0, deadline - self.monotonic()))
+                if not soft_done.is_set() or past_deadline():
+                    return False
+            if soft_errors:
+                raise soft_errors[0]
+            if soft_started is None:
                 return False
-            try:
-                frame = channel.response()
-            except ControlError as exc:
-                raise ResearchError("CONTRACT_MISMATCH", str(exc)) from exc
-            if frame is None or past_deadline():
-                return False
-            progress = frame["progress"]
-            if (type(progress) is not dict or set(progress) != {"completed_steps", "total_steps", "throughput_per_second", "eta_seconds"}
-                    or type(progress["completed_steps"]) is not int or type(progress["total_steps"]) is not int
-                    or not 0 <= progress["completed_steps"] <= progress["total_steps"]
-                    or progress["total_steps"] <= 0
-                    or any(type(progress[key]) not in {int, float} or not math.isfinite(progress[key]) or progress[key] < 0
-                        for key in ("throughput_per_second", "eta_seconds"))):
-                raise ResearchError("CONTRACT_MISMATCH", "worker checkpoint progress is invalid")
-            # Verify one short response/save phase, including the actual final
-            # saved journal. ACK must stay outside the scope: otherwise the
-            # worker could accept a checkpoint before final corruption is seen.
-            # The three durable MANIFEST/CHECKPOINT/SAVED events need only one
-            # final head, still before uncached checks and ACK. No audit event
-            # or event fsync is deferred by this checkpoint-only owned phase.
+            # REQUEST, fresh budget and ready-response/save share one short
+            # initial/final physical scope, never an idle/poll approval. Ordinary
+            # REQUEST keeps its immediate durable head. The checkpoint-only
+            # MANIFEST/CHECKPOINT/SAVED heads still finish before uncached final
+            # checks. Every event fsync remains real; ACK stays outside.
             with self.store._checkpoint_publication():
+                record_checkpoint_request()
                 def check_current_budget():
                     nonlocal budget_stop_requested
                     budget_stop_requested |= self.budget.balance(run["arm_id"])["closed"]
@@ -198,8 +196,25 @@ class ResearchSupervisor:
                 # Hold/closure can change during actual publication. Recheck
                 # after the final uncached physical pass, before any ACK.
                 self.store._read_completion(check_current_budget, lambda: None)
-                if budget_stop_requested:
+                if budget_stop_requested or past_deadline():
                     return True
+                try:
+                    frame = channel.response()
+                except ControlError as exc:
+                    raise ResearchError("CONTRACT_MISMATCH", str(exc)) from exc
+                # The real response read itself may publish a current closure
+                # or hold. Recheck authority before the funded save handler.
+                check_current_budget()
+                if frame is None or budget_stop_requested or past_deadline():
+                    return True
+                progress = frame["progress"]
+                if (type(progress) is not dict or set(progress) != {"completed_steps", "total_steps", "throughput_per_second", "eta_seconds"}
+                        or type(progress["completed_steps"]) is not int or type(progress["total_steps"]) is not int
+                        or not 0 <= progress["completed_steps"] <= progress["total_steps"]
+                        or progress["total_steps"] <= 0
+                        or any(type(progress[key]) not in {int, float} or not math.isfinite(progress[key]) or progress[key] < 0
+                            for key in ("throughput_per_second", "eta_seconds"))):
+                    raise ResearchError("CONTRACT_MISMATCH", "worker checkpoint progress is invalid")
                 reference = checkpoint_handler(frame["state"], progress, deadline)
                 if past_deadline():
                     return True
@@ -280,11 +295,10 @@ class ResearchSupervisor:
                         break
                     current_budget_closed = budget_stop_requested or (
                         not budget_checked and self.budget.balance(run["arm_id"])["closed"])
-                    # Record an actual signal even when the fresh blocked read
-                    # returns closed. It is trace evidence, not funded work or
-                    # permission to save/ACK against that closed authority.
-                    record_checkpoint_request()
                     if current_budget_closed:
+                        # A completed signal remains trace evidence even when
+                        # the fresh blocked poll closes authority. No save/ACK.
+                        record_checkpoint_request()
                         outcome, error_code = "BUDGET_EXHAUSTED", "BUDGET_EXHAUSTED"
                         break
                     # Authority I/O may cross the soft or hard threshold. Do
@@ -296,9 +310,10 @@ class ResearchSupervisor:
                     if now - start >= 15 and (not heartbeat.exists() or time.time() - heartbeat.stat().st_mtime > 15):
                         outcome, error_code = "INTERRUPTED", "HEARTBEAT_LOST"
                         break
-                    if now - start >= budget.job_seconds * 0.8 and not warned:
+                    if channel is None and now - start >= budget.job_seconds * 0.8 and not warned:
                         record_checkpoint_request()
-                    collect_checkpoint()
+                    if not budget_checked:
+                        collect_checkpoint()
                     if budget_stop_requested:
                         outcome, error_code = "BUDGET_EXHAUSTED", "BUDGET_EXHAUSTED"
                         break
