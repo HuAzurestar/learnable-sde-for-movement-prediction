@@ -212,8 +212,10 @@ class ResearchSupervisor:
                         or type(progress["completed_steps"]) is not int or type(progress["total_steps"]) is not int
                         or not 0 <= progress["completed_steps"] <= progress["total_steps"]
                         or progress["total_steps"] <= 0
-                        or any(type(progress[key]) not in {int, float} or not math.isfinite(progress[key]) or progress[key] < 0
-                            for key in ("throughput_per_second", "eta_seconds"))):
+                        or type(progress["throughput_per_second"]) not in {int, float}
+                        or not math.isfinite(progress["throughput_per_second"]) or progress["throughput_per_second"] < 0
+                        or (progress["eta_seconds"] is not None and (type(progress["eta_seconds"]) not in {int, float}
+                            or not math.isfinite(progress["eta_seconds"]) or progress["eta_seconds"] < 0))):
                     raise ResearchError("CONTRACT_MISMATCH", "worker checkpoint progress is invalid")
                 reference = checkpoint_handler(frame["state"], progress, deadline)
                 if past_deadline():

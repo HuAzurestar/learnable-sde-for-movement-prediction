@@ -63,6 +63,17 @@ def main():
         if value['rng_state'] != saved['rng_state']:
             raise ResearchError('IDENTITY_CONFLICT', 'restored RNG state differs')
     latest, started = {}, time.monotonic()
+    from .approximation import RECIPE_SCHEMA
+    engineering_reference = (spec['admission']['mode'] == 'fixture'
+        and spec['switching_recipe']['schema_version'] == RECIPE_SCHEMA)
+    reference_phase = 'not-started'
+    def fixture_reference(*args, **kwargs):
+        nonlocal reference_phase
+        from .approximation_checks import check_prefix_approximation
+        reference_phase = 'running; whole-fixed-reference-restart'
+        value = check_prefix_approximation(*args, **kwargs)
+        reference_phase = 'computed; independently-checking'
+        return value
     total = len(spec['switching_recipe']['initializations'][str(cell['fit_K'])]) * (spec['switching_recipe']['inference'].get('max_iterations', 30)+1) + 3
 
     def progress(state):
@@ -78,13 +89,18 @@ def main():
             elapsed = max(now-started, 1e-9)
             state = {'step': completed, 'data_position': {'accepted_EM_steps': completed},
                      'method_state': dict(latest), 'rng_state': latest['rng_state']}
+            if engineering_reference:
+                state['data_position'].update(reference_phase=reference_phase,
+                    reference_recovery='restart-all-fixed-batches-from-frozen-recipe-cell-seed; no-partial-reuse')
             control.save(state, {'completed_steps': completed, 'total_steps': total,
-                'throughput_per_second': completed/elapsed, 'eta_seconds': (total-completed)*elapsed/max(1, completed)})
+                'throughput_per_second': completed/elapsed,
+                'eta_seconds': None if engineering_reference else (total-completed)*elapsed/max(1, completed)})
             os._exit(85)
 
     try:
         payload = execute_recipe(spec['switching_recipe'], cell['fit_K'], cell['seed'],
-                                 check_budget=poll, progress_callback=progress, resume_state=saved)
+            check_budget=poll, progress_callback=progress, resume_state=saved,
+            fixture_approximation_executor=fixture_reference if engineering_reference else None)
     except NumericalCellFailure as error:
         content = encode(failure_result(error.diagnostic, spec, cell, plugin))
         if len(content) > plan['maximum_result_bytes']:

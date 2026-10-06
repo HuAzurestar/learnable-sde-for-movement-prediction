@@ -11,7 +11,8 @@ from .pipeline import validate_recipe
 
 
 def failure_result(diagnostic, spec, cell, plugin):
-    payload = {'failure': diagnostic, 'source_schema': 'pirc28-synthetic-failure-v1'}
+    payload = {'failure': diagnostic, 'source_schema': 'pirc28-synthetic-failure-v2'
+               if 'approximation_checks' in diagnostic else 'pirc28-synthetic-failure-v1'}
     return {'schema_version': 'pirc25-failure-v1', 'status': 'FAILED', 'qualification': 'failed',
         'spec_hash': digest(spec), 'cell_hash': digest(cell), 'protocol_hash': spec['protocol_hash'],
         'input_hash': spec['data_hash'], 'output_hash': digest(payload), 'error_code': diagnostic['error_code'],
@@ -27,14 +28,34 @@ def validate_cell_failure(result, spec, cell):
     keys = {'schema_version', 'stage', 'error_code', 'initializations', 'selection', 'cause',
             'recipe_hash', 'generated_inputs'}
     stages = {'generation', 'fit', 'selection', 'test-inference', 'forecast', 'evaluation'}
-    if (result.get('source_schema') != 'pirc28-synthetic-failure-v1' or type(value) is not dict
+    approximation = result.get('source_schema') == 'pirc28-synthetic-failure-v2'
+    if approximation:
+        keys |= {'approximation_checks'}
+        stages |= {'approximation'}
+    if (result.get('source_schema') not in {'pirc28-synthetic-failure-v1', 'pirc28-synthetic-failure-v2'} or type(value) is not dict
             or set(value) != keys or value['schema_version'] != 'pirc28-numerical-cell-failure-v1'
             or type(value['stage']) is not str or value['stage'] not in stages
             or type(value['error_code']) is not str or value['error_code'] not in NUMERICAL_CODES
             or value['error_code'] != result['error_code']
             or value['recipe_hash'] != digest({'recipe': spec['switching_recipe'], 'K': cell['fit_K'], 'seed': cell['seed']})):
         raise ResearchError('CONTRACT_MISMATCH', 'numerical failure recipe/stage/schema differs')
-    scenario, models, _, _, _ = validate_recipe(spec['switching_recipe'], cell['fit_K'])
+    scenario, models, inference, prior_mean, prior_covariance = validate_recipe(spec['switching_recipe'], cell['fit_K'])
+    if approximation:
+        from .approximation import ApproximationSpec, RECIPE_SCHEMA
+        from .approximation_evidence import reference_seed
+        if (value['stage'] != 'approximation' or cell['fit_K'] != 2
+                or spec['switching_recipe']['schema_version'] != RECIPE_SCHEMA
+                or spec.get('admission', {}).get('mode') != 'fixture'):
+            raise ResearchError('CONTRACT_MISMATCH', 'engineering approximation failure scope differs')
+        report = value['approximation_checks']
+        if report is not None:
+            if (type(report) is not dict or report.get('state') != 'INFERENCE_INAPPLICABLE'
+                    or report.get('spec_hash') != ApproximationSpec.from_dict(spec['switching_recipe']['approximation_spec']).spec_hash
+                    or report.get('reference_seed') != reference_seed(spec['switching_recipe'], cell['seed'])
+                    or report.get('origin_index') != spec['switching_recipe']['forecast_origin_index']
+                    or any(report.get(name) is not False for name in (
+                        'managed_evidence_bound', 'qualified_identifiability', 'real_data_authorized'))):
+                raise ResearchError('CONTRACT_MISMATCH', 'failed prefix report identity/disposition differs')
     generated = value['generated_inputs']
     if (type(generated) is not list or any(type(item) is not dict for item in generated)
             or not 0 <= len(generated) <= 3 or (value['stage'] != 'generation' and len(generated) != 3)
@@ -62,6 +83,16 @@ def validate_cell_failure(result, spec, cell):
                 or value['stage'] == 'selection' and (value['selection'] is None or chosen is not None
                     or not any(history['state'] == 'SUCCEEDED' for history in histories))):
             raise ResearchError('CONTRACT_MISMATCH', 'failed initialization stage/disposition differs')
+        if approximation and report is not None:
+            probability = np.ones(cell['fit_K']) / cell['fit_K']
+            means = np.tile(prior_mean, (cell['fit_K'], 1))
+            covariances = np.tile(prior_covariance, (cell['fit_K'], 1, 1))
+            if (chosen is None or report.get('model_hash') != chosen['model_hash']
+                    or report.get('schema_version') != 'pirc28-approximation-numerical-check-v1'
+                    or report.get('inference_hash') != digest(inference.to_dict())
+                    or report.get('initial_state_hash') != digest({'probability': probability.tolist(),
+                        'means': means.tolist(), 'covariances': covariances.tolist()})):
+                raise ResearchError('CONTRACT_MISMATCH', 'failed prefix selected-model/prior identity differs')
     cause = value['cause']
     if value['stage'] in {'fit', 'selection'}:
         if cause is not None or value['error_code'] != 'INFERENCE_INAPPLICABLE':

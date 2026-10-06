@@ -17,7 +17,7 @@ from application.research_budget import BudgetLedger, BudgetSpec
 from application.research_contracts import CapabilityRegistry
 from application.research_recovery import RecoveryPlugin, RecoveryRegistry, SharedRecovery
 from experiments.pirc25.runner import SharedRunner
-from infrastructure.research_store import ResearchStore, digest, encode, atomic_write
+from infrastructure.research_store import ResearchError, ResearchStore, digest, encode, atomic_write
 from tests.research_admission_fixtures import synthetic_plugin, admit_fixture
 from tests.test_research_store import spec
 
@@ -148,6 +148,36 @@ def test_actual_worker_saves_before_deadline_and_reopened_resume_matches_continu
     assert actual["metrics"] == expected_output["metrics"]
     assert BudgetLedger(reopened).balance("affine")["committed_ms"] > previous_cost
     assert reopened.attempts()[resumed["attempt_id"]]["parent_attempt_id"] == interrupted["attempt_id"]
+
+
+def test_actual_checkpoint_preserves_unknown_eta(tmp_path, monkeypatch):
+    expression = '(300 - step - 1) * elapsed / max(1, step + 1 - position)'
+    assert expression in PROGRAM
+    monkeypatch.setattr(sys.modules[__name__], 'PROGRAM', PROGRAM.replace(expression, 'None'))
+    store, value, registry, adapters, _ = prepared(tmp_path / 'unknown-eta', 'exact', 'unknown-eta')
+    result = SharedRunner(store, registry, recovery_registry=adapters).run_cell(
+        value['study_id'], digest(value['cells'][0]), budget=BudgetSpec(3))
+    assert result['state'] == 'FAILED'
+    assert store.attempts()[result['attempt_id']]['error_code'] == 'CHECKPOINT_SAVED'
+    saved = [event['payload'] for event in store.events() if event['event_kind'] == 'CHECKPOINT_SAVED']
+    assert len(saved) == 1
+    assert saved[0]['progress']['eta_seconds'] is None
+    assert saved[0]['progress']['throughput_per_second'] > 0
+    assert BudgetLedger(store).balance('affine')['committed_ms'] > 0
+
+
+@pytest.mark.parametrize('eta', ['True', '-1.0'])
+def test_unknown_eta_support_does_not_accept_invalid_eta(tmp_path, monkeypatch, eta):
+    expression = '(300 - step - 1) * elapsed / max(1, step + 1 - position)'
+    monkeypatch.setattr(sys.modules[__name__], 'PROGRAM', PROGRAM.replace(expression, eta))
+    store, value, registry, adapters, _ = prepared(tmp_path / 'invalid-eta', 'exact', 'invalid-eta')
+    with pytest.raises(ResearchError, match='CONTRACT_MISMATCH'):
+        SharedRunner(store, registry, recovery_registry=adapters).run_cell(
+            value['study_id'], digest(value['cells'][0]), budget=BudgetSpec(3))
+    attempt = next(iter(store.attempts().values()))
+    assert attempt['state'] == 'INTERRUPTED' and attempt['error_code'] == 'SUPERVISOR_ERROR'
+    assert not any(event['event_kind'] == 'CHECKPOINT_SAVED' for event in store.events())
+    assert BudgetLedger(store).balance('affine')['committed_ms'] > 0
 
 
 @pytest.mark.parametrize("level", ["exact", "chunk"])

@@ -601,9 +601,9 @@ new pre-fit registration, never a new original-arm budget identity.
 
 CURRENT LIMITATION: the immutable contract, fine-grid metadata preflight,
 fail-closed publication boundary and bounded numerical core below are implemented.
-The managed numerical executor, its registered allocation plan and independent
-evidence/provenance adapter are NOT implemented.
-V2 execution therefore refuses with `NEEDS_IMPLEMENTATION` before generation
+The registered allocation and fixture-only managed engineering executor now exist;
+the complete independent scientific evidence/provenance adapter is NOT implemented.
+Default/scientific V2 execution therefore refuses with `NEEDS_IMPLEMENTATION` before generation
 or fitting. This software gap is not published as a numerical-failure artifact.
 Preparation/staging is metadata only and admits no reference computation or
 additional memory. Existing 20-million-element/512-MiB caps remain unchanged.
@@ -650,12 +650,12 @@ before opening its control channel or doing numerical work; recomputing a forged
 generic resource hash does not bypass this comparison.
 
 All 128 K/scenario recipe families in the full reference master fit the additive
-declaration: worst combined allocation is 19,698,300 float64-equivalent numeric
+declaration: worst combined allocation is 19,716,228 float64-equivalent numeric
 slots within the unchanged 20,000,000 ceiling. This is a declared tensor/storage
 bound, not observed process RSS, complete Python/interpreter heap accounting or
 an execution admission. Budget/cost/timeouts, source/input/selected-fit/seed
 provenance, independent numerical evidence and actual accuracy still need their
-managed path. V2 source execution remains `NEEDS_IMPLEMENTATION`. New component
+managed scientific path. Default/scientific V2 source execution remains `NEEDS_IMPLEMENTATION`. New component
 and whole-source identities require refreshed final-source pre-fit registration,
 not a new store, grant, original-arm budget identity or successful-artifact reuse.
 
@@ -730,7 +730,7 @@ gate failure remains `INFERENCE_INAPPLICABLE`; timeouts and other caller budget
 errors propagate without retry or a partial pass. `NUMERICAL_CHECKS_PASSED` means
 only these core comparisons met their limits, never scientific qualification:
 `managed_evidence_bound=qualified_identifiability=real_data_authorized=false`.
-The V2 source worker still refuses `NEEDS_IMPLEMENTATION`; independently verified
+The V2 pilot/formal worker still refuses `NEEDS_IMPLEMENTATION`; independently verified
 managed selected-fit/input/source/cost/authority evidence and actual scientific
 recovery/calibration are still outstanding. Code-source changes require fresh
 pre-fit master/preregistration binding without resetting the original arm costs.
@@ -775,9 +775,9 @@ not independently rerun here. Accordingly `reference_sampling_verified` and
 verify full generated input hashes, source authority or settlement. The original
 K=2 supervisor must still bind actual reference execution, all initializer and
 selected-fit evidence, immutable recipe/source identities, authorized artifacts,
-deadline/checkpoint/native-containment and all costs before V2 execution or
-scientific promotion can be enabled. The worker's `NEEDS_IMPLEMENTATION` stop
-and qualification withholding remain unchanged. No scientific group is passed
+deadline/checkpoint/native-containment and all costs before scientific V2 execution
+or promotion can be enabled. The default/pilot/formal worker's `NEEDS_IMPLEMENTATION`
+stop and qualification withholding remain unchanged. No scientific group is passed
 by these disposable software controls.
 
 ```console
@@ -815,8 +815,56 @@ hashes, reference sampling, managed authority and scientific qualification remai
 unverified/false. A declared final model need not have been produced by authentic
 GEM execution merely because its selection score is correct. The original-K2
 managed source/reference/authorization/containment/cost path still has to bind
-those obligations, and V2 generation/fitting remains `NEEDS_IMPLEMENTATION`.
+those obligations, and default/scientific V2 generation/fitting remains `NEEDS_IMPLEMENTATION`.
 
 ```console
 python -m pytest tests/test_pirc28_selection_evidence.py -q
+```
+
+## Managed engineering reference adapter (not scientific qualification)
+
+Only a V2 **fixture** admitted through the existing shared runner, source/resource
+identity checks and worker control channel enables the event-driven reference
+callback. It executes the complete frozen batch roster against the selected K2
+model and held-out filtering prefix, then independently validates the numerical
+report before forecasting. Default library calls and pilot/formal admissions
+still refuse V2 execution before generating data or fitting. The explicit library
+fixture callback is not an admission, execution proof or alternate research CLI.
+K1 does not invoke or allocate the K2 reference.
+
+Recovery retains accepted fit/RNG state; reference computation restarts **all**
+fixed batches from the original domain-separated recipe/cell seed, with no partial
+batch reuse or outcome-conditioned reseeding. Worker checkpoint metadata names
+this recovery rule and the current reference phase. ETA remains unknown (`null`)
+for engineering V2 work; the EM throughput is not a reference-completion estimate.
+Shared checkpoint validation accepts unknown ETA but still refuses boolean,
+negative or nonfinite numeric ETA. Real reference-phase 80%-checkpoint/resume
+delivery remains a distinct verification obligation; completed-fit library replay
+and the generic native unknown-ETA checkpoint do not prove that obligation.
+
+The additive resource plan now reserves the retained numerical report plus two
+owner report copies in addition to the existing source/fit/forecast/particle
+workspaces. The complete 128-family declared maximum is 19,716,228 float64 slots
+under the unchanged 20,000,000 cap. This is declared numeric storage, not measured
+RSS or a proof of full Python/native heap usage; the original result-byte and
+runtime limits still apply. Scientific plan counts, MC design, error thresholds,
+hard budgets and original `pirc28-k2` arm identity are unchanged.
+
+Failed prefix gates retain every fixed batch and typed approximation diagnostic
+in a V2 numerical-failure artifact, without success metrics. Its metadata binds
+the selected model, prior, inference, specification, origin and reference seed;
+the ordinary owner admission/containment/cost/failure checks remain mandatory.
+Timeout, authority and unknown failures propagate rather than producing a
+numerical pass/failure artifact. Actual worker success/failure and reuse controls
+use disposable explicitly admitted fixtures, not a production shared store.
+
+Reports and receipts keep `managed_evidence_bound`, `qualified_identifiability`
+and `real_data_authorized` false. The execution-scope string explicitly disclaims
+managed authority proof. Authorized scientific collector/owner integration,
+independent selected-fit binding, complete execution/cost authority and reference
+phase checkpoint verification are still required before lifting scientific V2
+withholding. Zero scientific qualification groups have been executed.
+
+```console
+python -m pytest tests/test_pirc28_managed_approximation.py -q
 ```

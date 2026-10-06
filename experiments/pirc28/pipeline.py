@@ -165,11 +165,13 @@ def validate_failed_fit(value, initial_model, index, observations_hash, probabil
         raise SwitchingError('IDENTITY_CONFLICT', 'failed initialization model family differs')
 
 
-def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, resume_state=None):
+def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, resume_state=None,
+                   fixture_approximation_executor=None):
     context = {'stage': 'validation'}
     try:
         return _execute_recipe(recipe, k, seed, check_budget=check_budget, progress_callback=progress_callback,
-                               resume_state=resume_state, context=context)
+                               resume_state=resume_state, context=context,
+                               fixture_approximation_executor=fixture_approximation_executor)
     except NumericalCellFailure:
         raise
     except NUMERICAL_EXCEPTIONS as error:
@@ -179,18 +181,29 @@ def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, res
         failure = NumericalCellFailure(context['stage'], context['initializations'], context['selection'],
                                        error_code=cause['error_code'], cause=cause)
         failure.diagnostic.update(recipe_hash=context['recipe_hash'], generated_inputs=context['generated_inputs'])
+        if context['stage'] == 'approximation':
+            failure.diagnostic['approximation_checks'] = None
         raise failure from error
 
 
-def _execute_recipe(recipe, k, seed, *, check_budget, progress_callback, resume_state, context):
+def _execute_recipe(recipe, k, seed, *, check_budget, progress_callback, resume_state, context,
+                    fixture_approximation_executor):
     scenario, initial_models, inference, prior_mean, prior_covariance = validate_recipe(recipe, k)
     if type(seed) is not int or not 0 <= seed < 2**64:
         raise SwitchingError('CONTRACT_MISMATCH', 'cell seed must be unsigned 64-bit')
-    if recipe['schema_version'] == RECIPE_SCHEMA:
+    if fixture_approximation_executor is not None and (not callable(fixture_approximation_executor)
+            or recipe['schema_version'] != RECIPE_SCHEMA):
+        raise ResearchError('CONTRACT_MISMATCH', 'explicit V2 engineering executor required')
+    if recipe['schema_version'] == RECIPE_SCHEMA and fixture_approximation_executor is None:
         # Metadata/resource preflight is not an implemented diagnostic adapter.
         # Refuse before any generation/fitting; do not create a numerical-failure
         # artifact for a software implementation gap or invent successful proof.
         raise ResearchError('NEEDS_IMPLEMENTATION', 'managed approximation executor/evidence adapter is not implemented')
+    if fixture_approximation_executor is not None:
+        from application.research_registry import plan_resources
+        from .runtime import switching_plugin
+        allocation = recipe_allocation(recipe, k)
+        plan_resources(switching_plugin().registry_entry, allocation['config'], allocation['inputs'], matrix_cells=1)
     identity = digest({'recipe': recipe, 'K': k, 'seed': seed})
     context.update(stage='generation', recipe_hash=identity, generated_inputs=[], selection=None,
         initializations=[{'initialization_id': 'init-'+str(index), 'state': 'NOT_RUN',
@@ -284,6 +297,25 @@ def _execute_recipe(recipe, k, seed, *, check_budget, progress_callback, resume_
         raise
     selection = complete_selection(selection)
     context['selection'] = selection
+    approximation_checks, approximation_consistency = None, None
+    if recipe['schema_version'] == RECIPE_SCHEMA and k == 2:
+        from .approximation_evidence import reference_seed, validate_prefix_numbers
+        context['stage'] = 'approximation'
+        approximation = ApproximationSpec.from_dict(recipe['approximation_spec'])
+        frozen_seed = reference_seed(recipe, seed)
+        approximation_checks = fixture_approximation_executor(batches[2], selected.model, probability, means,
+            covariance, inference, approximation, origin_index=recipe['forecast_origin_index'],
+            seed=frozen_seed, check_budget=check_budget)
+        approximation_consistency = validate_prefix_numbers(approximation_checks, batches[2], selected.model,
+            probability, means, covariance, inference, approximation, origin_index=recipe['forecast_origin_index'],
+            seed=frozen_seed, check_budget=check_budget)
+        if approximation_checks['state'] != 'NUMERICAL_CHECKS_PASSED':
+            cause = numerical_diagnostic(SwitchingError('INFERENCE_INAPPLICABLE', 'fixed prefix gates failed'),
+                                         'approximation', None)
+            failure = NumericalCellFailure('approximation', histories, selection, cause=cause)
+            failure.diagnostic.update(recipe_hash=identity, generated_inputs=generated,
+                                      approximation_checks=approximation_checks)
+            raise failure
     forecasts, scores, test_objectives, posterior_probabilities, coverage = [], [], [], [], []
     origin_index, horizon_indices = recipe['forecast_origin_index'], recipe['horizon_indices']
     offsets = [float(batches[2].times[index] - batches[2].times[origin_index]) for index in horizon_indices]
@@ -358,6 +390,10 @@ def _execute_recipe(recipe, k, seed, *, check_budget, progress_callback, resume_
         'interpretation_level': 'synthetic-statistical-only', 'qualified_identifiability': False}
     if recovery_diagnostics is not None:
         fit_payload['recovery_diagnostics'] = recovery_diagnostics
+    if recipe['schema_version'] == RECIPE_SCHEMA:
+        fit_payload.update(approximation_checks=approximation_checks,
+            approximation_consistency=approximation_consistency,
+            approximation_execution_scope='engineering-only; not-managed-authority-proof')
     # Shared case views consume this registered first-path preview. The full
     # synthetic paths remain separately named, rather than confused with n blocks.
     preview = forecasts[0]

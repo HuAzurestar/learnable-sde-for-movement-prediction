@@ -49,7 +49,7 @@ def test_full_master_registered_pool_covers_additive_fit_forecast_source_and_ref
             assert registered['limits'] == {**dict(GLOBAL_LIMITS), 'matrix_cells': 10000,
                                            'result_bytes': 64*1024*1024}
             maximum = max(maximum, registered['tensor_elements'])
-    assert maximum == 19_698_300 < GLOBAL_LIMITS['tensor_elements']
+    assert maximum == 19_716_228 < GLOBAL_LIMITS['tensor_elements']
     assert plugin.registry_entry.version == '1.1.0'
 
 

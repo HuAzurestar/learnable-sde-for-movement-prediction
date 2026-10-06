@@ -80,9 +80,14 @@ def schedule_plan(spec, inference, times, origin_index, paths, k, rate_upper, ob
         raise SwitchingError('INFERENCE_INAPPLICABLE', 'coarse prefix exceeds its permitted-rate quota')
     n = len(times)
     ref = settings['event_driven_reference']
+    # Retain the complete published numeric report while independently parsing
+    # and serializing it. These are ADDITIONAL to particle/filter workspaces;
+    # do not quietly charge live report copies against a discarded phase.
+    report_elements = 32+paths*(19+3*n*(k+4)+ref['independent_batches']*(n*(k+5)+6)+5*k)
+    copy_elements = 2*report_elements
     elements = (max(coarse_steps, fine['maximum_prefix_substeps'])*k*k*16*24
         + ref['particles']*96 + paths*ref['independent_batches']*n*(k+5)
-        + paths*n*(k+4+16)*4 + paths*n*observation_dimension)
+        + paths*n*(k+4+16)*4 + paths*n*observation_dimension+report_elements+copy_elements)
     segments = paths*ref['independent_batches']*ref['particles']*(n-1)*(ref['maximum_jumps_per_particle_interval']+1)
     if elements > MAXIMUM_ELEMENTS or segments > MAXIMUM_SEGMENTS:
         raise SwitchingError('RESOURCE_LIMIT', 'reference allocation or worst-case segment work exceeds the core quota')
@@ -90,6 +95,7 @@ def schedule_plan(spec, inference, times, origin_index, paths, k, rate_upper, ob
         'tensor_bytes': elements*8, 'maximum_event_segments': segments,
         'coarse_prefix_substeps': coarse_steps, 'fine_prefix_substeps': fine['maximum_prefix_substeps'],
         'reference_particles': ref['particles'], 'independent_batches': ref['independent_batches'],
+        'retained_report_numeric_elements': report_elements, 'owner_report_copy_elements': copy_elements,
         'reference_storage': 'sequential-path-and-batch; no-particle-or-jump-history',
         'resource_admitted': False, 'managed_executor_implemented': False}
 
