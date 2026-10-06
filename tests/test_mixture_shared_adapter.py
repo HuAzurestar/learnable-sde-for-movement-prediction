@@ -22,9 +22,10 @@ from tests.test_propagation_shared_adapter import prepare
 from tests.test_propagation_study_design import fixture
 
 
-def prepared(root, *, synthetic=False, formal=False, maximum_job_seconds=60):
+def prepared(root, *, synthetic=False, formal=False, maximum_job_seconds=60, request_changes=None):
     changes = ({"steps": 1, "initial_mean": (0.,)*4,
         "initial_covariance": ((.25, 0., 0., 0.), (0.,)*4, (0.,)*4, (0.,)*4)} if synthetic else {})
+    changes.update(request_changes or {})
     store, spec, _ = prepare(root, recovery=True, synthetic=synthetic, changes=changes)
     cell = spec["cells"][0]
     request = request_from_manifest(cell["propagation_request"])
@@ -94,6 +95,95 @@ def test_frozen_job_cap_refuses_before_reservation_or_worker(tmp_path):
             budget=BudgetSpec(60, category="smoke"))
     assert not any(e["event_kind"] in {"RESERVE", "WORKER_STARTED", "READ_STARTED", "READ_COMPLETED"}
         for e in store.events()[before:])
+
+
+def test_fixture_mode_cannot_consume_heldout_mixture_block(tmp_path):
+    store, spec, registry = prepared(tmp_path, formal=True)
+    spec["admission"]["mode"] = "fixture"
+    store.register(spec, digest(spec))
+    before = len(store.events())
+    with pytest.raises(ResearchError, match="dedicated held-out qualification"):
+        SharedRunner(store, registry).run_cell(spec["study_id"], digest(spec["cells"][0]),
+            budget=BudgetSpec(60, category="smoke"))
+    assert not any(e["event_kind"] in {"WORKER_STARTED", "READ_STARTED", "READ_COMPLETED"}
+        for e in store.events()[before:])
+
+
+def test_actual_mixture_save_ack_reopened_resume_keeps_policy_lineage_and_all_costs(tmp_path):
+    import time
+    from application.research_recovery import RecoveryRegistry, SharedRecovery
+    from application.propagation_execution import execute_propagation
+    from infrastructure.research_store import ResearchStore, encode
+    from tests.test_propagation_shared_adapter import _checkpoint_job_seconds, _worker_startup_seconds
+
+    # Freeze the engineering workload within the unchanged million-work quota
+    # and predeclare at most two60s continuations before creating any store.
+    maximum_resumes = 2
+    steps = 1_000_000 // (8*(1+1+4**3))
+    startup = _worker_startup_seconds()
+    store, spec, registry = prepared(tmp_path, request_changes={"steps": steps, "chunk_size": 1})
+    cell = spec["cells"][0]
+    started = time.monotonic()
+    expected = execute_propagation(spec, cell)  # Pure unprotected unit control.
+    job_seconds = _checkpoint_job_seconds(time.monotonic()-started, startup)
+    store.register(spec, digest(spec))
+    adapters = RecoveryRegistry()
+    adapters.register(mixture_recovery_plugin())
+    interrupted = SharedRunner(store, registry, recovery_registry=adapters).run_cell(
+        spec["study_id"], digest(cell), budget=BudgetSpec(job_seconds, category="smoke"))
+    assert interrupted["state"] == "FAILED", interrupted
+    parent = store.attempts()[interrupted["attempt_id"]]
+    assert parent["error_code"] == "CHECKPOINT_SAVED", interrupted
+    saved = interrupted["checkpoint"]
+    progress = saved["progress"]
+    assert 0 < progress["completed_steps"] < progress["total_steps"] == cell["execution"]["config"]["work_steps"]
+    assert progress["throughput_per_second"] > 0 and progress["eta_seconds"] > 0
+    assert progress["eta_seconds"] == pytest.approx((progress["total_steps"]-progress["completed_steps"])/progress["throughput_per_second"])
+    events = [e for e in store.events() if e["payload"].get("attempt_id") == parent["attempt_id"]]
+    kinds = [e["event_kind"] for e in events]
+    assert kinds.index("CHECKPOINT_REQUESTED") < kinds.index("CHECKPOINT") < kinds.index("CHECKPOINT_SAVED")
+    assert kinds.index("CHECKPOINT_SAVED") < kinds.index("WORKER_TREE_STOPPED") < kinds.index("SETTLE")
+    request = next(e["payload"] for e in events if e["event_kind"] == "CHECKPOINT_REQUESTED")
+    assert 0 < request["remaining_seconds"] <= .2*job_seconds
+    saved_value = json.loads((store.path/"artifacts"/saved["artifact_id"]).read_bytes())
+    state = saved_value["state"]
+    assert state["method_state"]["policy_hash"] == cell["execution"]["config"]["mixture_policy_hash"]
+    assert state["rng_state"]["scheme"] == "deterministic-cubature-no-sampled-rng-v1"
+    assert state["chunk_complete"] is True and "budget" not in state and "remaining_seconds" not in state
+    arm = cell["arm_id"]
+    before = BudgetLedger(store).balance(arm)
+    assert before["committed_ms"] == interrupted["elapsed_ms"] and not before["closed"]
+    reopened = ResearchStore(tmp_path, store.store_id)
+    grant = reopened.manifest("authorization-"+spec["admission"]["authorization_id"])
+    with pytest.raises(ResearchError):
+        SharedRecovery(reopened, registry, adapters).prepare(parent["attempt_id"], saved["artifact_id"],
+            authorization={**grant, "purposes": ["evaluate"]})
+    assert BudgetLedger(reopened).balance(arm) == before
+    continuations = []
+    previous, checkpoint, completed = parent["attempt_id"], saved["artifact_id"], progress["completed_steps"]
+    for _ in range(maximum_resumes):
+        reopened = ResearchStore(tmp_path, store.store_id)
+        resumed = SharedRecovery(reopened, registry, adapters).resume(previous, checkpoint,
+            authorization=grant, budget=BudgetSpec(60, category="smoke"))
+        continuations.append(resumed)
+        current = reopened.attempts()[resumed["attempt_id"]]
+        assert current["parent_attempt_id"] == previous
+        if resumed["state"] == "SUCCEEDED":
+            break
+        # Never continue timeout, fused, numerical or admission failures.
+        assert resumed["state"] == "FAILED" and current["error_code"] == "CHECKPOINT_SAVED", resumed
+        saved = resumed["checkpoint"]
+        assert completed < saved["progress"]["completed_steps"] < progress["total_steps"]
+        previous, checkpoint, completed = resumed["attempt_id"], saved["artifact_id"], saved["progress"]["completed_steps"]
+    assert resumed["state"] == "SUCCEEDED", resumed
+    actual = json.loads((reopened.path/"artifacts"/resumed["artifact_id"]).read_bytes())
+    assert actual["forecast"] == json.loads(encode(expected["forecast"]))
+    assert actual["metrics"] == expected["metrics"] and actual["output_hash"] == expected["output_hash"]
+    assert actual["qualification"] == "fixture" and actual["admission_hash"] != saved_value["admission_hash"]
+    receipt = reopened.manifest("admission-"+actual["admission_hash"])
+    assert receipt["attempt_id"] == resumed["attempt_id"]
+    assert BudgetLedger(reopened).balance(arm)["committed_ms"] == interrupted["elapsed_ms"]+sum(c["elapsed_ms"] for c in continuations)
+    assert not BudgetLedger(reopened).balance(arm)["closed"]
 
 
 @pytest.mark.parametrize("nonlinear", [False, True])
