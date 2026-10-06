@@ -234,7 +234,11 @@ def test_actual_owner_forecast_ack_reopen_and_fresh_cost_preserve_complete_sampl
     # Calibrate a separate finite engineering reservation from observed native
     # baseline cost. No synthetic time/delay/request/ACK or production budget.
     measured = BudgetLedger(baseline).balance("affine")["committed_ms"]/1000
-    stopped_seconds = max(5,math.floor(measured*(.95 if two_origins else .75)))
+    # Native source/admission work varies between fresh attempts. A .95 ratio
+    # saved at origin0/ID98 in an observed52.361s baseline, not at the required
+    # completed prefix. Keep both full128-path populations/grid/model; enlarge
+    # only this disposable engineering reservation (80% threshold unchanged).
+    stopped_seconds = max(5,math.floor(measured*(1.2 if two_origins else .75)))
     store,value,_,_,registry,recovery,grant = prepare(tmp_path/"resumed",operation=operation,role=role,long_forecast=True,two_origins=two_origins,dtype=dtype)
     stopped = SharedRunner(store,registry,recovery_registry=recovery).run_cell(value["study_id"],digest(value["cells"][0]),budget=BudgetSpec(stopped_seconds))
     assert stopped["state"] == "FAILED", (stopped,measured,stopped_seconds)
