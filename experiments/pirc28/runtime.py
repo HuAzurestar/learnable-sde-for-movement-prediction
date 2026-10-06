@@ -30,6 +30,11 @@ def resume_command(output, spec, cell, state):
     return command(output, spec, cell) + [str(target), digest(state)]
 
 
+def failure_validator(value, spec, cell):
+    from .failure_artifacts import validate_cell_failure
+    validate_cell_failure(value, spec, cell)
+
+
 def switching_plugin():
     def counts_schema(values):
         return {'type': 'object', 'properties': values, 'required': sorted(values), 'additionalProperties': False}
@@ -54,7 +59,7 @@ def switching_plugin():
                 {'name': 'forecast', 'axes': ['paths', 'steps', 'state_dim'], 'item_bytes': 8}],
             'limits': {**dict(GLOBAL_LIMITS), 'matrix_cells': 10000, 'result_bytes': 64*1024*1024}})
     return ExecutionPlugin(PLUGIN_ID, entry.capabilities, entry.state_order, entry.units,
-                           entry.resume_level, command, entry)
+                           entry.resume_level, command, entry, failure_validator=failure_validator)
 
 
 def registries():

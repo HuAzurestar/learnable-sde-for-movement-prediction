@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
-from .research_contracts import validate_package, validate_result
+from .research_contracts import validate_package, validate_result, validate_failure
 from .research_data import EvaluationExposureLedger
 from .research_preregistration import PreregistrationGate, hash_reference, source_identity, validate_preregistration, protocol_binding
 from infrastructure.research_store import ResearchError, digest, encode, utc_now
@@ -31,10 +31,13 @@ def command_binding(builder):
 
 
 def plugin_binding(plugin):
-    return digest({"plugin_id": plugin.plugin_id, "capabilities": sorted(plugin.capabilities),
+    value = {"plugin_id": plugin.plugin_id, "capabilities": sorted(plugin.capabilities),
                    "state_order": list(plugin.state_order), "units": list(plugin.units),
                    "resume_level": plugin.resume_level, "command_hash": command_binding(plugin.command_builder),
-                   "registry_entry_hash": digest(plugin.registry_entry.manifest())})
+                   "registry_entry_hash": digest(plugin.registry_entry.manifest())}
+    if plugin.failure_validator is not None:
+        value['failure_validator_hash'] = command_binding(plugin.failure_validator)
+    return digest(value)
 
 
 class AdmissionGate:
@@ -284,6 +287,21 @@ class AdmissionGate:
             result["admission_hash"] = receipt["admission_hash"]
         return validate
 
+    def failure_validator(self, receipt, spec, cell, plugin):
+        def validate(result):
+            from .research_execution import execution_plan
+            from .research_registry import validate_value
+            if (receipt.get('resource_plan') != execution_plan(spec, cell, plugin)
+                    or receipt.get('registry_entry') != plugin.registry_entry.manifest()
+                    or receipt.get('plugin_hash') != plugin_binding(plugin)):
+                raise ResearchError('CONTRACT_MISMATCH', 'failure resource/registry/handler admission changed')
+            validate_value(plugin.registry_entry.output_schema, result)
+            validate_failure(result, spec=spec, cell=cell, plugin=plugin)
+            if result.get('admission_hash', receipt['admission_hash']) != receipt['admission_hash']:
+                raise ResearchError('CONTRACT_MISMATCH', 'worker substituted another failure admission')
+            result['admission_hash'] = receipt['admission_hash']
+        return validate
+
     def run(self, attempt_id, spec, cell, plugin, command_builder, budget, *, builtin_fixture=False, recovery_builder=None, checkpoint_handler=None):
         from .research_supervisor import ResearchSupervisor
         admitted = {}
@@ -304,7 +322,10 @@ class AdmissionGate:
             return command_builder(output)
         def validate(result):
             return self.result_validator(admitted, spec, cell, plugin)(result)
+        def validate_failed(result):
+            return self.failure_validator(admitted, spec, cell, plugin)(result)
         def checkpoint(state, progress, deadline):
             return checkpoint_handler(state, progress, admitted, deadline)
         return ResearchSupervisor(self.store).run(attempt_id, command, budget, result_validator=validate,
+            failure_validator=validate_failed if plugin.failure_validator is not None else None,
             resource_plan=resource_plan, checkpoint_handler=checkpoint if checkpoint_handler is not None else None)

@@ -62,6 +62,7 @@ class ExecutionPlugin:
     command_builder: object
     registry_entry: RegistryEntry | None = None
     component_registries: dict | None = None
+    failure_validator: object | None = None
 
 
 class CapabilityRegistry:
@@ -83,6 +84,7 @@ class CapabilityRegistry:
         if (not plugin.capabilities
                 or not plugin.capabilities <= CAPABILITIES or plugin.resume_level not in RESUME_LEVELS
                 or len(plugin.units) != len(plugin.state_order) or not callable(plugin.command_builder)
+                or (plugin.failure_validator is not None and not callable(plugin.failure_validator))
                 or entry.component_id != plugin.plugin_id or entry.component_kind != "execution-adapter"
                 or entry.capabilities != plugin.capabilities or entry.resume_level != plugin.resume_level
                 or entry.state_order != plugin.state_order or entry.units != plugin.units):
@@ -120,3 +122,26 @@ def validate_result(result: dict, *, spec: dict, cell: dict, plugin: ExecutionPl
         raise ResearchError("CORRUPT_ARTIFACT", "result output hash mismatch")
     from infrastructure.research_store import encode
     encode(result)  # Reject NaN and infinities before publishing success.
+
+
+def validate_failure(result: dict, *, spec: dict, cell: dict, plugin: ExecutionPlugin):
+    """Opt-in failure evidence: never reusable output or invented metrics."""
+    keys = {'schema_version', 'status', 'spec_hash', 'cell_hash', 'protocol_hash', 'input_hash',
+        'output_hash', 'state_order', 'units', 'time_unit', 'resume_level', 'qualification',
+        'qualified_identifiability', 'real_data_authorized', 'error_code', 'source_schema', 'failure'}
+    if (type(result) is not dict or set(result) not in (keys, keys | {'admission_hash'})
+            or plugin.failure_validator is None or result['schema_version'] != 'pirc25-failure-v1'
+            or result['status'] != 'FAILED' or result['qualification'] != 'failed'
+            or result['qualified_identifiability'] is not False or result['real_data_authorized'] is not False
+            or result['spec_hash'] != digest(spec) or result['cell_hash'] != digest(cell)
+            or result['protocol_hash'] != spec['protocol_hash'] or result['input_hash'] != spec['data_hash']
+            or result['state_order'] != list(plugin.state_order) or result['units'] != list(plugin.units)
+            or result['time_unit'] != 's' or result['resume_level'] != plugin.resume_level
+            or type(result['error_code']) is not str
+            or result['error_code'] not in {'INFERENCE_INAPPLICABLE', 'NONFINITE', 'NUMERICAL_FAILURE'}
+            or type(result['failure']) is not dict or result['failure'].get('error_code') != result['error_code']
+            or result['output_hash'] != digest({'failure': result['failure'], 'source_schema': result['source_schema']})):
+        raise ResearchError('CONTRACT_MISMATCH', 'worker failure differs from registered execution contract')
+    from infrastructure.research_store import encode
+    encode(result)
+    plugin.failure_validator(result, spec, cell)

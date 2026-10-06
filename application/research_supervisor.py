@@ -22,7 +22,7 @@ class ResearchSupervisor:
         self.budget = BudgetLedger(store)
         self.monotonic = monotonic
 
-    def run(self, attempt_id: str, command_builder, budget: BudgetSpec, *, result_validator=None, resource_plan=None, checkpoint_handler=None):
+    def run(self, attempt_id: str, command_builder, budget: BudgetSpec, *, result_validator=None, resource_plan=None, checkpoint_handler=None, failure_validator=None):
         reservation = self.budget.reserve(attempt_id, budget)
         if reservation["settled"]:
             raise ResearchError("IDENTITY_CONFLICT", "settled attempt cannot execute again")
@@ -353,10 +353,12 @@ class ResearchSupervisor:
                         outcome, error_code = "BUDGET_EXHAUSTED", "BUDGET_EXHAUSTED"
                     elif checkpoint_stopped:
                         outcome, error_code = "FAILED", "CHECKPOINT_SAVED"
-                    elif completed_code == 0 and result_path.is_file():
+                    elif (completed_code == 0 or (completed_code == 86 and failure_validator is not None)) and result_path.is_file():
+                        typed_failure = completed_code == 86
                         # Registered adapters must supply a finite JSON result; no pickle.
                         import json
-                        with result_path.open("rb") as stream:
+                        from infrastructure.research_files import opened_regular_file
+                        with opened_regular_file(work, result_path, maximum_bytes=maximum_result_bytes) as (stream, _, _):
                             content = stream.read(maximum_result_bytes + 1)
                         if len(content) > maximum_result_bytes:
                             raise ResearchError("RESOURCE_PLAN_REJECTED", "worker result exceeds admitted byte quota")
@@ -369,8 +371,9 @@ class ResearchSupervisor:
                         # this short owner phase's verified prefix, then verify
                         # the actual final journal before independent settlement.
                         with self.store._read_transaction():
-                            if result_validator is not None:
-                                result_validator(result)
+                            validator = failure_validator if typed_failure else result_validator
+                            if validator is not None:
+                                validator(result)
                             # Supervisor-owned admission bindings added by the
                             # validator must be part of the published artifact.
                             content = encode(result)
@@ -385,9 +388,10 @@ class ResearchSupervisor:
                             if past_deadline():
                                 outcome, error_code = "TIMEOUT", "TIMEOUT"
                             else:
-                                artifact = self.store.artifact(content, role="result", visibility=visibility,
+                                artifact = self.store.artifact(content, role="failure" if typed_failure else "result", visibility=visibility,
                                     block_ids=[run["cell"]["block_id"]], study_id=run["study_id"])
-                                outcome, artifact_id, error_code = "SUCCEEDED", artifact["artifact_id"], None
+                                outcome, artifact_id, error_code = ("FAILED" if typed_failure else "SUCCEEDED",
+                                    artifact["artifact_id"], result['error_code'] if typed_failure else None)
                         if past_deadline():
                             outcome, artifact_id, error_code = "TIMEOUT", None, "TIMEOUT"
         except BaseException as exc:
@@ -446,7 +450,7 @@ class ResearchSupervisor:
             # work; result validation still has its original deadline vetoes.
             end = stopped_at if stop_confirmed and stopped_at is not None else self.monotonic()
             elapsed = math.ceil((end - start) * 1000)
-            if outcome == "SUCCEEDED" and (past_deadline() or elapsed > reservation["reserved_ms"]):
+            if (outcome == "SUCCEEDED" or artifact_id is not None) and (past_deadline() or elapsed > reservation["reserved_ms"]):
                 outcome, artifact_id, error_code = "TIMEOUT", None, "TIMEOUT"
             if stop_confirmed:
                 self.budget.settle(reservation["reservation_id"], elapsed, outcome=outcome)

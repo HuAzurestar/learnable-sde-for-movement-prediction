@@ -34,8 +34,8 @@ def valid_numerical_diagnostic(value, stage, initialization_id):
 
 class NumericalCellFailure(SwitchingError):
     """Observation-only failure receipt; not a successful result or metric."""
-    def __init__(self, stage, initializations, selection=None):
-        super().__init__('INFERENCE_INAPPLICABLE', 'no numerically applicable registered initialization at '+stage)
+    def __init__(self, stage, initializations, selection=None, *, error_code='INFERENCE_INAPPLICABLE', cause=None):
+        super().__init__(error_code, 'registered switching cell is numerically inapplicable at '+stage)
         self.diagnostic = {'schema_version': 'pirc28-numerical-cell-failure-v1',
             'stage': stage, 'error_code': self.code, 'initializations': initializations,
-            'selection': selection}
+            'selection': selection, 'cause': cause}

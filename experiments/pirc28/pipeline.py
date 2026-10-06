@@ -115,10 +115,30 @@ def validate_failed_fit(value, initial_model, index, observations_hash, probabil
 
 
 def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, resume_state=None):
+    context = {'stage': 'validation'}
+    try:
+        return _execute_recipe(recipe, k, seed, check_budget=check_budget, progress_callback=progress_callback,
+                               resume_state=resume_state, context=context)
+    except NumericalCellFailure:
+        raise
+    except NUMERICAL_EXCEPTIONS as error:
+        if context['stage'] == 'validation':
+            raise
+        cause = numerical_diagnostic(error, context['stage'], None)
+        failure = NumericalCellFailure(context['stage'], context['initializations'], context['selection'],
+                                       error_code=cause['error_code'], cause=cause)
+        failure.diagnostic.update(recipe_hash=context['recipe_hash'], generated_inputs=context['generated_inputs'])
+        raise failure from error
+
+
+def _execute_recipe(recipe, k, seed, *, check_budget, progress_callback, resume_state, context):
     scenario, initial_models, inference, prior_mean, prior_covariance = validate_recipe(recipe, k)
     if type(seed) is not int or not 0 <= seed < 2**64:
         raise SwitchingError('CONTRACT_MISMATCH', 'cell seed must be unsigned 64-bit')
     identity = digest({'recipe': recipe, 'K': k, 'seed': seed})
+    context.update(stage='generation', recipe_hash=identity, generated_inputs=[], selection=None,
+        initializations=[{'initialization_id': 'init-'+str(index), 'state': 'NOT_RUN',
+                          'initial_model_hash': digest(model.to_dict())} for index, model in enumerate(initial_models)])
     rng = np.random.default_rng(seed)
     split_seeds = [int(value) for value in rng.integers(0, 2**63, size=3, dtype=np.int64)]
     rng_state = {'base_pcg64': rng.bit_generator.state, 'split_seeds': split_seeds,
@@ -147,6 +167,7 @@ def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, res
 
     progress()
     batches, truths, generated = [], [], []
+    context['generated_inputs'] = generated
     for role_index, role in enumerate(('train', 'selection', 'test')):
         check_budget()
         registered = replace(scenario, seed=split_seeds[role_index], sample_count=recipe[role + '_paths'],
@@ -158,6 +179,7 @@ def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, res
                           'observations_hash': manifest['observations_hash'], 'truth_hash': manifest['truth_hash']})
     probability, means, covariance = np.ones(k)/k, np.tile(prior_mean, (k, 1)), np.tile(prior_covariance, (k, 1, 1))
     fits, histories = [], []
+    context.update(stage='fit', initializations=histories)
     for index, initial_model in enumerate(initial_models):
         check_budget()
         failure = fit_failures[index]
@@ -196,6 +218,7 @@ def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, res
     try:
         if not fits:
             raise NumericalCellFailure('fit', histories)
+        context['stage'] = 'selection'
         selected, selection = select_initialization(fits, batches[1], probability, means, covariance,
             inference, split_role='selection', check_budget=check_budget)
     except NumericalCellFailure as error:
@@ -204,16 +227,20 @@ def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, res
             complete_selection(error.diagnostic['selection'])
         raise
     selection = complete_selection(selection)
+    context['selection'] = selection
     forecasts, scores, test_objectives, posterior_probabilities, coverage = [], [], [], [], []
     origin_index, horizon_indices = recipe['forecast_origin_index'], recipe['horizon_indices']
     offsets = [float(batches[2].times[index] - batches[2].times[origin_index]) for index in horizon_indices]
     for path_index in range(recipe['test_paths']):
         check_budget()
+        context['stage'] = 'test-inference'
         filtered = filter_switching(batches[2], selected.model, probability, means, covariance, inference,
                                    path_index=path_index, check_budget=check_budget)
+        context['stage'] = 'forecast'
         forecast = forecast_switching(selected.model, filtered.posteriors[origin_index], offsets,
             sample_count=recipe['forecast_paths'], seed=split_seeds[2]+path_index,
             max_jumps=scenario.max_jumps, check_budget=check_budget)
+        context['stage'] = 'evaluation'
         samples = np.asarray(forecast['samples'])
         if 'identifiability_spec' in recipe:
             qualification = IdentifiabilitySpec.from_dict(recipe['identifiability_spec'])

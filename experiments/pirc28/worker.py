@@ -13,6 +13,8 @@ from infrastructure.research_files import opened_regular_file
 from infrastructure.research_store import ResearchError, ResearchStore, atomic_write, digest, encode
 from .pipeline import execute_recipe, recipe_resources
 from .runtime import switching_plugin
+from .failures import NumericalCellFailure
+from .failure_artifacts import failure_result
 
 
 def main():
@@ -80,8 +82,17 @@ def main():
                 'throughput_per_second': completed/elapsed, 'eta_seconds': (total-completed)*elapsed/max(1, completed)})
             os._exit(85)
 
-    payload = execute_recipe(spec['switching_recipe'], cell['fit_K'], cell['seed'],
-                             check_budget=poll, progress_callback=progress, resume_state=saved)
+    try:
+        payload = execute_recipe(spec['switching_recipe'], cell['fit_K'], cell['seed'],
+                                 check_budget=poll, progress_callback=progress, resume_state=saved)
+    except NumericalCellFailure as error:
+        content = encode(failure_result(error.diagnostic, spec, cell, plugin))
+        if len(content) > plan['maximum_result_bytes']:
+            raise ResearchError('RESOURCE_LIMIT', 'failure exceeds its frozen byte quota')
+        # Deadline/checkpoint authority wins over scientific failure disclosure.
+        poll()
+        atomic_write(Path(output), content)
+        os._exit(86)
     units = payload.pop('metric_units')
     result = {'schema_version': 'pirc25-result-v1', 'status': 'SUCCEEDED',
         'spec_hash': digest(spec), 'cell_hash': digest(cell), 'protocol_hash': spec['protocol_hash'],

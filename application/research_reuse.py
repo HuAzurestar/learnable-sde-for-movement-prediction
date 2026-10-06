@@ -12,20 +12,31 @@ from infrastructure.research_store import ResearchError, digest, encode
 
 
 def verified_reuse(store, attempt, spec, cell, plugin):
+    return _verified_terminal(store, attempt, spec, cell, plugin, failed=False)
+
+
+def verified_failure(store, attempt, spec, cell, plugin):
+    """Validate failed artifact provenance without granting successful reuse."""
+    return _verified_terminal(store, attempt, spec, cell, plugin, failed=True)
+
+
+def _verified_terminal(store, attempt, spec, cell, plugin, *, failed):
+    state, role = ('FAILED', 'failure') if failed else ('SUCCEEDED', 'result')
+    prefix = 'FAILURE' if failed else 'REUSE'
     with store.lock():
         request = {"attempt_id": attempt["attempt_id"], "run_id": attempt["run_id"],
                    "artifact_id": attempt.get("artifact_id")}
-        store._append("REUSE_CHECK_STARTED", request)
+        store._append(prefix+"_CHECK_STARTED", request)
         try:
             execution_plan(spec, cell, plugin)
             current = store._attempts().get(attempt["attempt_id"])
             run = store._manifest("run-" + attempt["run_id"])
-            if (current != attempt or attempt["state"] != "SUCCEEDED"
+            if (current != attempt or attempt["state"] != state
                     or run["spec_hash"] != digest(spec) or run["cell_hash"] != digest(cell)
                     or run["study_id"] != spec["study_id"] or run["cell"] != cell):
                 raise ResearchError("CONTRACT_MISMATCH", "reused attempt/run identity differs")
             metadata = store._manifest("artifact-" + attempt["artifact_id"])
-            if (metadata["role"] != "result" or metadata["media_type"] != "application/json"
+            if (metadata["role"] != role or metadata["media_type"] != "application/json"
                     or metadata["study_id"] != spec["study_id"]
                     or metadata["block_ids"] != [cell["block_id"]]
                     or digest(metadata) != attempt.get("artifact_manifest_hash")):
@@ -55,7 +66,10 @@ def verified_reuse(store, attempt, spec, cell, plugin):
                 expected_command = None
             if not expected_command or expected_command != receipt.get("command_hash"):
                 raise ResearchError("UNQUALIFIED", "reused command binding differs")
-            AdmissionGate(store).result_validator(receipt, spec, cell, plugin)(result)
+            gate = AdmissionGate(store)
+            (gate.failure_validator if failed else gate.result_validator)(receipt, spec, cell, plugin)(result)
+            if failed and result['error_code'] != attempt['error_code']:
+                raise ResearchError('CONTRACT_MISMATCH', 'failed attempt and artifact error code differ')
             events = store._events()
             admission_events = [event for event in events if event["event_kind"] == "ADMISSION"
                 and event["payload"] == {"attempt_id": attempt["attempt_id"], "run_id": run["run_id"],
@@ -76,7 +90,7 @@ def verified_reuse(store, attempt, spec, cell, plugin):
             if (any(event["payload"].get("reservation_id") != expected_id for event in (reservation, settlement, worker))
                     or any(cost.get(key) != value for key, value in {
                         "attempt_id": attempt["attempt_id"], "run_id": run["run_id"], "study_id": spec["study_id"],
-                        "arm_id": cell["arm_id"], "settled": True, "outcome": "SUCCEEDED"}.items())
+                        "arm_id": cell["arm_id"], "settled": True, "outcome": state}.items())
                     or any(reservation["payload"].get(key) != cost.get(key) for key in
                         ("attempt_id", "run_id", "study_id", "arm_id", "reserved_ms", "worker_slot"))
                     or isinstance(elapsed, bool) or not isinstance(elapsed, int) or elapsed < 0
@@ -85,9 +99,17 @@ def verified_reuse(store, attempt, spec, cell, plugin):
                     or not reservation["sequence"] < worker["sequence"] < settlement["sequence"] < completions[0]["sequence"]
                     or not any(event["sequence"] < worker["sequence"] for event in admission_events)):
                 raise ResearchError("UNQUALIFIED", "reused execution/cost bindings differ")
+            if failed:
+                stops = [event for event in events if event['event_kind'] == 'WORKER_TREE_STOPPED'
+                    and event['payload'].get('attempt_id') == attempt['attempt_id']]
+                if (len(stops) != 1 or stops[0]['payload'].get('reservation_id') != expected_id
+                        or stops[0]['payload'].get('observed_elapsed_ms') != elapsed
+                        or stops[0]['payload'].get('confirmation') != 'native-job-or-process-group-no-running-descendants'
+                        or not worker['sequence'] < stops[0]['sequence'] < settlement['sequence']):
+                    raise ResearchError('UNQUALIFIED', 'failed evidence lacks actual containment/settlement provenance')
         except (ResearchError, KeyError, TypeError, ValueError, OSError) as exc:
             error = exc if isinstance(exc, ResearchError) else ResearchError("CORRUPT_ARTIFACT", "reused evidence is malformed")
-            store._append("REUSE_CHECK_FAILED", {**request, "error_code": error.code})
+            store._append(prefix+"_CHECK_FAILED", {**request, "error_code": error.code})
             raise error from (None if error is exc else exc)
-        store._append("REUSE_VERIFIED", request)
-        return {**attempt, "reused": True, "exit_code": 0}
+        store._append(prefix+"_VERIFIED", request)
+        return {**attempt, "reused": not failed, "exit_code": 1 if failed else 0}

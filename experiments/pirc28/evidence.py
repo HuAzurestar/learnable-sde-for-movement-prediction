@@ -15,7 +15,7 @@ import numpy as np
 from application.research_budget import BudgetLedger
 from application.research_evidence import authorize_study, require_unexpired_disclosure
 from application.research_preregistration import hash_reference, validate_preregistration
-from application.research_reuse import verified_reuse
+from application.research_reuse import verified_reuse, verified_failure
 from infrastructure.research_store import ResearchError, digest, encode
 from .pipeline import validate_recipe, validate_failed_fit
 from .failures import valid_numerical_diagnostic
@@ -115,6 +115,7 @@ def _cost_history(store, study, cell, attempts, events_by_attempt):
         elif settlements or attempt.get('started_at') is not None:
             raise ResearchError('UNQUALIFIED', 'attempt started/settled without its own reservation')
         history.append({'attempt_id': attempt_id, 'state': attempt['state'],
+            'artifact_id': attempt.get('artifact_id'), 'artifact_manifest_hash': attempt.get('artifact_manifest_hash'),
             'error_code': attempt.get('error_code'), 'parent_attempt_id': attempt.get('parent_attempt_id'),
             'cost': None if not reserves else {
                 'reservation_id': reserves[0]['payload']['reservation_id'],
@@ -183,46 +184,26 @@ def _preregistration(store, study, definition, cell, events):
     return reference
 
 
-def _success_row(definition, study, cell, result, artifact_hash):
-    scenario, initial_models, inference, prior_mean, prior_covariance = validate_recipe(study['switching_recipe'], cell['fit_K'])
-    fit, diagnostic = result.get('fit', {}), result.get('fit', {}).get('recovery_diagnostics', {})
-    if (result.get('source_schema') != 'pirc28-synthetic-result-v1'
-            or fit.get('model', {}).get('K') != cell['fit_K']
-            or fit.get('recipe_hash') != digest({'recipe': study['switching_recipe'], 'K': cell['fit_K'], 'seed': cell['seed']})
-            or diagnostic.get('identifiability_spec_hash') != digest(definition.to_dict())):
-        raise ResearchError('UNQUALIFIED', 'qualification result recipe/K/evaluator identities differ')
-    rng = np.random.default_rng(cell['seed'])
-    seeds = rng.integers(0, 2**63, size=3, dtype=np.int64)
-    generated = fit.get('generated_inputs')
-    if type(generated) is not list or len(generated) != 3:
-        raise ResearchError('UNQUALIFIED', 'generated role-specific source identities missing')
-    for index, role in enumerate(('train', 'selection', 'test')):
-        frozen = replace(scenario, seed=int(seeds[index]), sample_count=study['switching_recipe'][role+'_paths'],
-                         scenario_id=scenario.scenario_id+'-'+role)
-        if (generated[index].get('role') != role or generated[index].get('scenario_hash') != frozen.scenario_hash
-                or not hash_reference(generated[index].get('observations_hash'))
-                or not hash_reference(generated[index].get('truth_hash'))):
-            raise ResearchError('IDENTITY_CONFLICT', 'generated roles do not match frozen independent streams')
-    metrics = {'position_energy_score_d2': result['metrics']['position_energy_score_d2']}
-    if cell['fit_K'] == 2:
-        parameter = diagnostic.get('parameter_recovery', {}).get('metrics', {})
-        mode = diagnostic.get('mode_diagnostics', {})
-        jump = diagnostic.get('jump_diagnostics', {})
-        values = {**parameter, **{name: mode[name] for name in ('mode_brier', 'mode_ece', 'occupancy_error') if name in mode},
-            'position_marginal_coverage_error': diagnostic.get('position_marginal_coverage_error'),
-            **{name: jump[name] for name in ('any_jump_brier', 'different_endpoint_mode_brier') if name in jump}}
-        if set(values) != set(METRICS) or any(value is None for value in values.values()):
-            raise ResearchError('UNQUALIFIED', 'K=2 source artifact lacks preregistered recovery/calibration metrics')
-        metrics.update(values)
+def validate_initialization_history(study, cell, fit, generated, *, allow_failed_selection=False):
+    _, initial_models, inference, prior_mean, prior_covariance = validate_recipe(study['switching_recipe'], cell['fit_K'])
     selection = fit.get('selection', {})
-    selected = selection.get('selected_initialization')
     candidates = fit.get('initializations', [])
     expected_ids = ['init-'+str(index) for index in range(len(study['switching_recipe']['initializations'][str(cell['fit_K'])]))]
-    if (selection.get('split_role') != 'selection' or selection.get('selection_hash') != generated[1]['observations_hash']
+    if (type(candidates) is not list or any(type(candidate) is not dict for candidate in candidates)
+            or [candidate.get('initialization_id') for candidate in candidates] != expected_ids):
+        raise ResearchError('UNQUALIFIED', 'complete initialization history differs')
+    no_selection = selection is None
+    if no_selection:
+        if not allow_failed_selection or any(candidate.get('state') != 'FAILED' for candidate in candidates):
+            raise ResearchError('UNQUALIFIED', 'selection is missing without all fits failing')
+        selection = {'selected_initialization': None, 'candidates': [{**candidate, 'score': None} for candidate in candidates]}
+    elif (type(selection) is not dict or type(selection.get('candidates')) is not list
+            or any(type(candidate) is not dict for candidate in selection['candidates'])
+            or selection.get('split_role') != 'selection' or selection.get('selection_hash') != generated[1]['observations_hash']
             or selection.get('rule') != 'largest-approximate-selection-objective-stable-tie'
-            or [candidate.get('initialization_id') for candidate in candidates] != expected_ids
             or [candidate.get('initialization_id') for candidate in selection.get('candidates', [])] != expected_ids):
         raise ResearchError('UNQUALIFIED', 'initialization selection source or complete diagnostic history differs')
+    selected = selection.get('selected_initialization')
     eligible = []
     probability = np.ones(cell['fit_K'])/cell['fit_K']
     means = np.tile(prior_mean, (cell['fit_K'], 1))
@@ -265,10 +246,46 @@ def _success_row(definition, study, cell, result, artifact_hash):
             eligible.append((selection_row['score'], -index, identifier))
         else:
             raise ResearchError('UNQUALIFIED', 'selection candidate is neither applicable nor a typed failure')
+    if not eligible and allow_failed_selection and selected is None:
+        return None
     if not eligible or selected != max(eligible, key=lambda value: value[:2])[2]:
         raise ResearchError('UNQUALIFIED', 'selected initializer is not the preregistered applicable-score winner')
+    return next(candidate for candidate in candidates if candidate['initialization_id'] == selected)
+
+
+def _success_row(definition, study, cell, result, artifact_hash):
+    scenario, _, _, _, _ = validate_recipe(study['switching_recipe'], cell['fit_K'])
+    fit, diagnostic = result.get('fit', {}), result.get('fit', {}).get('recovery_diagnostics', {})
+    if (result.get('source_schema') != 'pirc28-synthetic-result-v1'
+            or fit.get('model', {}).get('K') != cell['fit_K']
+            or fit.get('recipe_hash') != digest({'recipe': study['switching_recipe'], 'K': cell['fit_K'], 'seed': cell['seed']})
+            or diagnostic.get('identifiability_spec_hash') != digest(definition.to_dict())):
+        raise ResearchError('UNQUALIFIED', 'qualification result recipe/K/evaluator identities differ')
+    rng = np.random.default_rng(cell['seed'])
+    seeds = rng.integers(0, 2**63, size=3, dtype=np.int64)
+    generated = fit.get('generated_inputs')
+    if type(generated) is not list or len(generated) != 3:
+        raise ResearchError('UNQUALIFIED', 'generated role-specific source identities missing')
+    for index, role in enumerate(('train', 'selection', 'test')):
+        frozen = replace(scenario, seed=int(seeds[index]), sample_count=study['switching_recipe'][role+'_paths'],
+                         scenario_id=scenario.scenario_id+'-'+role)
+        if (generated[index].get('role') != role or generated[index].get('scenario_hash') != frozen.scenario_hash
+                or not hash_reference(generated[index].get('observations_hash'))
+                or not hash_reference(generated[index].get('truth_hash'))):
+            raise ResearchError('IDENTITY_CONFLICT', 'generated roles do not match frozen independent streams')
+    metrics = {'position_energy_score_d2': result['metrics']['position_energy_score_d2']}
+    if cell['fit_K'] == 2:
+        parameter = diagnostic.get('parameter_recovery', {}).get('metrics', {})
+        mode = diagnostic.get('mode_diagnostics', {})
+        jump = diagnostic.get('jump_diagnostics', {})
+        values = {**parameter, **{name: mode[name] for name in ('mode_brier', 'mode_ece', 'occupancy_error') if name in mode},
+            'position_marginal_coverage_error': diagnostic.get('position_marginal_coverage_error'),
+            **{name: jump[name] for name in ('any_jump_brier', 'different_endpoint_mode_brier') if name in jump}}
+        if set(values) != set(METRICS) or any(value is None for value in values.values()):
+            raise ResearchError('UNQUALIFIED', 'K=2 source artifact lacks preregistered recovery/calibration metrics')
+        metrics.update(values)
+    chosen = validate_initialization_history(study, cell, fit, generated)
     # This diagnostic remains separate from test posterior mode alignment.
-    chosen = next((candidate for candidate in candidates if candidate.get('initialization_id') == selected), None)
     if chosen is None or chosen.get('model') != fit.get('model') or chosen.get('model_hash') != digest(fit.get('model')):
         raise ResearchError('UNQUALIFIED', 'selected fit and retained initialization history differ')
     return {'scenario_id': scenario.scenario_id, 'replicate_id': cell['replicate_id'], 'K': cell['fit_K'],
@@ -394,6 +411,26 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
             if run.get('spec_hash') != digest(study) or run.get('cell') != cell or run.get('run_id') != run_id:
                 raise ResearchError('IDENTITY_CONFLICT', 'qualification run source differs')
         history = _cost_history(store, study, cell, related, events_by_attempt)
+        failures = {}
+        for attempt in related:
+            if attempt['state'] != 'FAILED' or attempt.get('artifact_id') is None:
+                continue
+            check_budget()
+            artifact_id = attempt['artifact_id']
+            metadata = store.manifest('artifact-'+artifact_id)
+            size = metadata.get('size_bytes')
+            if type(size) is not int or not 0 <= size <= MAXIMUM_RESULT_BYTES or consumed+size > maximum_total_bytes:
+                raise ResearchError('RESOURCE_LIMIT', 'failure artifact/matrix bytes exceed frozen quota')
+            grant = authorizations[study['study_id']]
+            content = store.read_artifact(artifact_id, purpose='evaluate', authorization=grant)
+            consumed += len(content)
+            result = json.loads(content)
+            if len(content) != size or hashlib.sha256(content).hexdigest() != artifact_id or content != encode(result):
+                raise ResearchError('CORRUPT_ARTIFACT', 'authorized failure bytes differ from frozen canonical metadata')
+            verified_failure(store, attempt, study, cell, plugin)
+            failures[attempt['attempt_id']] = result['failure']
+            next(value for value in history if value['attempt_id'] == attempt['attempt_id'])['failure'] = result['failure']
+            disclosed.append((artifact_id, grant))
         successful = [attempt for attempt in related if attempt['state'] == 'SUCCEEDED']
         if len(successful) > 1:
             raise ResearchError('IDENTITY_CONFLICT', 'a single independent cell has multiple successful outcomes')
@@ -439,7 +476,10 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
                 elif selected['state'] in store.TERMINAL:
                     state = 'INFERENCE_INAPPLICABLE' if selected.get('error_code') == 'INFERENCE_INAPPLICABLE' else 'FAILED'
             rows.append({'scenario_id': key[0], 'replicate_id': key[1], 'K': key[2], 'state': state,
-                'input_hash': None, 'artifact_hash': None, 'metrics': None, 'posterior_occupancy': None, 'collapsed': None})
+                'input_hash': None if selected is None or selected['attempt_id'] not in failures
+                    else digest(failures[selected['attempt_id']]['generated_inputs']),
+                'artifact_hash': None if selected is None or selected['attempt_id'] not in failures else selected['artifact_id'],
+                'metrics': None, 'posterior_occupancy': None, 'collapsed': None})
     report = qualify(definition, rows, digest(rows), check_budget=check_budget)
     if not fixture and report['state'] == 'PASSED' and study_definition_hash is None:
         report['state'] = 'NEEDS_PREREGISTRATION'

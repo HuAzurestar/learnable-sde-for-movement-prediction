@@ -277,10 +277,29 @@ accepted-progress identities before skipping a retained failed initializer; it
 does not reset its initialization or iteration budget. Legacy v1 checkpoint
 shape remains readable, subject to the existing shared source/receipt binding.
 All-initializer failures raise a typed observation-only NumericalCellFailure
-with the complete history, not fabricated successful metrics. A managed
-whole-cell failure publication/consumption path is still required before
-production scientific execution; this library exception alone does not replace
-shared FAILED-attempt/cost/artifact provenance.
+with the complete history, not fabricated successful metrics. Whole-cell
+generation, test inference, forecast and evaluation failures retain their stage
+and bounded numerical cause; all-selection failures retain successful fits and
+null failed selection scores.
+
+The switching adapter opts into a separate managed failure validator. Its worker
+writes a bounded canonical `pirc25-failure-v1` result and exits 86; this is never
+a successful result or an unbudgeted side-channel artifact. The supervisor stops
+and confirms the whole process tree before validating recipe, generated streams,
+initializer history and ordinary admission bindings. Only then may it publish a
+role=`failure` artifact on the original study/block and attach its manifest hash
+to a FAILED attempt. Legacy adapters without this validator do not interpret
+exit 86 as typed evidence. Deadline, checkpoint, containment and arm-fuse authority
+still take precedence; even delayed owner validation cannot publish after timeout.
+
+Failure provenance verification checks immutable admission/code, artifact bytes,
+actual worker launch/tree stop and original-arm settlement. It explicitly does
+not grant successful reuse. The collector reads failed artifacts under existing
+evaluate-purpose grants and cumulative byte quotas, retaining each diagnostic
+and retry cost even before a later success. Failed rows have no fabricated metrics,
+occupancy or collapse observations; initializations and retries remain one
+independent cell. Retrying requires an explicit parent and reason and cannot
+refresh an arm balance. All tests use disposable stores, not scientific evidence.
 
 ## Immutable scientific study definitions
 

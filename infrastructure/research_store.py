@@ -692,13 +692,18 @@ class ResearchStore:
         if state not in self.TERMINAL | {"RUNNING"} or (state == "RUNNING" and current["state"] != "REGISTERED"):
             raise ResearchError("CONTRACT_MISMATCH", "invalid attempt transition")
         artifact_hash = None
-        if state == "SUCCEEDED":
-            if current["state"] != "RUNNING" or artifact_id is None or error_code is not None:
+        if state == "SUCCEEDED" or (state == "FAILED" and artifact_id is not None):
+            if (current["state"] != "RUNNING" or artifact_id is None
+                    or (state == 'SUCCEEDED' and error_code is not None)
+                    or (state == 'FAILED' and (type(error_code) is not str or not error_code))):
                 raise ResearchError("CONTRACT_MISMATCH", "success needs running attempt and published artifact")
             metadata = self._manifest("artifact-" + identifier(artifact_id))
             run = self._manifest("run-" + current["run_id"])
             if metadata["study_id"] != run["study_id"]:
                 raise ResearchError("CONTRACT_MISMATCH", "artifact belongs to another study")
+            if state == 'FAILED' and (metadata['role'] != 'failure'
+                    or metadata['media_type'] != 'application/json' or metadata['block_ids'] != [run['cell']['block_id']]):
+                raise ResearchError('CONTRACT_MISMATCH', 'failed attempt needs its own failure evidence metadata')
             self._verified_artifact_content(metadata)
             artifact_hash = digest(metadata)
         updated = {**current, "state": state, "error_code": error_code,
