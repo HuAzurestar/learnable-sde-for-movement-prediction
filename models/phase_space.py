@@ -93,12 +93,17 @@ class _ResidualDrift(nn.Module):
         _require(isinstance(features, (tuple, list)) and 1 <= len(features) <= 8
                  and all(type(i) is int and 0 <= i < 4 + spec.context_dim for i in features)
                  and len(set(features)) == len(features), "bounded unique feature selector required")
+        from infrastructure.pirc26_checkpoint_contract import normalizer_buffers, CheckpointContractError
+        try:
+            buffers = normalizer_buffers(spec.means, spec.scales)
+        except CheckpointContractError as exc:
+            raise ModelContractError(str(exc)) from exc
         self.affine = affine
         self.spec = spec
         self.features = tuple(features)
         self.residual_enabled = True
-        self.register_buffer("means", torch.tensor(spec.means))
-        self.register_buffer("scales", torch.tensor(spec.scales))
+        self.register_buffer("means", torch.tensor(buffers["means"], dtype=torch.float32))
+        self.register_buffer("scales", torch.tensor(buffers["scales"], dtype=torch.float32))
 
     def selected_features(self, z, c):
         values = (torch.cat((z, c), dim=-1) - self.means) / self.scales

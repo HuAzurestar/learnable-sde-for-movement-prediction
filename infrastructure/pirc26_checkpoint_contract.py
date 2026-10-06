@@ -34,15 +34,50 @@ def keys(value, expected):
     require(type(value) is dict and set(value) == set(expected), "closed checkpoint field set")
 
 
-def array(value, shape, *, dtype="torch.float64"):
+INTEGER_BOUNDS = {"int64": (-(1 << 63), (1 << 63)-1), "int32": (-(1 << 31), (1 << 31)-1),
+                  "uint8": (0, 255), "uint32": (0, (1 << 32)-1)}
+
+
+def array(value, shape, *, dtype="torch.float64", exact=False):
+    """Validate exact JSON nesting and typed scalars without allocating arrays.
+
+    Recipe floats may intentionally round to their frozen float32 buffers;
+    serialized tensor data must already represent its declared dtype exactly.
+    """
+    kind = dtype.removeprefix("torch.") if type(dtype) is str else None
+    require(kind in ("float32", "float64", "bool", *INTEGER_BOUNDS), "checkpoint array dtype")
     if shape:
         require(type(value) is list and len(value) == shape[0], "checkpoint tensor nesting/shape")
         for child in value:
-            array(child, shape[1:], dtype=dtype)
+            array(child, shape[1:], dtype=dtype, exact=exact)
+    elif kind == "bool":
+        require(type(value) is bool, "checkpoint boolean scalar")
+    elif kind in INTEGER_BOUNDS:
+        lo, hi = INTEGER_BOUNDS[kind]
+        require(type(value) is int and lo <= value <= hi, "checkpoint integer scalar/range")
     else:
         require(type(value) in (int, float) and math.isfinite(value), "finite checkpoint scalar")
-        if dtype == "torch.float32":
+        if kind == "float32":
             require(abs(value) <= 3.4028234663852886e38, "checkpoint scalar exceeds dtype range")
+        if exact:
+            # Both numerical engines' tolist() emits Python floats for these
+            # dtypes. Accepting an integer here changes the re-encoded identity
+            # even when its numerical value happens to be representable.
+            require(type(value) is float, "checkpoint floating scalar differs from dtype representation")
+            represented = struct.unpack("f", struct.pack("f", value))[0] if kind == "float32" else float(value)
+            require(represented == value, "checkpoint scalar differs from dtype representation")
+
+
+def normalizer_buffers(means, scales):
+    """The actual residual recipe freezes float32 buffers, even in double models."""
+    require(type(means) in (list, tuple) and type(scales) in (list, tuple)
+            and 4 <= len(means) == len(scales) <= 132, "bounded aligned normalizer buffers")
+    for values in (means, scales):
+        array(list(values), [len(values)], dtype="torch.float32")
+    result = {name: [struct.unpack("f", struct.pack("f", v))[0] for v in values]
+              for name, values in (("means", means), ("scales", scales))}
+    require(all(v > 0 for v in result["scales"]), "positive normalization scales after float32 representation")
+    return result
 
 
 def inspect_checkpoint(checkpoint, *, component_limit=None):
@@ -142,13 +177,13 @@ def inspect_checkpoint(checkpoint, *, component_limit=None):
             keys(item, ("shape", "dtype", "data", "sha256"))
             require(type(item["shape"]) is list and all(type(i) is int for i in item["shape"])
                 and item["shape"] == shape and item["dtype"] == card["dtype"], "architecture-derived tensor shape/dtype")
-            array(item["data"], shape, dtype=card["dtype"])
+            array(item["data"], shape, dtype=card["dtype"], exact=True)
             require(item["sha256"] == identity({k: v for k, v in item.items() if k != "sha256"}), "checkpoint tensor identity")
         # These frozen buffers must describe the recipe before constructor work.
         if residual:
+            buffers = normalizer_buffers(spec["means"], spec["scales"])
             for name in ("means", "scales"):
-                rounded = [struct.unpack("f", struct.pack("f", v))[0] for v in spec[name]]
-                require(state["acceleration_model."+name]["data"] == rounded, "normalizer buffer differs from recipe")
+                require(state["acceleration_model."+name]["data"] == buffers[name], "normalizer buffer differs from recipe")
             for name in ("centers", "bandwidth") if family == "M1-R" else ("knots",) if family == "M1-S" else ():
                 require(state["acceleration_model."+name]["data"] == config[name], "basis buffer differs from recipe")
         return {"document": document, "shapes": shapes, "tensor_elements": count, "component_capacity": capacity}

@@ -13,6 +13,7 @@ import torch
 
 from infrastructure.research_files import source_file_hash
 from infrastructure.research_control import canonical, ControlError, SCHEMA as CONTROL_SCHEMA
+from infrastructure.pirc26_checkpoint_contract import array as validate_array, CheckpointContractError
 from infrastructure.research_store import digest
 from models.phase_space import ModelContractError, PhaseSpaceSDE
 
@@ -32,15 +33,21 @@ def _encode(value, depth=0):
     if depth > 32:
         raise ModelContractError("MODEL_CONTRACT_ERROR: checkpoint nesting quota")
     if isinstance(value, torch.Tensor):
-        if value.device.type != "cpu" or value.numel() > 100000 or not torch.isfinite(value).all():
+        if (value.device.type != "cpu" or value.dtype not in (torch.float32, torch.float64, torch.int64,
+                torch.int32, torch.uint8, torch.bool) or value.numel() > 100000
+                or len(value.shape) > 8 or any(i > 100000 for i in value.shape)
+                or not torch.isfinite(value).all()):
             raise ModelContractError("MODEL_CONTRACT_ERROR: bounded finite CPU checkpoint tensor required")
         return {"tensor": {"dtype": str(value.dtype).split(".")[-1], "shape": list(value.shape),
                            "data": value.detach().tolist()}}
     if isinstance(value, np.ndarray):
-        if value.dtype.name not in ("uint32", "int64", "float32", "float64") or value.size > 100000 or not np.isfinite(value).all():
+        if (value.dtype.name not in ("uint32", "int64", "float32", "float64") or value.size > 100000
+                or len(value.shape) > 8 or any(i > 100000 for i in value.shape) or not np.isfinite(value).all()):
             raise ModelContractError("MODEL_CONTRACT_ERROR: bounded checkpoint RNG array required")
         return {"array": {"dtype": value.dtype.name, "shape": list(value.shape), "data": value.tolist()}}
     if isinstance(value, dict):
+        if any(type(key) not in (str, int) for key in value):
+            raise ModelContractError("MODEL_CONTRACT_ERROR: checkpoint map key")
         return {"map": [[_encode(key, depth + 1), _encode(item, depth + 1)] for key, item in value.items()]}
     if isinstance(value, tuple):
         return {"tuple": [_encode(item, depth + 1) for item in value]}
@@ -51,7 +58,7 @@ def _encode(value, depth=0):
     raise ModelContractError("MODEL_CONTRACT_ERROR: unsupported checkpoint object")
 
 
-def _decode(value, depth=0):
+def _decode(value, depth=0, *, validate_only=False):
     if depth > 32:
         raise ModelContractError("MODEL_CONTRACT_ERROR: checkpoint nesting quota")
     if isinstance(value, dict):
@@ -68,15 +75,21 @@ def _decode(value, depth=0):
                 count *= size
             if count > 100000:
                 raise ModelContractError("MODEL_CONTRACT_ERROR: checkpoint array element quota")
+            allowed = ("float32", "float64", "int64", "int32", "uint8", "bool") if kind == "tensor" else (
+                "uint32", "int64", "float32", "float64")
+            if type(item["dtype"]) is not str or item["dtype"] not in allowed:
+                raise ModelContractError("MODEL_CONTRACT_ERROR: checkpoint array dtype")
+            try:
+                validate_array(item["data"], item["shape"], dtype=item["dtype"], exact=True)
+            except CheckpointContractError as exc:
+                raise ModelContractError(str(exc)) from exc
+            if validate_only:
+                return None  # No array engine until the entire state has passed.
             if kind == "tensor":
-                if item["dtype"] not in ("float32", "float64", "int64", "int32", "uint8", "bool"):
-                    raise ModelContractError("MODEL_CONTRACT_ERROR: checkpoint tensor dtype")
                 array = torch.tensor(item["data"], dtype=getattr(torch, item["dtype"]))
                 if array.numel() != count or not torch.isfinite(array).all():
                     raise ModelContractError("MODEL_CONTRACT_ERROR: checkpoint tensor content")
             else:
-                if item["dtype"] not in ("uint32", "int64", "float32", "float64"):
-                    raise ModelContractError("MODEL_CONTRACT_ERROR: checkpoint RNG dtype")
                 array = np.asarray(item["data"], dtype=item["dtype"])
                 if array.size != count or not np.isfinite(array).all():
                     raise ModelContractError("MODEL_CONTRACT_ERROR: checkpoint RNG content")
@@ -84,25 +97,28 @@ def _decode(value, depth=0):
         if kind == "tuple":
             if type(item) is not list:
                 raise ModelContractError("MODEL_CONTRACT_ERROR: checkpoint tuple content")
-            return tuple(_decode(child, depth + 1) for child in item)
+            return tuple(_decode(child, depth + 1, validate_only=validate_only) for child in item)
         if kind == "map":
             if type(item) is not list or any(type(pair) is not list or len(pair) != 2 for pair in item):
                 raise ModelContractError("MODEL_CONTRACT_ERROR: checkpoint map content")
             decoded = {}
             for key, child in item:
-                key = _decode(key, depth + 1)
+                key = _decode(key, depth + 1, validate_only=validate_only)
                 if type(key) not in (str, int) or key in decoded:
                     raise ModelContractError("MODEL_CONTRACT_ERROR: checkpoint map key")
-                decoded[key] = _decode(child, depth + 1)
+                decoded[key] = _decode(child, depth + 1, validate_only=validate_only)
             return decoded
         raise ModelContractError("MODEL_CONTRACT_ERROR: unknown checkpoint tag")
     if isinstance(value, list):
-        return [_decode(item, depth + 1) for item in value]
+        return [_decode(item, depth + 1, validate_only=validate_only) for item in value]
     return value
 
 
 def _encoded_limits(encoded):
     try:
+        # Shared preflight bounds key bytes/container lengths before either
+        # extending a traversal stack or materializing the detached JSON.
+        canonical(encoded, LIMIT)
         # Leave envelope/RNG duplication margin below the shared 65,536 nodes.
         stack, remaining = [(encoded, 0)], 45000
         while stack:
@@ -118,7 +134,7 @@ def _encoded_limits(encoded):
                 raise ValueError("checkpoint scalar quota")
         if len(json.dumps(encoded, allow_nan=False).encode()) > LIMIT:
             raise ValueError("checkpoint byte quota")
-    except (ValueError, TypeError, UnicodeError) as exc:
+    except (ValueError, TypeError, UnicodeError, RecursionError) as exc:
         raise ModelContractError("RESOURCE_PLAN_REJECTED: checkpoint structure/byte quota") from exc
     return encoded
 
@@ -133,7 +149,9 @@ def decode_state(value):
         raw = json.dumps(value, allow_nan=False)
         if len(raw.encode()) > LIMIT:
             raise ModelContractError("RESOURCE_PLAN_REJECTED: checkpoint byte quota")
-        return _decode(json.loads(raw))
+        detached = json.loads(raw)
+        _decode(detached, validate_only=True)
+        return _decode(detached)
     except (ValueError, TypeError, KeyError, OverflowError, RuntimeError, RecursionError) as exc:
         if isinstance(exc, ModelContractError):
             raise
