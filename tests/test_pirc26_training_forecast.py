@@ -74,6 +74,29 @@ def test_train_only_fit_recovers_affine_with_frozen_diffusion_and_stops():
     assert interrupted["best_train_objective"] is None
 
 
+@pytest.mark.parametrize("family", ["M0", "M2"])
+def test_finite_float32_gradients_with_overflowing_global_norm_fail_before_update(family, monkeypatch):
+    m = model(family, torch.float32)
+    state = torch.full((2, 4), 1e10, dtype=torch.float32)
+    b = TransitionBatch(torch.zeros(2), state, state.clone(), torch.ones(2),
+                        ModelContext(), m.spec.train_binding_hash)
+    loss = local_velocity_nll(m, b)
+    assert torch.isfinite(loss)
+    loss.backward()
+    gradients = [p.grad for p in m.acceleration_model.parameters() if p.grad is not None]
+    assert all(torch.isfinite(g).all() for g in gradients)
+    assert not torch.isfinite(torch.linalg.vector_norm(torch.stack([g.norm() for g in gradients])))
+    assert torch.isfinite(torch.linalg.vector_norm(torch.stack([g.double().norm() for g in gradients])))
+    for p in m.acceleration_model.parameters():
+        p.grad = None
+    before, rows, saved = m.checkpoint(), [], []
+    monkeypatch.setattr(torch.optim.Adam, "step", lambda *_a, **_k: pytest.fail("nonfinite norm reached Adam"))
+    with pytest.raises(ModelContractError, match="NONFINITE: training gradient norm"):
+        fit_o1(m, [b], O1Plan(max_steps=1, patience=1, fit_diffusion=False), progress=rows.append,
+               checkpoint_requested=lambda: True, checkpoint_handler=lambda *args: saved.append(args))
+    assert m.checkpoint() == before and not rows and not saved
+
+
 def test_positive_diffusion_parameterization_and_gradient():
     factor = torch.tensor([[.2, 0.], [.03, .4]], dtype=torch.float64)
     fitted = VelocityCholesky(factor, .01)

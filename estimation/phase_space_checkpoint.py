@@ -322,7 +322,14 @@ def train_loop(model, parameters, plan, scope, objective, monitor, *, auxiliary=
         loss.backward()
         if any(p.grad is not None and not torch.isfinite(p.grad).all() for p in parameters):
             raise ModelContractError("NONFINITE: training gradient")
-        gradient = torch.nn.utils.clip_grad_norm_(parameters, plan.gradient_norm_limit)
+        # Finite individual float32 gradients can still overflow the aggregate
+        # norm. Refuse before clipping/updating instead of zeroing all gradients
+        # and emitting an infinite history row as a successful optimizer step.
+        try:
+            gradient = torch.nn.utils.clip_grad_norm_(parameters, plan.gradient_norm_limit,
+                                                     error_if_nonfinite=True)
+        except RuntimeError as exc:
+            raise ModelContractError("NONFINITE: training gradient norm") from exc
         optimizer.step()
         with torch.no_grad():
             value = monitor()
