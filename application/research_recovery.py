@@ -105,8 +105,10 @@ class SharedRecovery:
             if (attempt["state"] != "RUNNING" or receipt["attempt_id"] != attempt_id
                     or receipt["cell_hash"] != digest(cell) or type(state) is not dict
                     or state.get("step") != progress["completed_steps"]
-                    or progress["total_steps"] > receipt["resource_plan"]["counts"]["steps"]):
+                    or plugin.checkpoint_validator is None and progress["total_steps"] > receipt["resource_plan"]["counts"]["steps"]):
                 raise ResearchError("CONTRACT_MISMATCH", "checkpoint differs from the admitted running job")
+            if plugin.checkpoint_validator is not None:
+                plugin.checkpoint_validator(receipt, state, progress)
         adapter = self.recovery.resolve(plugin.plugin_id, plugin.resume_level, plugin.registry_entry.version)
         required = {"step", "data_position", "method_state", "rng_state"}
         from .research_registry import _bounded_json

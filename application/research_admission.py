@@ -37,6 +37,8 @@ def plugin_binding(plugin):
                    "registry_entry_hash": digest(plugin.registry_entry.manifest())}
     if plugin.pre_read_validator is not None:
         binding["pre_read_validator_hash"] = command_binding(plugin.pre_read_validator)
+    if plugin.checkpoint_validator is not None:
+        binding["checkpoint_validator_hash"] = command_binding(plugin.checkpoint_validator)
     return digest(binding)
 
 

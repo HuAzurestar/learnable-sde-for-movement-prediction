@@ -40,14 +40,18 @@ def one_thread():
 
 
 def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=False, long_training=False, family="M0", rank_failure=False,
-            formal=False, metric_policy=None, pilot=False):
-    m = model("M2" if long_training else family)
+            formal=False, metric_policy=None, pilot=False, long_forecast=False):
+    m = model("M2" if long_training or long_forecast else family)
     doc = document(m)
     doc["block_id"] = "fixture-1"
     if long_training:
         segment = doc["segments"][0]
         segment.update(time=[i / 100 for i in range(4098)], position=[[i / 100, i / 200] for i in range(4098)],
                        condition=[[] for _ in range(4098)], condition_available_at=[i / 100 for i in range(4098)])
+    if long_forecast:
+        segment = doc["segments"][0]
+        segment.update(time=[i / 10 for i in range(67)], position=[[i / 10,i / 20] for i in range(67)],
+                       condition=[[] for _ in range(67)], condition_available_at=[i / 10 for i in range(67)])
     if basis_family(family):
         import math
         times = [i / 10 for i in range(101)]
@@ -61,11 +65,14 @@ def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=Fal
         if rank_failure:
             doc["segments"][0]["velocity"] = [[0., 0.] for _ in times]
     dto = decode_block(admitted(doc), m)
-    grid = tuple(doc["segments"][0]["time"][2:5])
-    req = dto.forecast_request("synthetic-segment", 2, grid, sample_count=8, brownian_root_id="a" * 64, chunk_size=8)
+    grid = tuple(doc["segments"][0]["time"][2:(66 if long_forecast else 5)])
+    paths, chunk = (256,1) if long_forecast else (8,8)
+    req = dto.forecast_request("synthetic-segment", 2, grid, sample_count=paths, brownian_root_id="a" * 64, chunk_size=chunk)
     cfg, profile, _, _, _, _ = declarations(m)
     cfg["forecast_request_hashes"] = [digest(asdict(req))]
     profile["steps"] = 4
+    if long_forecast:
+        profile.update(steps=64, observations=67, paths=256)
     if long_training:
         cfg["plan"].update(max_steps=RECOVERY_STEPS, patience=RECOVERY_STEPS, tolerance=0.)
         profile.update(steps=RECOVERY_STEPS, observations=4098)
@@ -81,9 +88,9 @@ def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=Fal
     if metric_policy is not None or pilot:
         value["cells"][0]["comparison_dimensions"] = {"horizon": grid[-1] - grid[0]}
     job = {"schema_version": "pirc26-worker-job-v1", "operation": operation, "initial_checkpoint": m.checkpoint(),
-        "o1_result": None, "batch_size": 32 if basis_family(family) else (4096 if long_training else 4),
+        "o1_result": None, "batch_size": 32 if basis_family(family) else (4096 if long_training or long_forecast else 4),
         "origins": [{"segment_id": "synthetic-segment", "origin_index": 2,
-            "time_grid": list(grid), "sample_count": 8, "brownian_root_id": "a" * 64, "chunk_size": 8}]}
+            "time_grid": list(grid), "sample_count": paths, "brownian_root_id": "a" * 64, "chunk_size": chunk}]}
     if corrupt:
         doc["state_units"] = ["unknown"] * 4  # hash-admitted but semantically invalid, worker must refuse.
     grant = admit_fixture(store, value, plugin, root, formal=formal, execution_config=cfg,

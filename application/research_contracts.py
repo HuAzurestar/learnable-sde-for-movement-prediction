@@ -63,6 +63,7 @@ class ExecutionPlugin:
     registry_entry: RegistryEntry | None = None
     component_registries: dict | None = None
     pre_read_validator: object = None
+    checkpoint_validator: object = None
 
 
 class CapabilityRegistry:
@@ -85,6 +86,7 @@ class CapabilityRegistry:
                 or not plugin.capabilities <= CAPABILITIES or plugin.resume_level not in RESUME_LEVELS
                 or len(plugin.units) != len(plugin.state_order) or not callable(plugin.command_builder)
                 or plugin.pre_read_validator is not None and not callable(plugin.pre_read_validator)
+                or plugin.checkpoint_validator is not None and not callable(plugin.checkpoint_validator)
                 or entry.component_id != plugin.plugin_id or entry.component_kind != "execution-adapter"
                 or entry.capabilities != plugin.capabilities or entry.resume_level != plugin.resume_level
                 or entry.state_order != plugin.state_order or entry.units != plugin.units):

@@ -18,6 +18,10 @@ def run(output, handoff_hash):
     from application.pirc26_components import construct_components
     from application.pirc26_data import decode_block
     from application.pirc26_training_control import ManagedTrainingControl
+    from application.pirc26_forecast_control import (is_forecast_state, validate_saved_job, materialize_fit,
+        pack_fit, ManagedForecastControl)
+    from inference.phase_space_resume import array, materialize, moments
+    from infrastructure.pirc26_forecast_codec import inspect_array, require
     from evaluation.phase_space import evaluate_forecast
     from application.pirc26_metrics import metric_binding, aggregate_metric
     from estimation.phase_space_o2 import HorizonTrainingExample
@@ -36,11 +40,22 @@ def run(output, handoff_hash):
     if [digest(asdict(req)) for req in requests] != cell["execution"]["config"]["forecast_request_hashes"]:
         raise ResearchError("CONTRACT_MISMATCH", "causal requests differ from the registered origin recipes")
     fit = {"status": "FROZEN", "checkpoint": model.checkpoint()}
-    if job["operation"] == "fit-and-forecast":
+    completed_predictions, origin_index, active = [], 0, None
+    fit_frame, batch_count = None, 0
+    forecast_recovery = is_forecast_state(restored)
+    if forecast_recovery:
+        _, completed_predictions, origin_index, active = validate_saved_job(restored, job, receipt)
+        fit_frame = restored["method_state"]["fit"]
+        fit = materialize_fit(fit_frame)
+        from estimation.phase_space_checkpoint import restore_model, decode_state, restore_rng
+        restore_model(model, fit["checkpoint"])
+        restore_rng(decode_state(restored["rng_state"]))
+    elif job["operation"] == "fit-and-forecast":
         trainer = parts["trainer"]
         data = block.transitions(batch_size=job["batch_size"]) if trainer.document["objective"] == "O1" else [
             HorizonTrainingExample(req, block.truth(recipe["segment_id"], req), model.spec.train_binding_hash)
             for recipe, req in zip(job["origins"], requests)]
+        batch_count = len(data)
         if plugin.resume_level == "restart-only":
             if restored is not None:
                 raise ResearchError("CHECKPOINT_INCOMPATIBLE", "basis QR cannot resume an optimizer state")
@@ -52,15 +67,38 @@ def run(output, handoff_hash):
             return 85  # save() has received the actual owner ACK.
     elif restored is not None:
         raise ResearchError("CHECKPOINT_INCOMPATIBLE", "training recovery cannot substitute a frozen forecast job")
+    if control is not None and fit_frame is None:
+        fit["producer_attempt_id"] = ownership.attempt_id
+        fit_frame = pack_fit(fit, job, cell["execution"]["config"], batch_count)
     forecasts = []
-    for recipe, req in zip(job["origins"], requests):
-        prediction = parts["predictor"].predict(model, req,
-            cancellation=lambda: ownership.requested() if control is None else control.poll() is not None)
+    for index, (recipe, req) in enumerate(zip(job["origins"], requests)):
+        if index < origin_index:
+            prediction = dict(completed_predictions[index])
+            shape = [len(prediction["sample_ids"]),len(req.time_grid),4]
+            raw = inspect_array(prediction["samples"], shape, str(model.velocity_factor.dtype).split(".")[-1])
+            prediction["samples"] = materialize(raw, shape, model.velocity_factor.dtype)
+            mean, m2 = moments(prediction["samples"])
+            expected_moments = {"estimator_id": "ordered-sample-welford-full-state-v1", "sample_count": shape[0],
+                "mean": mean.tolist(), "covariance": (m2/(shape[0]-1)).tolist()}
+            require(prediction["moments"] == expected_moments, "completed origin moment population differs")
+        else:
+            managed_forecast = None if control is None else ManagedForecastControl(
+                control, job, fit_frame, completed_predictions, index, ownership.attempt_id,
+                active if index == origin_index else None)
+            prediction = parts["predictor"].predict(model, req,
+                cancellation=ownership.requested if control is None else None,
+                resume_state=active if index == origin_index else None,
+                checkpoint_requested=None if managed_forecast is None else managed_forecast.requested,
+                checkpoint_handler=None if managed_forecast is None else managed_forecast.save)
+            if prediction.get("status") == "CHECKPOINTED":
+                return 85  # Actual control.save has received the owner's ACK.
+            completed_predictions.append({**prediction, "samples": array(prediction["samples"])})
         evaluation = evaluate_forecast(prediction, block.truth(recipe["segment_id"], req))
         if evaluation["status"] != "SUCCEEDED":
             raise ResearchError("NONFINITE", "incomplete paths cannot become a successful comparison result")
         forecasts.append({"request_hash": digest(asdict(req)), "evaluation": evaluation,
                           "sample_ids": prediction["sample_ids"],
+                          "moments": prediction["moments"],
                           "samples": prediction["samples"].detach().cpu().tolist()})
     # Hash-covered observation through fitting/forecast/evaluation. Keep
     # telemetry out of exact scientific forecast/history equality comparisons.

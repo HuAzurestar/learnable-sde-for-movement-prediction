@@ -16,7 +16,7 @@ from application.research_registry import GLOBAL_LIMITS, RegistryEntry, implemen
 from infrastructure.research_store import ResearchError, digest, encode
 
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 STATE = ("x", "y", "vx", "vy")
 UNITS = ("m", "m", "m/s", "m/s")
 FAMILIES = ("M0", "M1-S", "M1-R", "M2")
@@ -248,11 +248,15 @@ class BoundPredictor:
         self.document, self.inputs = json.loads(encode(document)), json.loads(encode(inputs))
         _settings(self.document, self.inputs)
 
-    def predict(self, model, request, *, cancellation=None):
+    def predict(self, model, request, *, cancellation=None, resume_state=None,
+                checkpoint_requested=None, checkpoint_handler=None):
         _model_profile(model, self.document, self.inputs)
         _request_profile(request, self.document, self.inputs)
         from inference.phase_space import forecast
-        return forecast(model, request, cancellation=cancellation)
+        import torch
+        with torch.no_grad():
+            return forecast(model, request, cancellation=cancellation, resume_state=resume_state,
+                            checkpoint_requested=checkpoint_requested, checkpoint_handler=checkpoint_handler)
 
 
 def predictor_factory(document, inputs, context):

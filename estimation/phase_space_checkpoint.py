@@ -28,7 +28,8 @@ SOURCE_FILES = ("estimation/phase_space_checkpoint.py", "estimation/phase_space.
                 "infrastructure/pirc26_process_resources.py",
                 "estimation/phase_space_basis.py",
                 "estimation/phase_space_o2.py", "models/phase_space.py",
-                "inference/phase_space.py", "evaluation/phase_space.py")
+                "inference/phase_space.py", "inference/phase_space_resume.py",
+                "infrastructure/pirc26_forecast_codec.py", "evaluation/phase_space.py")
 
 
 def _encode(value, depth=0):

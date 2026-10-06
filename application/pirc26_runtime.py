@@ -46,7 +46,7 @@ def execution_plugin(objective, family):
                           for i in range(64)]],
             "limits": {**dict(GLOBAL_LIMITS), "matrix_cells": 10000, "result_bytes": 4 * 1024 * 1024}})
     return ExecutionPlugin(identity, entry.capabilities, STATE, UNITS, entry.resume_level, command, entry, registries,
-                           pre_read_validator=pre_read_validate)
+                           pre_read_validator=pre_read_validate, checkpoint_validator=validate_checkpoint_progress)
 
 
 def recovery_plugin(objective, family):
@@ -58,6 +58,18 @@ def recovery_plugin(objective, family):
 def pre_read_validate(receipt):
     """Consumer-specific validation before even shared admission verifies data."""
     validate_job(receipt["documents"]["package"]["payload"].get("pirc26_job"), receipt)
+
+
+def validate_checkpoint_progress(receipt, state, progress):
+    from application.pirc26_forecast_control import validate_saved_job, is_forecast_state
+    job = receipt["documents"]["package"]["payload"]["pirc26_job"]
+    if is_forecast_state(state):
+        validate_saved_job(state, job, receipt)
+        total = sum(r["sample_count"] * (len(r["time_grid"]) - 1) for r in job["origins"])
+        if progress["total_steps"] != total:
+            raise ResearchError("CONTRACT_MISMATCH", "forecast progress differs from registered per-path grid work")
+    elif (job["operation"] != "fit-and-forecast" or progress["total_steps"] != receipt["cell"]["execution"]["config"]["plan"]["max_steps"]):
+        raise ResearchError("CONTRACT_MISMATCH", "training progress differs from frozen plan")
 
 
 def validate_job(job, receipt):
@@ -103,6 +115,9 @@ def validate_job(job, receipt):
             raise ResearchError("UNQUALIFIED", "test forecasts require the owner's independently qualified frozen checkpoint")
     from application.pirc26_metrics import metric_binding
     metric_binding(job, receipt)
+    if not basis_family(config["family"]):
+        from application.pirc26_forecast_control import preflight_job_capacity
+        preflight_job_capacity(job, config, inputs)
     return job
 
 
@@ -210,4 +225,8 @@ def load_handoff(output, expected_hash, control):
     state = read_frame(output.parent / "pirc26-restored.json", HANDOFF_LIMIT) if handoff["recovery"] else None
     if (digest(state) if handoff["recovery"] else None) != handoff["restored_hash"]:
         raise ResearchError("CHECKPOINT_INCOMPATIBLE", "owner restored state identity differs")
+    if state is not None:
+        from application.pirc26_forecast_control import is_forecast_state, validate_saved_job
+        if is_forecast_state(state):
+            validate_saved_job(state, job, receipt)
     return receipt, plugin, job, transport, state, ownership
