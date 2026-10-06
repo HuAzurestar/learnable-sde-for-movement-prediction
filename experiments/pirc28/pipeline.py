@@ -14,17 +14,22 @@ from inference.switching import InferenceSpec, filter_switching, forecast_switch
 from infrastructure.research_store import digest
 from models.switching import SwitchingError, SwitchingSDEModel, finite_array, psd_array
 from .synthetic import ScenarioSpec, generate_scenario
+from .qualification import IdentifiabilitySpec, forecast_coverage, jump_diagnostics, mode_diagnostics, parameter_recovery
 
 
 def validate_recipe(recipe, k):
     keys = {'schema_version', 'scenario', 'initializations', 'inference', 'train_paths',
         'selection_paths', 'test_paths', 'forecast_paths', 'forecast_origin_index', 'horizon_indices',
         'prior_mean', 'prior_covariance'}
-    if (type(recipe) is not dict or set(recipe) != keys
+    if (type(recipe) is not dict or set(recipe) not in (keys, keys | {'identifiability_spec'})
             or recipe['schema_version'] != 'pirc28-synthetic-recipe-v1' or type(k) is not int or k not in (1, 2)):
         raise SwitchingError('CONTRACT_MISMATCH', 'synthetic recipe schema or first-round K differs')
     scenario = ScenarioSpec.from_dict(recipe['scenario'])
     scenario.validated()
+    if 'identifiability_spec' in recipe:
+        qualification = IdentifiabilitySpec.from_dict(recipe['identifiability_spec'])
+        if scenario.scenario_id not in qualification.scenario_axes:
+            raise SwitchingError('IDENTITY_CONFLICT', 'recipe scenario is outside the declared qualification matrix')
     if type(recipe['inference']) is not dict:
         raise SwitchingError('CONTRACT_MISMATCH', 'inference configuration is required')
     try:
@@ -126,7 +131,7 @@ def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, res
         fits.append(fit)
     selected, selection = select_initialization(fits, batches[1], probability, means, covariance,
         inference, split_role='selection', check_budget=check_budget)
-    forecasts, scores, test_objectives, posterior_probabilities = [], [], [], []
+    forecasts, scores, test_objectives, posterior_probabilities, coverage = [], [], [], [], []
     origin_index, horizon_indices = recipe['forecast_origin_index'], recipe['horizon_indices']
     offsets = [float(batches[2].times[index] - batches[2].times[origin_index]) for index in horizon_indices]
     for path_index in range(recipe['test_paths']):
@@ -137,6 +142,10 @@ def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, res
             sample_count=recipe['forecast_paths'], seed=split_seeds[2]+path_index,
             max_jumps=scenario.max_jumps, check_budget=check_budget)
         samples = np.asarray(forecast['samples'])
+        if 'identifiability_spec' in recipe:
+            qualification = IdentifiabilitySpec.from_dict(recipe['identifiability_spec'])
+            coverage.append(forecast_coverage(samples,
+                truths[2].states[path_index, horizon_indices], nominal=qualification.coverage_nominal))
         for horizon_index, time_index in enumerate(horizon_indices):
             scores.append(energy_score(samples[:, horizon_index, :2], truths[2].states[path_index, time_index, :2]))
         forecasts.append(forecast)
@@ -149,20 +158,50 @@ def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, res
     units = {'position_energy_score_d2': 'm', 'approximate_test_log_likelihood_per_observation': 'nats/observation',
         'posterior_min_occupancy': '1', 'mode_collapse': '1', 'test_path_count': 'count', 'configured_K': 'count'}
     # Truth is evaluator-only, and only synthetic modes can have a Brier score.
-    unavailable, mode_diagnostics = {}, {}
+    unavailable, legacy_mode_diagnostics = {}, {}
     if scenario.model['K'] == k == 2:
         probabilities = np.asarray(posterior_probabilities)
         truth = np.eye(2)[truths[2].modes]
         losses = [np.mean(np.sum((probabilities[..., order]-truth)**2, axis=-1)) for order in ([0, 1], [1, 0])]
-        mode_diagnostics['permutation_invariant_mode_brier'] = {'value': float(min(losses)), 'unit': '1',
+        legacy_mode_diagnostics['permutation_invariant_mode_brier'] = {'value': float(min(losses)), 'unit': '1',
             'role': 'synthetic-filtering-diagnostic', 'label_matching': 'minimum-over-two-permutations'}
     else:
         unavailable['permutation_invariant_mode_brier'] = 'truth/model K differ or single-mode control'
+    recovery_diagnostics = None
+    if 'identifiability_spec' in recipe:
+        qualification = IdentifiabilitySpec.from_dict(recipe['identifiability_spec'])
+        recovery_diagnostics = {'identifiability_spec_hash': digest(qualification.to_dict()),
+            'state': 'NEEDS_PREREGISTRATION' if qualification.missing_fields else 'UNQUALIFIED_CELL_DIAGNOSTICS',
+            'missing_fields': qualification.missing_fields,
+            'position_marginal_coverage_error': abs(float(np.mean([value['position_marginal_coverage'] for value in coverage]))
+                                                   - qualification.coverage_nominal),
+            'position_marginal_coverage_nominal': qualification.coverage_nominal,
+            'sampling_unit': 'one-independent-replicate; paths-and-points-within-cell-not-replicates'}
+        recovery_diagnostics['jump_diagnostics'] = jump_diagnostics(forecasts, truths[2].jump_times,
+            truths[2].modes, scenario.times, origin_index, horizon_indices)
+        if scenario.model['K'] == k == 2:
+            truth_model = SwitchingSDEModel.from_dict(scenario.model)
+            # Scenario labels relabel evaluator modes/dwell, not physical model
+            # dynamics. Match against the model expressed in those truth labels.
+            label_order = np.argsort(scenario.label_permutation or tuple(range(k))).tolist()
+            truth_model = truth_model.permuted(label_order)
+            matched = parameter_recovery(selected.model, truth_model,
+                                         qualification.parameter_scales)
+            modes = mode_diagnostics(np.asarray(posterior_probabilities), truths[2].modes,
+                matched['label_order'], truths[2].dwell_by_mode, float(scenario.times[-1]),
+                bins=qualification.calibration_bins)
+            recovery_diagnostics.update(parameter_recovery=matched, mode_diagnostics=modes,
+                posterior_occupancy=modes['posterior_occupancy'], collapsed=bool(selected.collapsed),
+                occupied_K=int(sum(value >= inference.min_occupancy for value in selected.occupancy)))
+        else:
+            recovery_diagnostics['unavailable'] = 'parameter/mode recovery is unavailable when truth/fit K differ or K=1'
     fit_payload = {'model': selected.model.to_dict(), 'selection': selection,
         'initializations': [fit.to_dict(include_posteriors=False) for fit in fits],
         'generated_inputs': generated, 'recipe_hash': identity, 'unavailable_metrics': unavailable,
-        'mode_diagnostics': mode_diagnostics,
+        'mode_diagnostics': legacy_mode_diagnostics,
         'interpretation_level': 'synthetic-statistical-only', 'qualified_identifiability': False}
+    if recovery_diagnostics is not None:
+        fit_payload['recovery_diagnostics'] = recovery_diagnostics
     # Shared case views consume this registered first-path preview. The full
     # synthetic paths remain separately named, rather than confused with n blocks.
     preview = forecasts[0]

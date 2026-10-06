@@ -112,3 +112,57 @@ lineage. The synthetic pipeline does not claim identifiability qualification.
 ```console
 python -m pytest tests/test_pirc28_synthetic.py tests/test_pirc28_inference.py tests/test_pirc28_runtime.py -q
 ```
+
+## Synthetic identifiability qualification
+
+`experiments.pirc28.qualification.phase_scenarios` expands an explicitly supplied,
+bounded Cartesian matrix over mode separation, mean stationary sojourn time,
+observation interval, position noise standard deviation, trajectory length and
+stationary mode occupancy. It does not run simulations or create a ledger.
+Separation scales affine drift contrasts; `dwell_time_s` is not the CTMC
+relaxation time. Each generated scenario preserves its actual schedule/model
+hash, including the six axis values. Oversized matrices and invalid axes refuse
+before numerical execution.
+
+`IdentifiabilitySpec` freezes independent replicate IDs, all unit-specific
+parameter scales/recovery thresholds, occupancy and collapse criteria, effective
+replicate minimum, recovery fraction, calibration bins, marginal coverage level,
+bootstrap seed/draw count, selection-only initialization choice and shared-arm
+stop rule. Unfilled thresholds are `NEEDS_PREREGISTRATION`, not an implicit pass.
+No default scientific success thresholds are chosen from observed results.
+
+An optional canonical `identifiability_spec` inside the frozen synthetic recipe
+adds evaluator-only diagnostics to each result. Parameter matching enumerates
+the two label maps with unit-specific normalized errors; Q is relabeled on both
+axes. Diffusion recovery compares `L L^T`, since a noise rotation changes L but
+not its model law. Scenario truth label maps are applied consistently to model,
+mode probabilities and continuous dwell. Parameter/mode recovery is explicitly
+unavailable for K=1 versus K=2 truth, not reported as artificial zero error.
+
+Mode Brier/ECE and continuous-dwell occupancy error accompany coordinate-marginal
+equal-tail forecast coverage. The latter is not a joint credible-region claim.
+Two binary proper scores separately evaluate at least one actual future jump
+and a different endpoint mode; evaluator jump paths include return jumps. All
+such statistics are within one independently generated replicate. Paths, points,
+horizons and initialization seeds within a cell are not extra independent units.
+
+`qualify(spec, rows, aggregate_hash, check_budget=...)` requires unique registered
+(scenario, independent replicate, K) rows, matched K=1/K=2 input hashes, and
+failure-inclusive denominators. One input block cannot be counted under several
+replicate IDs. Results distinguish missing/incomplete, budget exhausted,
+unidentifiable and passing scenarios, and retain their applicable axis ranges.
+Missing/nonfinite metrics or label/identity conflicts cannot pass. Recovery
+fractions use Wilson binomial intervals, including the all-success boundary;
+successful-fit metric means and paired energy differences use a bounded
+replicate-level percentile bootstrap. Those conditional intervals are not used
+to hide failed fits. Polls occur between bounded bootstrap batches.
+
+Raw evaluator rows and a passing mathematical report never authorize real-data
+access. Their source, immutable artifacts, attempts, admission and qualification
+bindings must still be validated through the shared store. Neither cell outputs
+nor this module promote `qualified_identifiability`; the pipeline retains false.
+No scientific matrix has been executed merely by passing these software tests:
+
+```console
+python -m pytest tests/test_pirc28_qualification.py -q
+```
