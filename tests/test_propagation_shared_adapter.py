@@ -1,7 +1,8 @@
 """Synthetic integration with real admission, process and shared budget APIs."""
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
+import time
 
 import pytest
 
@@ -12,26 +13,32 @@ from domain.propagation import PropagationRequest
 from experiments.pirc25.affine import code_hash
 from experiments.pirc25.runner import SharedRunner
 from experiments.pirc27.oracles import oracle_suite
-from experiments.pirc27.plugin import propagation_plugin, execution_config, execution_inputs
+from experiments.pirc27.plugin import (propagation_plugin, execution_config, execution_inputs,
+    propagation_resume_command, propagation_recovery_plugin)
 from infrastructure.research_store import ResearchError, ResearchStore, digest, encode
 from tests.research_admission_fixtures import admit_fixture
 
 
-def prepare(tmp_path, method="euler"):
+def prepare(tmp_path, method="euler", *, recovery=False, changes=None, level_samples=None, unbound_steps=None):
     # A disposable test store, not a new scientific ledger or protected input.
     store = ResearchStore(tmp_path, "propagation-unit", initialize=True)
     case = oracle_suite()[0]
     request = PropagationRequest("endpoint-fixture", case.package.package_hash, case.initial_mean,
         case.initial_covariance, 0.0, 0.0, (1.0,), "endpoint-halfspace" if method == "importance" else "endpoint-x", 11, "paired-root", "affine-method",
         samples=16, steps=4, chunk_size=8)
-    plugin = propagation_plugin()
-    config = execution_config(request, method, level_samples=(8, 8) if method == "mlmc" else (),
-                              proposal=(1.0, 0.0) if method == "importance" else (0.0, 0.0))
+    request = replace(request, **(changes or {}))
+    plugin = propagation_plugin(recovery=recovery)
+    config = execution_config(request, method, level_samples=(level_samples or (8, 8)) if method == "mlmc" else (),
+                              proposal=(1.0, 0.0) if method == "importance" else (0.0, 0.0), recovery=recovery)
     inputs = execution_inputs(request)
     cell = {"arm_id": request.arm_id, "block_id": "generator-v1", "seed": request.seed, "horizon": 1.0,
             "plugin_id": plugin.plugin_id, "capability": {"mlmc": "coupled-level", "exact": "exact-transition", "importance": "rare-event"}.get(method, "generic-rollout"),
             "visibility": "synthetic", "frozen_dynamics": case.package.manifest(),
             "propagation_request": json.loads(encode(asdict(request)))}
+    if unbound_steps is not None:
+        # Register this malformed pairing as the original matrix, so the test
+        # reaches method accounting rather than an earlier snapshot hash veto.
+        cell["propagation_request"]["steps"] = unbound_steps
     cell["resource_class"] = "cpu"
     cell["execution"] = execution_binding(plugin.registry_entry, config, inputs, matrix_cells=1)
     spec = {"schema_version": "pirc25-contract-v1", "study_id": "propagation-unit", "experiment_id": "oracle-unit",
@@ -41,7 +48,8 @@ def prepare(tmp_path, method="euler"):
         "arms": [{"arm_id": request.arm_id, "model_family_id": "affine-stable-v1",
                   "method_family_id": method, "objective_id": request.functional, "budget_seconds": 86400}],
         "cells": [cell], "runtime_binding": {"root": str(tmp_path.resolve()), "store_id": store.store_id}}
-    admit_fixture(store, spec, plugin, tmp_path, execution_config=config, execution_inputs=inputs, legacy_upstream=False)
+    admit_fixture(store, spec, plugin, tmp_path, execution_config=config, execution_inputs=inputs, legacy_upstream=False,
+        recovery_command_builder=propagation_resume_command if recovery else None)
     registry = CapabilityRegistry()
     registry.register(plugin)
     return store, spec, registry
@@ -93,3 +101,72 @@ def test_closed_shared_arm_refuses_plugin_before_any_worker_can_start(tmp_path):
         SharedRunner(store, registry).run_cell(spec["study_id"], digest(spec["cells"][0]))
     assert not any(event["event_kind"] == "WORKER_STARTED" for event in store.events())
     assert next(iter(store.attempts().values()))["state"] == "BUDGET_EXHAUSTED"
+
+
+@pytest.mark.parametrize("method", ["euler", "heun", "mlmc", "importance"])
+def test_actual_chunk_worker_stops_and_reopened_resume_preserves_computation_and_cost(tmp_path, method):
+    from application.propagation_execution import execute_propagation
+    from application.research_recovery import RecoveryRegistry, SharedRecovery
+    # Real numerical work, with tiny chunks to make the owner's real 80% signal
+    # reachable at a completed boundary. No fake clock, sleep-only worker,
+    # budget extension, forced checkpoint file or state-only roundtrip.
+    changes = {"samples": 896 if method == "mlmc" else 2048, "steps": 128, "chunk_size": 1}
+    store, spec, registry = prepare(tmp_path, method, recovery=True, changes=changes,
+        level_samples=(512, 256, 128) if method == "mlmc" else None)
+    cell = spec["cells"][0]
+    started = time.monotonic()
+    expected = execute_propagation(spec, cell)
+    # Calibrate only this synthetic test's job duration, not a research arm.
+    # Faster hosts must still exercise a real save before workload completion;
+    # no clock or deadline is altered after the reservation is made.
+    job_seconds = max(5.0, min(20.0, (time.monotonic()-started)*0.5))
+    store.register(spec, digest(spec))
+    adapters = RecoveryRegistry()
+    adapters.register(propagation_recovery_plugin())
+    interrupted = SharedRunner(store, registry, recovery_registry=adapters).run_cell(
+        spec["study_id"], digest(cell), budget=BudgetSpec(job_seconds, category="smoke"))
+    assert interrupted["state"] == "FAILED", interrupted
+    assert store.attempts()[interrupted["attempt_id"]]["error_code"] == "CHECKPOINT_SAVED"
+    saved = interrupted["checkpoint"]
+    assert saved["resume_level"] == "chunk"
+    assert 0 < saved["progress"]["completed_steps"] < saved["progress"]["total_steps"]
+    assert saved["progress"]["total_steps"] == cell["execution"]["config"]["work_steps"]
+    before = BudgetLedger(store).balance("affine-method")
+    assert before["committed_ms"] > 0 and not before["closed"]
+    reopened = ResearchStore(tmp_path, "propagation-unit")
+    grant = reopened.manifest("authorization-" + spec["admission"]["authorization_id"])
+    resumed = SharedRecovery(reopened, registry, adapters).resume(interrupted["attempt_id"], saved["artifact_id"],
+        authorization=grant, budget=BudgetSpec(60, category="smoke"))
+    assert resumed["state"] == "SUCCEEDED", resumed
+    actual = json.loads((reopened.path / "artifacts" / resumed["artifact_id"]).read_bytes())
+    assert actual["forecast"] == json.loads(encode(expected["forecast"]))
+    assert actual["metrics"] == expected["metrics"] and actual["output_hash"] == expected["output_hash"]
+    after = BudgetLedger(reopened).balance("affine-method")
+    assert after["committed_ms"] > before["committed_ms"] and not after["closed"]
+    assert reopened.attempts()[resumed["attempt_id"]]["parent_attempt_id"] == interrupted["attempt_id"]
+    assert actual["resume_level"] == "chunk" and actual["admission_hash"]
+
+
+def test_chunk_resource_plan_refuses_total_work_not_just_finest_grid(tmp_path):
+    from application.propagation_execution import request_from_manifest
+    from application.research_registry import plan_resources
+    store, spec, registry = prepare(tmp_path, recovery=True)
+    plugin = propagation_plugin(recovery=True)
+    config = dict(spec["cells"][0]["execution"]["config"], work_steps=1_000_001)
+    with pytest.raises(ResearchError, match="CONTRACT_MISMATCH"):
+        plan_resources(plugin.registry_entry, config, spec["cells"][0]["execution"]["inputs"], matrix_cells=1)
+    # Every individual bound is legal; the true product is not. Refuse it when
+    # building the immutable config rather than understating admitted progress.
+    request = replace(request_from_manifest(spec["cells"][0]["propagation_request"]), samples=1024, steps=8192)
+    with pytest.raises(ResearchError, match="RESOURCE_PLAN_REJECTED"):
+        execution_config(request, "euler", recovery=True)
+    assert not any(event["event_kind"] == "WORKER_STARTED" for event in store.events())
+
+
+@pytest.mark.parametrize("recovery", [False, True])
+def test_request_cannot_understate_registered_work_before_process_launch(tmp_path, recovery):
+    store, spec, registry = prepare(tmp_path, recovery=recovery, unbound_steps=8192)
+    store.register(spec, digest(spec))
+    with pytest.raises(ResearchError, match="CONTRACT_MISMATCH"):
+        SharedRunner(store, registry).run_cell(spec["study_id"], digest(spec["cells"][0]))
+    assert not any(event["event_kind"] == "WORKER_STARTED" for event in store.events())

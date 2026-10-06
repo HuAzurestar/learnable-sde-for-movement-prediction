@@ -30,10 +30,10 @@ def request_from_manifest(document):
         raise ResearchError("CONTRACT_MISMATCH", "invalid registered propagation request") from exc
 
 
-def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None):
+def validate_propagation_cell(spec, cell):
+    """Validate method/request accounting before launch and again in the worker."""
     from experiments.pirc25.affine import code_hash
     from experiments.pirc27.plugin import propagation_plugin, execution_config, execution_inputs
-    from inference.propagation_methods import (analytic_estimate, monte_carlo, mlmc_estimate, importance_sampling)
     if spec.get("code_hash") != code_hash() or cell.get("visibility") != "synthetic":
         raise ResearchError("CONTRACT_MISMATCH", "only the frozen synthetic source is supported by this adapter")
     recovery = cell["plugin_id"] == "affine-propagation-chunk"
@@ -50,6 +50,13 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None):
                            "heun": "generic-rollout", "mlmc": "coupled-level", "importance": "rare-event"}[config["method"]]
     if cell["capability"] != required_capability:
         raise ResearchError("CONTRACT_MISMATCH", "method differs from the cell's registered capability")
+    return package, request, config, plugin
+
+
+def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None):
+    from inference.propagation_methods import (analytic_estimate, monte_carlo, mlmc_estimate, importance_sampling)
+    package, request, config, plugin = validate_propagation_cell(spec, cell)
+    recovery = plugin.resume_level == "chunk"
     if not recovery and (resume_state is not None or checkpoint is not None):
         raise ResearchError("CONTRACT_MISMATCH", "restart-only methods cannot accept chunk state")
     continuation = {"resume_state": resume_state, "checkpoint": checkpoint}

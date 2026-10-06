@@ -14,6 +14,8 @@ from infrastructure.research_store import ResearchError, digest
 
 
 def propagation_command(output, spec, cell):
+    from application.propagation_execution import validate_propagation_cell
+    validate_propagation_cell(spec, cell)
     binding = spec.get("runtime_binding", {})
     from pathlib import Path
     if (set(binding) != {"root", "store_id"} or type(binding["root"]) is not str
@@ -26,9 +28,10 @@ def propagation_command(output, spec, cell):
 def propagation_resume_command(output, spec, cell, state):
     from pathlib import Path
     from infrastructure.research_store import atomic_write, encode
+    command = propagation_command(output, spec, cell)
     path = Path(output).with_name("propagation-resume.json")
     atomic_write(path, encode(state))
-    return [*propagation_command(output, spec, cell), str(path)]
+    return [*command, str(path)]
 
 
 def propagation_recovery_plugin():
