@@ -228,3 +228,47 @@ These tests use disposable stores and explicit synthetic operator attestations,
 including a managed pilot-mode control. They are software integration checks,
 not the production phase diagram, a crash-at-any-instruction proof or a claimed
 accepted scientific result.
+
+## Supervisor-budgeted qualification computation
+
+`experiments.pirc28.computation.QualificationRunner` runs collection and bounded
+bootstrap computation in the existing shared OS supervisor. It copies the
+original K=2 arm verbatim into a derived computation study: no new method family,
+24-hour balance, motion capability, store or data grant is introduced. Stage
+budgets must match the immutable source stage (fixture/smoke, pilot/pilot,
+formal/job). The canonical definition and the complete source study, attempt,
+code, authorization and resource-plan identities are frozen before the job.
+Concurrent source outcome changes reject collection/publication as INDEX_STALE;
+unrelated computation attempts do not invalidate the scoped source snapshot.
+
+At 80% the worker can save a seed-deterministic full-restart marker. This is not
+partial interval recovery. An explicit failed-parent retry and reason restart
+the same frozen input and retain all charges on the original arm. The native
+deadline/tree stop and cumulative-arm fuse remain shared supervisor authority.
+Source-read bytes, output/request bytes, bootstrap elements and batch size are
+bounded; these allocation declarations are not a claim of a hard RSS limit.
+
+Success produces an immutable result artifact and
+`pirc28-qualification-computation-receipt-v1` binding request/report/source hashes,
+actual reserve/launch/tree-stop/settlement provenance and charged slot-ms with
+the original arm ID. Receipt publication can resume after a crash without
+another worker reservation. Successful reuse revalidates source attempts,
+current grants, code, artifact and cost provenance; it does not rerun bootstrap.
+Current source visibility and block scopes are checked before disclosure and
+after publication. No external file export or authorization is created.
+Reports retain source-arm balances observed during computation, which may
+include this job's outstanding reservation; the final receipt records its
+actual settlement, not that temporary reserved amount.
+
+Only definitions already published as `pirc28-identifiability-spec-HASH` and
+existing evaluate-purpose grants can be used by the CLI:
+
+```console
+python -m experiments.pirc28 --root SHARED_ROOT --store-id STORE_ID --stage pilot --seconds 1800 qualify DEFINITION_HASH --study-grant STUDY_ID=AUTHORIZATION_ID
+python -m pytest tests/test_pirc28_computation.py -q
+```
+
+Fixture use additionally requires `--allow-fixture` and a smoke budget; it can
+only publish FIXTURE_ONLY. Even a synthetic scientific pass does not grant
+real-data access or replace the remaining preregistration, applicable-range,
+study execution, paper, review and acceptance obligations.

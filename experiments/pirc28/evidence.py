@@ -31,6 +31,13 @@ def _run_id(study, cell, spec_hash=None):
         'seed': cell.get('seed'), 'cell': cell})
 
 
+def source_attempts_hash(store, studies, *, attempts=None):
+    """Scoped immutable outcome snapshot, excluding unrelated computation jobs."""
+    runs = {_run_id(study, cell) for study in studies for cell in study['cells']}
+    states = store.attempts() if attempts is None else attempts
+    return digest({key: value for key, value in states.items() if value['run_id'] in runs})
+
+
 def _cost_history(store, study, cell, attempts, events_by_attempt):
     """Keep every attempt's charged or outstanding cost, including failed retries."""
     history = []
@@ -185,7 +192,8 @@ def _success_row(definition, study, cell, result, artifact_hash):
 
 
 def collect_qualification(store, definition, study_ids, authorizations, *, check_budget,
-                          allow_fixture=False, maximum_total_bytes=512*1024*1024):
+                          allow_fixture=False, maximum_total_bytes=512*1024*1024,
+                          expected_attempts_hash=None):
     """Collect a complete declared matrix; no retry or initialization cherry-pick.
 
     authorizations maps study IDs to existing evaluate-purpose grant documents.
@@ -219,11 +227,13 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
     expected = {(scenario, replicate, k) for scenario in definition.scenario_axes for replicate in definition.replicate_ids for k in (1, 2)}
     cells, families, sources, matrices, study_hashes = {}, {}, set(), {}, {}
     fixture = False
+    studies = []
     preregistrations = set()
     for study_id in sorted(study_ids):
         check_budget()
         document = store.manifest('study-' + study_id)
         study = document['spec']
+        studies.append(study)
         study_hashes[study_id] = digest(study)
         if (document.get('spec_hash') != digest(study) or study['study_id'] != study_id
                 or study.get('runtime_binding') != {'root': str(store.path.parent), 'store_id': store.store_id}
@@ -271,6 +281,9 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
     if (set(cells) != expected or len(sources) != 1 or families[1][0] == families[2][0]
             or families[1][1] == families[2][1] or (not fixture and len(matrices) != 1)):
         raise ResearchError('UNQUALIFIED', 'full paired matrix, one code source and separate fixed K arms required')
+    snapshot_hash = source_attempts_hash(store, studies, attempts=attempts)
+    if expected_attempts_hash is not None and snapshot_hash != expected_attempts_hash:
+        raise ResearchError('INDEX_STALE', 'frozen source attempts changed before qualification')
     # Recipe/seed pairing is checked even when neither cell has run yet.
     for scenario in definition.scenario_axes:
         seeds = set()
@@ -343,6 +356,8 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
             authorize_study(store, study_id, authorizations[study_id], 'evaluate')
         for artifact_id, grant in disclosed:
             store.verify_artifact_read(artifact_id, purpose='evaluate', authorization=grant)
+        if source_attempts_hash(store, studies) != snapshot_hash:
+            raise ResearchError('INDEX_STALE', 'source attempts changed during qualification')
     for study_id in study_ids:
         require_unexpired_disclosure(store, study_id, authorizations[study_id], 'evaluate')
     scientific = not fixture and report['state'] == 'PASSED' and not definition.missing_fields
@@ -353,4 +368,5 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
         'preregistration_hashes': sorted(preregistrations), 'code_hash': next(iter(sources)),
         'arm_balances': balances, 'read_bytes': consumed, 'selection_rule': SELECTION_RULE,
         'source_snapshot_event_hash': None if not events else events[-1]['hash'],
+        'source_attempts_hash': snapshot_hash,
         'evidence_binding': 'shared-authorized-result-read-and-verified-reuse-provenance'}
