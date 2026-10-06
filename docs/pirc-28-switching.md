@@ -573,10 +573,10 @@ affine K=1/Kalman boundary has absolute and relative tolerances 1e-8. All requir
 checks and failures must remain disclosed; failure state is
 `INFERENCE_INAPPLICABLE`, never a fabricated successful diagnostic.
 
-CURRENT LIMITATION: only the immutable contract, fine-grid metadata preflight
-and fail-closed publication boundary are implemented. The managed numerical
-executor, its registered allocation plan, reference algorithm/uncertainty
-implementation and independent evidence/provenance adapter are NOT implemented.
+CURRENT LIMITATION: the immutable contract, fine-grid metadata preflight,
+fail-closed publication boundary and bounded numerical core below are implemented.
+The managed numerical executor, its registered allocation plan and independent
+evidence/provenance adapter are NOT implemented.
 V2 execution therefore refuses with `NEEDS_IMPLEMENTATION` before generation
 or fitting. This software gap is not published as a numerical-failure artifact.
 Preparation/staging is metadata only and admits no reference computation or
@@ -595,3 +595,72 @@ recipes; neither a forged passing worker status nor a recomputed report hash
 can promote it. Implementing a numerical checker alone will not lift this
 stop: actual managed cost, source, input, selected-fit and approximation evidence
 must be independently bound before scientific qualification is enabled.
+
+## Observation-prefix numerical core (not an execution authorization)
+
+`experiments.pirc28.approximation_checks.check_prefix_approximation` now computes
+the checks from observation-only prefixes, a fixed selected-model input, the
+same filtering prior, frozen inference/approximation specifications, an explicit
+reference seed and caller-supplied budget poll. It never fits or selects a model,
+opens a store, reserves budget, creates an arm, accesses truth or reads future
+observations. Every held-out prefix path is retained. Its worst-rate grid,
+conservative sequential-allocation and worst-case event-segment preflight refuse
+oversized work; this is a core plan, NOT shared resource admission or accounting
+for concurrent source-fit/forecast allocations. The future adapter must register
+and verify the whole live allocation/work plan under the existing caps.
+
+The reference draws initial modes and autonomous CTMC jump paths, with zero or
+multiple events in each observation interval. Each particle carries a Gaussian
+continuous mean/covariance: fixed-mode affine kernels compose over actual jump
+segments, and a direct conditional Kalman update supplies observation weights.
+It uses independent initial/event/resampling streams per seed/path/batch and
+multinomial resampling at every observation. It keeps compact prefix summaries,
+not all jump/particle histories. The conditional continuous marginalisation
+follows the structure described by [Doucet et al., UAI 2000](https://arxiv.org/abs/1301.3853);
+this particular CTMC implementation is ours, not a claim that the paper supplies
+this code or establishes the chosen tolerances. It is not endpoint-only affine
+propagation, drift averaging, a true-mode input or a smoothing reference.
+
+All frozen independent batches execute exactly once, without deleting failed
+batches or adding particles/MC runs when precision is poor. Batch-mean Student-t
+half-widths are nominal pointwise normal-approximation diagnostics, not exact
+finite-sample or simultaneous coverage and not bounds on finite-particle
+self-normalisation/posterior bias. The integer-df critical value uses bounded
+numerical inversion of the [Student density](https://www.itl.nist.gov/div898/handbook/eda/section3/eda3664.htm),
+without a new SciPy dependency. The likelihood comparison logs the mean of
+positive likelihood estimates using stable rescaling, rather than averaging
+their logs. A nonpositive likelihood interval lower bound fails precision; it
+does not become a zero error. The transformed log estimate still has finite-MC
+bias. The distinction between likelihood estimators and log-noise assumptions is
+also explicit in [Doucet et al., Biometrika 2015](https://www.stats.ox.ac.uk/~doucet/DoucetPittDeligiannidisKohn_efficientimplementationMCMCunbiasedlikelihoodestimator.pdf).
+None of these papers proves our core's scientific accuracy or MC bias bound.
+
+Checks compare the coarse filter to the fine filter and to reference prefix
+mode/marginal-state means and per-observation log likelihood. Reference errors
+plus their nominal half-widths must meet the frozen discrepancy limits; widths
+must separately meet the quarter-tolerance precision rule, and every batch must
+meet ESS. These are not full-distribution distances or a covariance error bound.
+Every model mode additionally becomes a fixed-mode K=1 control whose means,
+covariances and likelihood are checked against a direct full-interval Kalman
+implementation using Cholesky scoring/covariance subtraction rather than the
+IMM measurement update's slogdet/Joseph implementation. Kernel analytic controls
+remain separate software evidence.
+
+The result records spec/model/prior/inference/prefix hashes, seed, path identities,
+all error/MC/ESS/jump/boundary diagnostics and resource estimates. Compact
+coarse/fine/reference observation-time summaries and the complete indexed batch
+summary/seed roster are included, so a future verifier does not have to trust
+a hash of unpublished numbers or a claimed MC width without its batch inputs.
+This is still not independently verified managed evidence. Any numerical
+gate failure remains `INFERENCE_INAPPLICABLE`; timeouts and other caller budget
+errors propagate without retry or a partial pass. `NUMERICAL_CHECKS_PASSED` means
+only these core comparisons met their limits, never scientific qualification:
+`managed_evidence_bound=qualified_identifiability=real_data_authorized=false`.
+The V2 source worker still refuses `NEEDS_IMPLEMENTATION`; independently verified
+managed selected-fit/input/source/cost/authority evidence and actual scientific
+recovery/calibration are still outstanding. Code-source changes require fresh
+pre-fit master/preregistration binding without resetting the original arm costs.
+
+```console
+python -m pytest tests/test_pirc28_approximation_checks.py -q
+```
