@@ -1,11 +1,12 @@
 # Endpoint propagation methods
 
 The affine implementation compares exact Gaussian reference, Euler path MC,
-additive-noise stochastic Heun, Euler Gaussian moment propagation, coupled Euler
+additive-noise stochastic Heun and reversible Heun, Euler Gaussian moment propagation, coupled Euler
 MLMC and unnormalized velocity-drift importance sampling. These kernels support
 four-state frozen synthetic affine packages and Gaussian initial distributions.
-They do not consume a trained nonlinear package, implement reversible Heun,
-perform mode learning or solve a PDE.
+They do not consume a trained nonlinear package, perform mode learning or solve
+a PDE. Separate synthetic nonlinear adapters support the declared constant-noise
+stress packages; these are not qualified trained models.
 
 `domain.propagation.PropagationRequest` is an immutable per-cell endpoint request:
 one registered horizon, initial distribution, model content identity, origin and
@@ -83,6 +84,51 @@ python -m pytest tests/test_mlmc_pilot.py tests/test_mlmc_pilot_shared.py -q
 
 ## Other methods and shared recovery
 
+`reversible-heun` is a distinct path-MC configuration, not an alias for ordinary
+Heun. It specializes Algorithm 1 of [Kidger et al., *Efficient and Accurate
+Gradients for Neural SDEs*](https://arxiv.org/abs/2105.13493) to autonomous drift
+and constant additive diffusion. In this supported slice the Itô and
+Stratonovich conventions coincide. The extended pair `(y, z)` starts with
+`z=y` and advances as
+
+```text
+z_next = 2*y - z + h*f(z) + L*dW
+y_next = y + h/2*(f(z) + f(z_next)) + L*dW
+```
+
+The retained auxiliary drift needs one new drift evaluation per step after
+initialization. The *extended pair*, not `y` alone, reverses algebraically using
+`-h` and the same negated Brownian increment. Numerical unit tests check that
+property to floating-point tolerance; no adjoint/backpropagation system or
+cross-platform bitwise reversal is provided. Coarse and fine paths retain their
+own auxiliary states and use actual sums of adjacent Brownian increments.
+
+For affine dynamics, an eight-dimensional augmented Gaussian recurrence tracks
+the physical and auxiliary states with their **fully correlated** initial
+covariance. Only its four-dimensional physical marginal is returned. The affine
+time-bias component compares that marginal with the continuous float64 reference;
+reference roundoff and real-model errors remain unknown. Nonlinear time bias is
+also unknown. Physical state order and units stay unchanged; the resource
+contract explicitly reserves bounded auxiliary/cached-drift workspace. Adapter
+version `1.1.0` reflects the changed configuration and allocation contract.
+
+The paper establishes strong order one for constant diffusion under its
+regularity assumptions; this is not evidence that a particular frozen grid or
+long horizon meets the requested error. The method is not A-stable. Affine
+results expose the extended transition's spectral radius, including growth of
+parasitic auxiliary modes. Nonfinite paths, drifts or Gaussian moments fail;
+there is no step expansion, PSD projection or stability promotion. Finite
+outputs remain engineering fixtures until independent method/reference
+qualification. No multiplicative-noise Itô model is supported.
+
+Recovery occurs only after *complete sample chunks*. There is no partial path
+or auxiliary trajectory to serialize at that boundary: completed statistics
+are saved and remaining independent sample streams reconstruct both initial
+states. The solver identity is checkpoint-bound, so a regular-Heun state cannot
+be used as a reversible-Heun continuation. Real affine and nonlinear worker
+tests exercise the unchanged80% soft-save/ACK, reopened linked restore and
+cumulative original-arm charging.
+
 Importance sampling changes drift only by `L @ u` and retains the original
 diffusion. Its discrete path likelihood ratio is accumulated in log space:
 `log w = -sum(u @ dW) - 0.5 * ||u||^2 * horizon`. The estimator is unnormalized,
@@ -102,7 +148,7 @@ The worker never initializes a store, supplies authorization or resets budgets.
 
 Both adapters remain fixture-only. The original adapter declares `restart-only`.
 `propagation_plugin(recovery=True)` registers the separate
-`affine-propagation-chunk` adapter for Euler/Heun MC, MLMC and importance sampling.
+`affine-propagation-chunk` adapter for Euler/Heun/reversible-Heun MC, MLMC and importance sampling.
 Register `propagation_recovery_plugin()` with the shared recovery registry and
 bind its command in the admitted package before running. Analytic exact and
 Gaussian methods retain the original restart-only adapter; they have no streaming
@@ -138,6 +184,7 @@ Validation:
 
 ```console
 python -m pytest tests/test_propagation_oracles.py tests/test_propagation_methods.py tests/test_propagation_recovery.py tests/test_propagation_shared_adapter.py -q
+python -m pytest tests/test_reversible_heun.py -q
 ```
 
 Synthetic integration tests create disposable test stores outside Git, run actual

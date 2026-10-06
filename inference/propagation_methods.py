@@ -71,13 +71,19 @@ def discrete_moments(package, request, *, solver="euler", steps=None):
     if type(steps) is not int or not 1 <= steps <= 8192:
         raise DataValidationError("discrete step count exceeds registered kernel limit")
     dt = request.horizons[0] / steps
-    F, offset, noise = _scheme(A, b, L, dt, solver)
     covariance = np.array(request.initial_covariance, dtype=float)
+    if solver == "reversible-heun":
+        from .reversible_heun import affine_extended_scheme
+        F, offset, noise = affine_extended_scheme(A, b, L, dt)
+        mean = np.concatenate((mean, mean))
+        covariance = np.block([[covariance, covariance], [covariance, covariance]])
+    else:
+        F, offset, noise = _scheme(A, b, L, dt, solver)
     for _ in range(steps):
         mean, covariance = F@mean+offset, F@covariance@F.T + dt*(noise@noise.T)
         if not np.isfinite(mean).all() or not np.isfinite(covariance).all():
             raise NumericalError("nonfinite discrete affine moments")
-    return mean, _covariance(covariance, "discrete covariance").numpy()
+    return mean[:4], _covariance(covariance[:4, :4], "discrete covariance").numpy()
 
 
 def _error_budget(package, request, solver, steps, standard_error, *, exact=False):
@@ -117,6 +123,9 @@ def endpoint_chunks(package, request, *, solver="euler", level=0, paired=False,
     Proposal drift is L @ proposal, hence remains in the declared noise support.
     """
     A, b, L, initial, root = _inputs(package, request)
+    if solver not in {"euler", "additive-heun", "reversible-heun"}:
+        raise DataValidationError("unsupported additive-noise solver")
+    reversible = solver == "reversible-heun"
     nonlinear = isinstance(package, FrozenNonlinearPackage)
     if nonlinear:
         from .nonlinear_propagation import nonlinear_drift
@@ -142,31 +151,53 @@ def endpoint_chunks(package, request, *, solver="euler", level=0, paired=False,
         raise DataValidationError("proposal must be a finite two-dimensional noise shift")
     u = np.array(proposal, dtype=float)
     dt = request.horizons[0] / steps
-    F, offset, noise = _scheme(A, b + L@u, L, dt, solver)
-    if paired:
-        coarse_F, coarse_offset, coarse_noise = _scheme(A, b + L@u, L, 2*dt, solver)
+    if reversible:
+        from .reversible_heun import reversible_step
+        def drift(state):
+            if nonlinear:
+                return nonlinear_drift(A, b+L@u, parameters["amplitude"], parameters["length_scale"], state)
+            return np.einsum("bi,ji->bj", state, A, optimize=False) + b+L@u
+    else:
+        F, offset, noise = _scheme(A, b + L@u, L, dt, solver)
+        if paired:
+            coarse_F, coarse_offset, coarse_noise = _scheme(A, b + L@u, L, 2*dt, solver)
     for start in range(start_sample, start_sample+count, request.chunk_size):
         stop = min(start+request.chunk_size, start_sample+count)
         streams = [_rng(request, sample, level, phase) for sample in range(start, stop)]
         # O(chunk * state/noise), without storing steps-by-path Brownian arrays.
         state = np.stack([initial + root @ stream.standard_normal(4) for stream in streams])
         coarse = state.copy() if paired else None
+        if reversible:
+            auxiliary, cached_drift = state.copy(), drift(state)
+            if paired:
+                coarse_auxiliary, coarse_drift = coarse.copy(), cached_drift.copy()
         log_weight = np.zeros(stop-start)
         pending = np.zeros((stop-start, 2)) if paired else None
         for step in range(steps):
             increments = np.stack([stream.standard_normal(2) for stream in streams]) * math.sqrt(dt)
             # Fixed reduction order, independent of the BLAS batch-size path.
-            state = (advance(state, increments, dt) if nonlinear else
-                np.einsum("bi,ji->bj", state, F, optimize=False) + offset + np.einsum("bi,ji->bj", increments, noise, optimize=False))
+            if reversible:
+                state, auxiliary, cached_drift = reversible_step(state, auxiliary, drift,
+                    np.einsum("bi,ji->bj", increments, L, optimize=False), dt, cached_drift)
+            else:
+                state = (advance(state, increments, dt) if nonlinear else
+                    np.einsum("bi,ji->bj", state, F, optimize=False) + offset + np.einsum("bi,ji->bj", increments, noise, optimize=False))
             log_weight -= np.einsum("bi,i->b", increments, u, optimize=False) + 0.5*float(u@u)*dt
             if paired:
                 pending += increments
                 if step % 2:
-                    coarse = (advance(coarse, pending, 2*dt) if nonlinear else
-                        np.einsum("bi,ji->bj", coarse, coarse_F, optimize=False) + coarse_offset + np.einsum("bi,ji->bj", pending, coarse_noise, optimize=False))
+                    if reversible:
+                        coarse, coarse_auxiliary, coarse_drift = reversible_step(coarse, coarse_auxiliary, drift,
+                            np.einsum("bi,ji->bj", pending, L, optimize=False), 2*dt, coarse_drift)
+                    else:
+                        coarse = (advance(coarse, pending, 2*dt) if nonlinear else
+                            np.einsum("bi,ji->bj", coarse, coarse_F, optimize=False) + coarse_offset + np.einsum("bi,ji->bj", pending, coarse_noise, optimize=False))
                     pending.fill(0)
             if not np.isfinite(state).all() or not np.isfinite(log_weight).all() or paired and not np.isfinite(coarse).all():
                 raise NumericalError("nonfinite path, coupled path or importance weight")
+            if reversible and (not np.isfinite(auxiliary).all() or not np.isfinite(cached_drift).all()
+                    or paired and (not np.isfinite(coarse_auxiliary).all() or not np.isfinite(coarse_drift).all())):
+                raise NumericalError("nonfinite reversible extended state or drift")
         yield start, stop, state, coarse, log_weight
 
 
@@ -196,9 +227,20 @@ def monte_carlo(package, request, *, solver="euler", resume_state=None, checkpoi
     # Explicit exact one-sided upper bound for zero independent Bernoulli hits.
     if request.functional == "endpoint-halfspace" and hits == 0:
         se, interval, kind = None, (0.0, -math.expm1(math.log(0.05)/n)), "exact-binomial-one-sided-95"
+    diagnostics = (("brownian_scheme", "per-sample-seedsequence-v1"), ("coupling_id", request.coupling_id), ("hits", hits))
+    if solver == "reversible-heun":
+        diagnostics += (("numerical_state", "physical-and-auxiliary-initially-identical"),
+            ("noise_scope", "constant-additive-only-Ito-Stratonovich-equivalent"),
+            ("stability", "not-A-stable; no finite-grid scientific qualification"),
+            ("drift_evaluations_per_path", request.steps+1))
+        if isinstance(package, FrozenDynamicsPackage):
+            from .reversible_heun import affine_extended_scheme
+            A, b, L, _, _ = _inputs(package, request)
+            F, _, _ = affine_extended_scheme(A, b, L, request.horizons[0]/request.steps)
+            diagnostics += (("extended_spectral_radius", float(np.max(np.abs(np.linalg.eigvals(F))))),)
     return FunctionalResult(request.request_hash, solver+"-path-mc-v1", "functional_estimate", mean, se, interval, kind, n,
         _error_budget(package, request, solver, request.steps, se), "SUCCEEDED",
-        (("brownian_scheme", "per-sample-seedsequence-v1"), ("coupling_id", request.coupling_id), ("hits", hits)))
+        diagnostics)
 
 
 def importance_sampling(package, request, *, proposal, resume_state=None, checkpoint=None):

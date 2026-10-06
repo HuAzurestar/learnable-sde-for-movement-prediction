@@ -42,17 +42,17 @@ def propagation_recovery_plugin(*, synthetic=False):
 
 def propagation_plugin(*, recovery=False, synthetic=False):
     integer = lambda maximum, minimum=1: {"type": "integer", "minimum": minimum, "maximum": maximum}
-    properties = {"method": {"type": "string", "enum": ["exact", "euler", "heun", "gaussian", "mlmc", "importance"]},
+    properties = {"method": {"type": "string", "enum": ["exact", "euler", "heun", "reversible-heun", "gaussian", "mlmc", "importance"]},
         "samples": integer(1_000_000, 2), "base_steps": integer(8192), "steps": integer(8192), "chunk_size": integer(256),
         "level_samples": {"type": "array", "items": integer(1_000_000, 2), "minItems": 0, "maxItems": 9},
         "proposal": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}}
     if synthetic:
-        properties["method"]["enum"] = ["euler", "heun", "mlmc", "importance", "cubature"]
+        properties["method"]["enum"] = ["euler", "heun", "reversible-heun", "mlmc", "importance", "cubature"]
         properties["workspace_rows"] = integer(256, 8)
     if recovery or synthetic:
         properties["work_steps"] = integer(1_000_000)
     if recovery:
-        properties["method"]["enum"] = ["euler", "heun", "mlmc", "mlmc-pilot", "importance"]
+        properties["method"]["enum"] = ["euler", "heun", "reversible-heun", "mlmc", "mlmc-pilot", "importance"]
     config = {"type": "object", "properties": properties, "required": sorted(properties), "additionalProperties": False}
     inputs = {"state_dim": {"type": "integer", "enum": [4]}, "horizon": {"type": "number", "minimum": 0},
               "model_package_hash": {"type": "string", "minLength": 64, "maxLength": 64},
@@ -63,7 +63,7 @@ def propagation_plugin(*, recovery=False, synthetic=False):
         capabilities = capabilities - {"exact-transition"}
     identity = ("synthetic-propagation" if synthetic else "affine-propagation") + ("-chunk" if recovery else "")
     resume_level = "chunk" if recovery else "restart-only"
-    entry = RegistryEntry(identity, "execution-adapter", "1.0.0", implementation_hash(propagation_command),
+    entry = RegistryEntry(identity, "execution-adapter", "1.1.0", implementation_hash(propagation_command),
         config, {"type": "object", "properties": inputs, "required": sorted(inputs), "additionalProperties": False},
         {"type": "object", "properties": {"schema_version": {"type": "string", "enum": ["pirc25-result-v1"]},
             "status": {"type": "string", "enum": ["SUCCEEDED"]}}, "required": ["schema_version", "status"], "additionalProperties": True},
@@ -74,10 +74,17 @@ def propagation_plugin(*, recovery=False, synthetic=False):
             "state_dim": {"constant": 4}},
          "tensors": [{"name": name, "axes": ["observations", "state_dim"], "item_bytes": 8}
                      for name in ("fine", "coarse", "noise", "rng-and-statistics", "update-workspace")]
+                    + [{"name": name, "axes": ["observations", "state_dim"], "item_bytes": 8}
+                       for name in ("fine-auxiliary", "coarse-auxiliary", "fine-cached-drift", "coarse-cached-drift",
+                                    "reversible-next-auxiliary", "reversible-next-drift")]
                     + ([{"name": name, "axes": ["observations", "state_dim"], "item_bytes": 8}
                         for name in ("predictor", "drift-first", "drift-second", "cubature-points", "cubature-residuals")]
                         if synthetic else [])
-                    + [{"name": "affine-workspace", "axes": ["state_dim", "state_dim", "state_dim"], "item_bytes": 8}],
+                    + [{"name": "affine-workspace", "axes": ["state_dim", "state_dim", "state_dim"], "item_bytes": 8},
+                       # Conservative pooled allowance for the 8x8 augmented
+                       # transition/covariance and matrix-product temporaries;
+                       # numerical auxiliaries never alter physical state_dim.
+                       {"name": "augmented-gaussian-workspace", "axes": ["state_dim"]*5, "item_bytes": 8}],
          "limits": {**dict(GLOBAL_LIMITS), "matrix_cells": 10000, "paths": 1_000_000, "steps": 1_000_000 if recovery or synthetic else 8192,
                     "observations": 256, "result_bytes": 512*1024}})
     return ExecutionPlugin(entry.component_id, capabilities, states, units, resume_level, propagation_command, entry)
@@ -85,7 +92,7 @@ def propagation_plugin(*, recovery=False, synthetic=False):
 
 def execution_config(request, method, *, level_samples=(), proposal=(0.0, 0.0), recovery=False, synthetic=False):
     request.validate()
-    allowed = {"euler", "heun", "mlmc", "mlmc-pilot", "importance", "cubature"} if synthetic else {"exact", "euler", "heun", "gaussian", "mlmc", "mlmc-pilot", "importance"}
+    allowed = {"euler", "heun", "reversible-heun", "mlmc", "mlmc-pilot", "importance", "cubature"} if synthetic else {"exact", "euler", "heun", "reversible-heun", "gaussian", "mlmc", "mlmc-pilot", "importance"}
     if method not in allowed:
         raise ResearchError("CONTRACT_MISMATCH", "method is not in the frozen adapter")
     if method in {"mlmc", "mlmc-pilot"}:

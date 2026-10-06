@@ -119,7 +119,7 @@ def prepare(tmp_path, method="euler", *, recovery=False, changes=None, level_sam
     return store, spec, registry
 
 
-@pytest.mark.parametrize("method", ["exact", "euler", "heun", "gaussian", "mlmc", "importance"])
+@pytest.mark.parametrize("method", ["exact", "euler", "heun", "reversible-heun", "gaussian", "mlmc", "importance"])
 def test_method_uses_shared_supervisor_and_retains_error_and_budget_provenance(tmp_path, method):
     store, spec, registry = prepare(tmp_path, method)
     store.register(spec, digest(spec))
@@ -167,7 +167,7 @@ def test_closed_shared_arm_refuses_plugin_before_any_worker_can_start(tmp_path):
     assert next(iter(store.attempts().values()))["state"] == "BUDGET_EXHAUSTED"
 
 
-@pytest.mark.parametrize("method", ["euler", "heun", "mlmc", "importance"])
+@pytest.mark.parametrize("method", ["euler", "heun", "reversible-heun", "mlmc", "importance"])
 def test_actual_chunk_worker_stops_and_reopened_resume_preserves_computation_and_cost(tmp_path, method):
     from application.propagation_execution import execute_propagation
     from application.research_recovery import RecoveryRegistry, SharedRecovery
@@ -195,7 +195,7 @@ def test_actual_chunk_worker_stops_and_reopened_resume_preserves_computation_and
         if method == "importance":
             importance_sampling(case.package, calibration, proposal=(1.0, 0.0))
         else:
-            monte_carlo(case.package, calibration, solver="additive-heun" if method == "heun" else "euler")
+            monte_carlo(case.package, calibration, solver={"heun": "additive-heun", "reversible-heun": "reversible-heun"}.get(method, "euler"))
         samples = _path_checkpoint_samples(time.monotonic()-started)
     changes = {"samples": sum(allocation) if allocation else samples, "steps": 128, "chunk_size": 1}
     startup_seconds = _worker_startup_seconds()

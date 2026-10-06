@@ -143,7 +143,7 @@ def _request(design, model, method, functional, horizon, seed, arm_id):
 
 
 def _disposition(model, method):
-    if method.method in {"mixture", "reversible-heun", "pde"}:
+    if method.method in {"mixture", "pde"}:
         return "NOT_IMPLEMENTED", "no versioned qualified implementation in this adapter"
     if isinstance(model.package, FrozenNonlinearPackage) and method.method in {"exact", "gaussian"}:
         return "INELIGIBLE", "affine-only analytic method cannot replace nonlinear dynamics"
@@ -199,7 +199,7 @@ def freeze_design(design):
                 or type(method.level_samples) is not tuple or type(method.proposal) is not tuple
                 or len(method.proposal) != 2 or not all(_finite(x) for x in method.proposal)):
             raise DataValidationError("unknown or mutable method configuration")
-        if method.recovery and method.method not in {"euler", "heun", "mlmc", "importance"}:
+        if method.recovery and method.method not in {"euler", "heun", "reversible-heun", "mlmc", "importance"}:
             raise DataValidationError("method has no declared chunk continuation")
         if method.method == "mlmc":
             if (not 1 <= len(method.level_samples) <= 9

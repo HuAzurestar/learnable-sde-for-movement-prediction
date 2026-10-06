@@ -96,7 +96,7 @@ def test_unsupported_and_affine_only_rows_are_retained_in_the_registered_draft()
     assert doc["expected_cells"] == len(doc["matrix"]) == 24
     assert {r["method"]: r["disposition"] for r in doc["matrix"]} == {
         "euler": "PLANNED", "exact": "INELIGIBLE", "gaussian": "INELIGIBLE",
-        "mixture": "NOT_IMPLEMENTED", "reversible-heun": "NOT_IMPLEMENTED", "pde": "NOT_IMPLEMENTED"}
+        "mixture": "NOT_IMPLEMENTED", "reversible-heun": "PLANNED", "pde": "NOT_IMPLEMENTED"}
     spec = frozen.study_spec(expected_hash=frozen.manifest_hash)
     assert len(spec["cells"]) == 24
     for row, cell in zip(doc["matrix"], spec["cells"]):
@@ -194,8 +194,8 @@ def test_frozen_draft_requires_exact_hash_and_current_source(monkeypatch):
 
 def test_all_supported_method_cells_have_frozen_shared_resource_bindings():
     functions = (StudyFunctional("probability", "endpoint-halfspace"),)
-    for nonlinear, names in ((False, ("exact", "gaussian", "euler", "heun", "mlmc", "importance")),
-                             (True, ("cubature", "euler", "heun", "mlmc", "importance"))):
+    for nonlinear, names in ((False, ("exact", "gaussian", "euler", "heun", "reversible-heun", "mlmc", "importance")),
+                             (True, ("cubature", "euler", "heun", "reversible-heun", "mlmc", "importance"))):
         methods = tuple(StudyMethod(name, steps=2, samples=16,
             level_samples=(8, 8) if name == "mlmc" else (),
             proposal=(1.0, 0.0) if name == "importance" else (0.0, 0.0)) for name in names)

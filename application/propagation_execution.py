@@ -56,7 +56,7 @@ def validate_propagation_cell(spec, cell):
     if config != expected or cell["execution"]["inputs"] != execution_inputs(request) or request.arm_id != cell["arm_id"] or request.seed != cell["seed"]:
         raise ResearchError("CONTRACT_MISMATCH", "registered request, method/resource configuration or arm differs")
     required_capability = {"exact": "exact-transition", "gaussian": "generic-rollout", "euler": "generic-rollout",
-                           "heun": "generic-rollout", "mlmc": "coupled-level", "mlmc-pilot": "coupled-level", "importance": "rare-event", "cubature": "generic-rollout"}[config["method"]]
+                           "heun": "generic-rollout", "reversible-heun": "generic-rollout", "mlmc": "coupled-level", "mlmc-pilot": "coupled-level", "importance": "rare-event", "cubature": "generic-rollout"}[config["method"]]
     if cell["capability"] != required_capability:
         raise ResearchError("CONTRACT_MISMATCH", "method differs from the cell's registered capability")
     if config["method"] == "mlmc-pilot":
@@ -90,6 +90,7 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None):
         "gaussian": lambda: analytic_estimate(package, request, discrete=True),
         "euler": lambda: monte_carlo(package, request, **continuation),
         "heun": lambda: monte_carlo(package, request, solver="additive-heun", **continuation),
+        "reversible-heun": lambda: monte_carlo(package, request, solver="reversible-heun", **continuation),
         "mlmc": lambda: mlmc_estimate(package, request, level_samples=tuple(config["level_samples"]), **continuation),
         "mlmc-pilot": lambda: mlmc_estimate(package, request, level_samples=tuple(config["level_samples"]), phase=2, pilot=True, **continuation),
         "importance": lambda: importance_sampling(package, request, proposal=tuple(config["proposal"]), **continuation),

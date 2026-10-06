@@ -35,12 +35,16 @@ shared store's cross-study identity/conflict and closed-arm checks. An operator
 must reuse the existing bindings; renamed identities are not permission to reset
 budgets.
 
-The complete expected matrix retains `NOT_IMPLEMENTED` mixture, reversible-Heun
-and PDE rows and `INELIGIBLE` affine-only methods on nonlinear packages. These
+The complete expected matrix retains `NOT_IMPLEMENTED` mixture and PDE rows and
+`INELIGIBLE` affine-only methods on nonlinear packages. These
 have reasons, requests and immutable shared non-execution declarations, not
 executable bindings. `PLANNED` means only
 that the engineering adapter supports the declared input/configuration. It does
 not mean scientific eligibility or a passing reference/pilot qualification.
+The additive-noise reversible-Heun path candidate now has a versioned engineering
+implementation and is `PLANNED` for affine and synthetic nonlinear inputs,
+including chunk recovery. Its auxiliary mode/stability limitations still need
+formal qualification; the compiler does not label it scientifically eligible.
 
 `manifest()` returns detached data. `study_spec(expected_hash=...)` also verifies
 the current runtime source and returns **all** cells, including declared

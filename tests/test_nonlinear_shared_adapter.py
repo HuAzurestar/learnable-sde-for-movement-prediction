@@ -29,7 +29,7 @@ def test_checkpoint_fixture_calibration_stays_within_the_frozen_work_quota(secon
     assert 1024 <= samples and samples*128 <= 1_000_000
 
 
-@pytest.mark.parametrize("method", ["euler", "heun", "mlmc", "importance", "cubature"])
+@pytest.mark.parametrize("method", ["euler", "heun", "reversible-heun", "mlmc", "importance", "cubature"])
 def test_synthetic_method_has_shared_admission_cost_and_no_fabricated_oracle_error(tmp_path, method):
     store, spec, registry = prepare(tmp_path, method, synthetic=True)
     store.register(spec, digest(spec))
@@ -69,27 +69,30 @@ def test_cubature_workspace_reserves_eight_points_even_when_path_chunk_is_one(tm
         execution_config(request, "cubature", synthetic=True, recovery=True)
 
 
-def test_real_nonlinear_chunk_worker_restores_actual_statistics_and_original_arm_cost(tmp_path):
+@pytest.mark.parametrize("method", ["euler", "reversible-heun"])
+def test_real_nonlinear_chunk_worker_restores_actual_statistics_and_original_arm_cost(tmp_path, method):
     from domain.propagation import PropagationRequest
     from experiments.pirc27.nonlinear import nonlinear_package
     from experiments.pirc27.oracles import oracle_suite
     from inference.propagation_methods import monte_carlo
+    from tests.test_propagation_shared_adapter import _worker_startup_seconds, _checkpoint_job_seconds
     case = oracle_suite()[0]
     package = nonlinear_package()
     calibration = PropagationRequest("timing-fixture", package.package_hash, case.initial_mean,
         case.initial_covariance, 0.0, 0.0, (1.0,), "endpoint-x", 11, "paired-root", "synthetic-method",
         samples=128, steps=128, chunk_size=1)
     started = time.monotonic()
-    monte_carlo(package, calibration)
+    monte_carlo(package, calibration, solver=method)
     samples = _checkpoint_fixture_samples(time.monotonic()-started)
-    store, spec, registry = prepare(tmp_path, synthetic=True, recovery=True,
+    startup_seconds = _worker_startup_seconds()
+    store, spec, registry = prepare(tmp_path, method, synthetic=True, recovery=True,
         changes={"samples": samples, "steps": 128, "chunk_size": 1})
     cell = spec["cells"][0]
     started = time.monotonic()
     expected = execute_propagation(spec, cell)
     # Real owner deadlines and soft-save condition are unchanged. No fake
     # clocks, sleeps, live reservation extension, or weakened restore assertions.
-    job_seconds = max(3., min(20., (time.monotonic()-started)*0.5))
+    job_seconds = _checkpoint_job_seconds(time.monotonic()-started, startup_seconds)
     store.register(spec, digest(spec))
     adapters = RecoveryRegistry()
     adapters.register(propagation_recovery_plugin(synthetic=True))
