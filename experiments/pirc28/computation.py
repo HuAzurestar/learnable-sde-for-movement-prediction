@@ -25,17 +25,32 @@ MAXIMUM_BOOTSTRAP_ELEMENTS = 50_000_000
 COMPUTATION_ID = 'pirc28-qualification-computation-v1'
 
 
-def computation_plan(definition, maximum_total_bytes):
+def computation_plan(definition, maximum_total_bytes, *, source_recipes=()):
     definition.validate()
     elements = (len(definition.scenario_axes)*len(definition.replicate_ids)
                 *definition.bootstrap_draws*(len(METRICS)+1))
     if (elements > MAXIMUM_BOOTSTRAP_ELEMENTS or type(maximum_total_bytes) is not int
             or not 1 <= maximum_total_bytes <= 2**30):
         raise ResearchError('RESOURCE_PLAN_REJECTED', 'qualification read/bootstrap allocation exceeds quota')
+    from .approximation import RECIPE_SCHEMA
+    from .pipeline import recipe_allocation
+    from .runtime import switching_plugin
+    from application.research_registry import plan_resources
+    prefix_elements = 0
+    for recipe in source_recipes:
+        if recipe['schema_version'] == RECIPE_SCHEMA:
+            allocation = recipe_allocation(recipe, 2)
+            plan_resources(switching_plugin().registry_entry, allocation['config'], allocation['inputs'], matrix_cells=1)
+            prefix_elements = max(prefix_elements, allocation['combined_tensor_elements'])
+    if (elements+prefix_elements)*8 > 512*1024*1024:
+        raise ResearchError('RESOURCE_PLAN_REJECTED', 'additive bootstrap/prefix numeric envelope exceeds 512 MiB')
     return {'maximum_result_bytes': MAXIMUM_RESULT_BYTES,
         'maximum_request_bytes': MAXIMUM_REQUEST_BYTES, 'maximum_total_source_bytes': maximum_total_bytes,
         'maximum_rows': len(definition.scenario_axes)*len(definition.replicate_ids)*2,
         'maximum_bootstrap_elements': elements, 'bootstrap_batch_draws': 32,
+        'maximum_prefix_replay_elements': prefix_elements,
+        'maximum_combined_numeric_bytes': (elements+prefix_elements)*8,
+        'prefix_replay_resource_rule': 'additive-bootstrap-plus-one-complete-registered-source-envelope; no-reference-resampling',
         'recovery': 'seed-deterministic-full-restart-from-frozen-source-attempts'}
 
 
@@ -106,6 +121,9 @@ def validate_computation_result(store, value, request):
             or (report['state'] == 'FIXTURE_ONLY' and not frozen['allow_fixture'])):
         raise ResearchError('CONTRACT_MISMATCH', 'qualification gate/fixture disposition differs')
     studies, _ = _sources(store, frozen)
+    if computation_plan(definition, frozen['resource_plan']['maximum_total_source_bytes'],
+            source_recipes=[study['switching_recipe'] for study in studies]) != frozen['resource_plan']:
+        raise ResearchError('RESOURCE_PLAN_REJECTED', 'owner qualification replay allocation differs')
     if (digest(report.get('approximation_qualification')) != digest(pending_qualification(studies))
             or (frozen['source_stage'] != 'fixture' and report['state'] == 'PASSED')):
         raise ResearchError('CONTRACT_MISMATCH', 'managed approximation proof is missing; scientific promotion refused')
@@ -116,6 +134,9 @@ def validate_computation_result(store, value, request):
             or report['study_definition_bound'] != (reference is not None)
             or (report['qualified_identifiability'] and reference is None)):
         raise ResearchError('CONTRACT_MISMATCH', 'qualification master-definition binding differs')
+    from .managed_evidence import validate_collected_prefix_bindings
+    validate_collected_prefix_bindings(store, studies, report, frozen['authorizations'],
+                                      frozen['resource_plan']['maximum_total_source_bytes'])
     _final_clock(store, frozen)
 
 
@@ -150,6 +171,8 @@ class QualificationRunner:
                     or ('pilot' in modes and budget.category != 'pilot')
                     or ('formal' in modes and budget.category != 'job') or len(modes) != 1):
                 raise ResearchError('CONTRACT_MISMATCH', 'one source stage and its shared computation budget cap required')
+            plan = computation_plan(definition, maximum_total_bytes,
+                                    source_recipes=[study['switching_recipe'] for study in studies])
             # Caller cannot choose a cheap new arm or relabel a method family.
             arms = [next((arm for arm in study['arms'] if arm['arm_id'] == cell['arm_id']), None)
                     for study in studies for cell in study['cells'] if cell.get('fit_K') == 2]

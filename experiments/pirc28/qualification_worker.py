@@ -40,7 +40,9 @@ def main(argv=None):
             or store.manifest('pirc28-qualification-request-'+attempt['attempt_id']) != request):
         raise ResearchError('IDENTITY_CONFLICT', 'qualification computation admission/source identity differs')
     definition = IdentifiabilitySpec.from_dict(frozen['definition'])
-    if computation_plan(definition, frozen['resource_plan']['maximum_total_source_bytes']) != frozen['resource_plan']:
+    studies, _ = _sources(store, frozen)
+    if computation_plan(definition, frozen['resource_plan']['maximum_total_source_bytes'],
+            source_recipes=[study['switching_recipe'] for study in studies]) != frozen['resource_plan']:
         raise ResearchError('RESOURCE_PLAN_REJECTED', 'qualification allocation differs from frozen source')
 
     def poll():

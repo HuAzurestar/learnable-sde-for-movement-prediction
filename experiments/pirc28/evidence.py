@@ -398,7 +398,7 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
                     or digest(left[0]['switching_recipe']) != digest(right[0]['switching_recipe']) or seed in seeds):
                 raise ResearchError('IDENTITY_CONFLICT', 'paired cells differ or duplicate an independent source seed')
             seeds.add(seed)
-    rows, lineage, disclosed = [], [], []
+    rows, lineage, disclosed, prefix_evidence = [], [], [], []
     consumed = 0
     plugin = switching_plugin()
     balances = {k: BudgetLedger(store).balance(family[0]) for k, family in families.items()}
@@ -429,6 +429,11 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
             if len(content) != size or hashlib.sha256(content).hexdigest() != artifact_id or content != encode(result):
                 raise ResearchError('CORRUPT_ARTIFACT', 'authorized failure bytes differ from frozen canonical metadata')
             verified_failure(store, attempt, study, cell, plugin)
+            from .managed_evidence import check_cell_prefix
+            prefix = check_cell_prefix(store, study, cell, attempt, result, metadata, grant, history,
+                                       check_budget=check_budget)
+            if prefix is not None:
+                prefix_evidence.append(prefix)
             failures[attempt['attempt_id']] = result['failure']
             next(value for value in history if value['attempt_id'] == attempt['attempt_id'])['failure'] = result['failure']
             disclosed.append((artifact_id, grant))
@@ -454,6 +459,11 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
             if content != encode(result):
                 raise ResearchError('CORRUPT_ARTIFACT', 'qualification source is not canonical result JSON')
             verified_reuse(store, selected, study, cell, plugin)
+            from .managed_evidence import check_cell_prefix
+            prefix = check_cell_prefix(store, study, cell, selected, result, metadata, grant, history,
+                                       check_budget=check_budget)
+            if prefix is not None:
+                prefix_evidence.append(prefix)
             row = _success_row(definition, study, cell, result, artifact_id)
             lineage[-1]['initialization_diagnostics'] = [
                 {'initialization_id': fit['initialization_id'], 'fit_state': fit['state'],
@@ -488,7 +498,8 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
         if 'applicable_ranges' in report:
             report['applicable_scenarios'], report['applicable_ranges'] = [], []
     approximation = withhold_scientific_pass(report, studies, fixture=fixture)
-    if len(encode({'rows': rows, 'lineage': lineage, 'gate': report})) > MAXIMUM_RESULT_BYTES:
+    if len(encode({'rows': rows, 'lineage': lineage, 'gate': report,
+                   'prefix_evidence': prefix_evidence})) > MAXIMUM_RESULT_BYTES:
         raise ResearchError('RESOURCE_LIMIT', 'qualification aggregate exceeds its bounded byte quota')
     # Integrity reuse and interval computation occur after the actual read;
     # purpose grants must still be valid at this final disclosure boundary.
@@ -507,6 +518,8 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
         'lineage': lineage, 'gate': report, 'state': 'FIXTURE_ONLY' if fixture else report['state'],
         'qualified_identifiability': scientific, 'real_data_authorized': False,
         'approximation_qualification': approximation,
+        'cell_approximation_evidence': prefix_evidence,
+        'cell_approximation_evidence_hash': digest(prefix_evidence),
         'preregistration_hashes': sorted(preregistrations), 'code_hash': next(iter(sources)),
         'study_definition_hash': study_definition_hash, 'study_definition_bound': study_definition_hash is not None,
         'arm_balances': balances, 'read_bytes': consumed, 'selection_rule': SELECTION_RULE,

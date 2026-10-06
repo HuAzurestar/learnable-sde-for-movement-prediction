@@ -864,12 +864,55 @@ use disposable explicitly admitted fixtures, not a production shared store.
 
 Reports and receipts keep `managed_evidence_bound`, `qualified_identifiability`
 and `real_data_authorized` false. The execution-scope string explicitly disclaims
-managed authority proof. Authorized scientific collector/owner integration,
-independent selected-fit binding and complete scientific execution/cost authority
-are still required before lifting scientific V2
+managed authority proof. The collector/owner diagnostic binding below is now
+implemented; complete scientific reference-execution/full-generated-input
+authority is still required before lifting scientific V2
 withholding. Zero scientific qualification groups have been executed.
 
 ```console
 python -m pytest tests/test_pirc28_managed_approximation.py -q
 python -m pytest tests/test_pirc28_reference_checkpoint.py -q
+```
+
+## Authorized prefix collection and independent owner binding
+
+The qualification worker now independently recomputes every V2 K2 source
+artifact's selected-fit scores and held-out prefix diagnostics after the actual
+evaluate-purpose read, canonical byte/hash checks and native reuse/failure
+verification. It replays only selection inputs and test prefixes, never future
+observations as filtering inputs or another particle reference. Failed prefix
+reports are checked without dropping failed batches; typed numerical exceptions
+with no report keep `NO_REFERENCE_REPORT`, not invented precision or success.
+
+`cell_approximation_evidence` binds every applicable success/failure artifact,
+complete source-attempt/cost history, original arm/store/code/cell/recipe, admission,
+evaluate grant, selected-model projection, prefix and numerical-report identities.
+Source substitution and unauthorized grants refuse before numerical checks.
+Actual native whole-tree stop evidence and matching measured settlement are
+required for successful as well as failed source artifacts. The publication owner
+re-reads the exact authorized immutable source artifacts and independently builds
+the complete expected binding roster from authoritative attempts and costs. It
+does not repeat numerical replay outside the funded worker. Missing/duplicate
+entries, changed hashes/seed/grant/costs, boolean type substitutions, unknown
+fields and self-rehashed promotion claims cannot pass merely by matching an
+aggregate hash. Final fresh disclosure/snapshot/expiry checks remain in place.
+
+Before reserving work, the frozen computation plan adds the maximum complete
+registered V2 source replay envelope to the existing bootstrap envelope under the
+unchanged 512-MiB numeric ceiling. Cells are sequential; no alternate reference
+arm or particle resampling is introduced. Both worker and owner independently
+rederive the frozen allocation. Each source's original 20-million-element cap,
+bootstrap/read/result quotas and original K2 shared budget still apply. These
+numeric declarations are not measured RSS or full interpreter/native heap proofs.
+
+`authorized_native_source_and_cost_bound` records this specific engineering
+provenance; it is not scientific qualification. Full generated training/test
+hash replay and independent reference-sampling verification remain false, along
+with `managed_evidence_bound`, `qualified_identifiability` and `real_data_authorized`.
+Default/pilot/formal V2 execution and scientific withholding remain unchanged
+until the complete scientific execution/evidence path is verified. No scientific
+qualification group is passed by the disposable control stores.
+
+```console
+python -m pytest tests/test_pirc28_managed_evidence.py -q
 ```
