@@ -171,7 +171,7 @@ class AdmissionGate:
                     raise ResearchError("UNAUTHORIZED_DATA", "analytic qualification cannot consume test/final-eval inputs")
                 from .propagation_execution import validate_propagation_cell
                 validate_propagation_cell(spec, cell)
-            if (plugin.plugin_id in {"affine-propagation-chunk", "synthetic-propagation-chunk"}
+            if (plugin.plugin_id in {"affine-propagation-chunk", "synthetic-propagation-chunk", "affine-mlmc-qualification-chunk"}
                     and cell.get("execution", {}).get("config", {}).get("method") == "mlmc-pilot"):
                 # BEFORE qualification artifacts or input exposure, including
                 # a caller that bypasses the propagation command builder.
@@ -328,7 +328,18 @@ class AdmissionGate:
             except ResearchError as exc:
                 self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
                 raise
-        if (plugin.plugin_id in {"affine-propagation-chunk", "synthetic-propagation-chunk"}
+        if plugin.plugin_id == "affine-mlmc-qualification-chunk":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.mlmc_qualification_plugin import mlmc_reference_policy
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                policy = mlmc_reference_policy(spec, cell, package, request, config)
+                if budget.category != "pilot" or budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "MLMC reference work requires the frozen pilot job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
+        if (plugin.plugin_id in {"affine-propagation-chunk", "synthetic-propagation-chunk", "affine-mlmc-qualification-chunk"}
                 and cell.get("execution", {}).get("config", {}).get("method") == "mlmc-pilot"
                 and budget.category != "pilot"):
             self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code="CONTRACT_MISMATCH")
