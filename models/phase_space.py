@@ -290,6 +290,8 @@ class PhaseSpaceSDE(SDEModel, ParameterGroupProvider):
         return {ParameterRole.DRIFT: tuple(self.acceleration_model.parameters()), ParameterRole.DIFFUSION: ()}
 
     def supports(self, objective, engine, resume_level):
+        if objective in ("L1", "L2"):
+            return {"supported": False, "reason": "INAPPLICABLE: current observed-state model has no registered latent observation/recognition contract"}
         allowed = objective in ("O1", "O2") and engine == "generic-rollout" and resume_level == "restart-only"
         return {"supported": allowed, "reason": None if allowed else "model capability not implemented/qualified"}
 

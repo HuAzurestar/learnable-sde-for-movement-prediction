@@ -16,7 +16,7 @@ from application.research_registry import GLOBAL_LIMITS, RegistryEntry, implemen
 from infrastructure.research_store import ResearchError, digest, encode
 
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 STATE = ("x", "y", "vx", "vy")
 UNITS = ("m", "m", "m/s", "m/s")
 FAMILIES = ("M0", "M1-S", "M1-R", "M2")
@@ -39,7 +39,39 @@ def resume_level(family):
     return "restart-only" if basis_family(family) else "exact"
 
 
+def latent_applicability(objective):
+    """Negative evidence for this registered observed contract, not all data.
+
+    No caller-supplied latent flags can promote this report to qualification.
+    A future latent contract needs its own registration and feasibility scope.
+    Degeneracy alone is not a proof that every constrained latent model fails.
+    """
+    if objective not in ("L1", "L2"):
+        raise ResearchError("CONTRACT_MISMATCH", "latent applicability requires L1 or L2")
+    reasons = ["OBSERVATION_LIKELIHOOD_UNREGISTERED", "INITIAL_LATENT_LAWS_UNREGISTERED",
+        "RECOGNITION_PROCESS_UNREGISTERED", "LATENT_NEED_AND_IDENTIFIABILITY_UNESTABLISHED",
+        "PATH_LAW_CONDITIONS_UNQUALIFIED"]
+    if objective == "L2":
+        reasons += ["FULL_STATE_DIFFUSION_INVERSE_UNAVAILABLE",
+            "CONSTRAINED_POSTERIOR_FLOW_AND_SCORE_UNREGISTERED"]
+    report = {"schema_version": "pirc26-latent-applicability-v1", "objective_id": objective,
+        "status": "INAPPLICABLE", "scope": "current-registered-observed-contract-only",
+        "component_version": VERSION, "observation_profile": "causal-observed-phase-space-v1",
+        "state_order": list(STATE), "noise_dim": 2, "diffusion_support": ["vx", "vy"],
+        "reason_codes": reasons, "production_latent_need": "NOT_ASSESSED",
+        "noise_support_requirement": "G r = prior_drift - posterior_drift; position drift must remain velocity",
+        "qualification": "unqualified", "metric_value": None}
+    return {**report, "report_hash": digest(report)}
+
+
+def _refuse_latent(objective):
+    if objective in ("L1", "L2"):
+        report = latent_applicability(objective)
+        raise ResearchError("INAPPLICABLE", "current observed contract: " + ", ".join(report["reason_codes"]))
+
+
 def plan_schema(objective, family=None):
+    _refuse_latent(objective)
     if objective == "O1" and basis_family(family):
         return object_schema({"solver_id": {"type": "string", "enum": ["streaming-qr-v1"]},
             "ridge": {"type": "number", "minimum": 0},
@@ -61,6 +93,7 @@ def plan_schema(objective, family=None):
 
 
 def config_schema(objective, family):
+    _refuse_latent(objective)
     fields = {"seed": integer(0, 2**63 - 1), "family": {"type": "string", "enum": [family]},
               "objective": {"type": "string", "enum": [objective]}, "plan": plan_schema(objective, family),
               "initial_model_hash": HASH, "dynamics_spec_hash": HASH, "configuration_hash": HASH,
@@ -82,6 +115,7 @@ def profile_schema():
 
 
 def _settings(document, inputs):
+    _refuse_latent(document.get("objective"))
     validate_value(config_schema(document.get("objective"), document.get("family")), document)
     validate_value(profile_schema(), inputs)
     if document["family"] not in FAMILIES or document["objective"] not in ("O1", "O2"):
@@ -206,6 +240,7 @@ def predictor_factory(document, inputs, context):
 
 
 def composition_contract(objective, family=None):
+    _refuse_latent(objective)
     return {"schema_version": "pirc25-composition-contract-v1", "shared_configuration": True,
         "roles": {"model": {"required_capabilities": ["phase-space-dynamics", "velocity-noise"],
                              "required_model_capabilities": [], "seed_path": ["seed"]},
@@ -217,6 +252,7 @@ def composition_contract(objective, family=None):
 
 
 def entry(role, objective, family):
+    _refuse_latent(objective)
     if role not in ("model", "trainer", "predictor") or objective not in ("O1", "O2") or family not in FAMILIES:
         raise ResearchError("CONTRACT_MISMATCH", "unknown exact component combination")
     if objective == "O2" and family != "M2":
