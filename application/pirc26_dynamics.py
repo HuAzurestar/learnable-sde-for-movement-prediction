@@ -19,6 +19,7 @@ from .research_contracts import accept_model
 
 
 SOURCE_FILES = ("application/pirc26_dynamics.py", "models/phase_space.py", "models/base.py",
+                "infrastructure/pirc26_checkpoint_contract.py", "infrastructure/research_control.py",
                 "domain/__init__.py", "domain/types.py", "domain/errors.py", "numerics.py",
                 "experiments/nex326/phase_space.py")
 

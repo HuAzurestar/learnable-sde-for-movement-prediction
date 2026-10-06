@@ -320,9 +320,11 @@ class PhaseSpaceSDE(SDEModel, ParameterGroupProvider):
     def from_checkpoint(cls, checkpoint):
         """Load bounded JSON data only; no pickle or user-supplied executable factory."""
         try:
-            raw = json.dumps(checkpoint, allow_nan=False)
-            _require(len(raw.encode("utf-8")) <= 2 * 1024 * 1024, "checkpoint byte quota")
-            document = json.loads(raw)
+            from infrastructure.pirc26_checkpoint_contract import inspect_checkpoint, CheckpointContractError
+            try:
+                document = inspect_checkpoint(checkpoint)["document"]
+            except CheckpointContractError as exc:
+                raise ModelContractError(str(exc)) from exc
             identity = document.pop("sha256")
             _require(identity == _hash(document) and document["schema_version"] == "pirc26-dynamics-checkpoint-v1",
                      "checkpoint identity/schema mismatch")

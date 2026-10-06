@@ -16,7 +16,7 @@ from application.research_registry import GLOBAL_LIMITS, RegistryEntry, implemen
 from infrastructure.research_store import ResearchError, digest, encode
 
 
-VERSION = "1.1.1"
+VERSION = "1.2.0"
 STATE = ("x", "y", "vx", "vy")
 UNITS = ("m", "m", "m/s", "m/s")
 FAMILIES = ("M0", "M1-S", "M1-R", "M2")
@@ -159,16 +159,36 @@ def _model_profile(model, document, inputs):
 
 
 def model_factory(document, inputs, context):
-    _settings(document, inputs)
-    from models.phase_space import PhaseSpaceSDE
+    validate_value(config_schema(document.get("objective"), document.get("family")), document)
+    validate_value(profile_schema(), inputs)
     if type(context) is not dict or set(context) != {"initial_checkpoint"}:
         raise ResearchError("MISSING_INPUT", "admitted initial checkpoint is required")
     checkpoint = context["initial_checkpoint"]
-    if type(checkpoint) is not dict or checkpoint.get("sha256") != document["initial_model_hash"]:
-        raise ResearchError("CONTRACT_MISMATCH", "actual initial checkpoint differs from frozen identity")
+    preflight_model(checkpoint, document, inputs)
+    _settings(document, inputs)
+    from models.phase_space import PhaseSpaceSDE
     model = PhaseSpaceSDE.from_checkpoint(checkpoint)
     _model_profile(model, document, inputs)
     return model
+
+
+def preflight_model(checkpoint, document, inputs):
+    """Owner/factory transport and workspace checks before any constructor."""
+    from infrastructure.pirc26_checkpoint_contract import inspect_checkpoint, CheckpointContractError
+    if type(checkpoint) is not dict or checkpoint.get("sha256") != document["initial_model_hash"]:
+        raise ResearchError("CONTRACT_MISMATCH", "actual initial checkpoint differs from frozen identity")
+    try:
+        checked = inspect_checkpoint(checkpoint, component_limit=inputs["components"])
+    except CheckpointContractError as exc:
+        raise ResearchError(exc.code, "bounded model checkpoint preflight refused") from exc
+    card, config = checked["document"]["model_card"], checked["document"]["configuration"]
+    if (card["family"] != document["family"] or card["dtype"] != "torch." + inputs["dtype"]
+            or card["device"] != inputs["device"] or digest(card["spec"]) != document["dynamics_spec_hash"]
+            or digest(config) != document["configuration_hash"] or card["state_names"] != list(STATE)
+            or inputs["state_dim"] != 4 or inputs["noise_dim"] != 2 or inputs["diffusion_support"] != ["vx", "vy"]
+            or card["family"] == "M2" and config["seed"] != document["seed"]):
+        raise ResearchError("CONTRACT_MISMATCH", "frozen checkpoint differs from declared component recipe")
+    return checked
 
 
 class BoundTrainer:
@@ -314,6 +334,7 @@ def construct_components(adapter_entry, bindings, *, matrix_cells, seed, registr
     checked = component_plan(adapter_entry, registries, sealed, matrix_cells=matrix_cells, seed=seed)
     if plan != checked:
         raise ResearchError("CONTRACT_MISMATCH", "component combination changed during preflight")
+    preflight_model(initial_checkpoint, sealed["model"]["config"], sealed["model"]["inputs"])
     parts = {role: registries[role].create_bound(sealed[role], matrix_cells=matrix_cells,
             context={"initial_checkpoint": initial_checkpoint} if role == "model" else None)
              for role in ("model", "trainer", "predictor")}

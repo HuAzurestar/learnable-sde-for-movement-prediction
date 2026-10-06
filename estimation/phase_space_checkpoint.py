@@ -18,6 +18,8 @@ from models.phase_space import ModelContractError, PhaseSpaceSDE
 
 LIMIT = 4 * 1024 * 1024
 SOURCE_FILES = ("estimation/phase_space_checkpoint.py", "estimation/phase_space.py",
+                "infrastructure/pirc26_checkpoint_contract.py",
+                "infrastructure/research_control.py",
                 "estimation/phase_space_basis.py",
                 "estimation/phase_space_o2.py", "models/phase_space.py",
                 "inference/phase_space.py", "evaluation/phase_space.py")

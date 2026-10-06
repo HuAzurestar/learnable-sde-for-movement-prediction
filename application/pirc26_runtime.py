@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 
 from application.pirc26_components import (VERSION, STATE, UNITS, config_schema, profile_schema,
-    component_registries, composition_contract, basis_family, resume_level)
+    component_registries, composition_contract, basis_family, resume_level, preflight_model)
 from application.pirc26_data import read_block
 from application.research_contracts import ExecutionPlugin
 from application.research_execution import execution_plan
@@ -79,6 +79,7 @@ def validate_job(job, receipt):
         raise ResearchError("RESOURCE_PLAN_REJECTED", "combined origin publication workspace exceeds the bounded worker route")
     if job["initial_checkpoint"].get("sha256") != config["initial_model_hash"]:
         raise ResearchError("CONTRACT_MISMATCH", "job initial model differs from the registered component")
+    preflight_model(job["initial_checkpoint"], config, inputs)
     if config["objective"] == "O1" and o1 is not None or config["objective"] == "O2" and digest(o1) != config["o1_lineage_hash"]:
         raise ResearchError("CONTRACT_MISMATCH", "job O1 lineage differs from the registered objective")
     protocol = receipt["documents"]["protocol"]
