@@ -197,6 +197,54 @@ def test_final_clock_uses_chronological_expiry_not_offset_text(monkeypatch):
     assert checked == ['earlier']
 
 
+def test_source_run_index_hashes_each_study_once_without_changing_identity(monkeypatch):
+    from experiments.pirc28 import evidence
+    studies = [{'study_id': name, 'experiment_id': 'bounded-index', 'cells': [
+        {'arm_id': 'original-arm', 'seed': index, 'block_id': 'block-'+str(index)} for index in range(1000)]}
+        for name in ('left', 'right')]
+    expected = {evidence._run_id(study, cell) for study in studies for cell in study['cells']}
+    original, full_hashes = evidence.digest, []
+    def counted(value):
+        if type(value) is dict and 'cells' in value:
+            full_hashes.append(value['study_id'])
+        return original(value)
+    monkeypatch.setattr(evidence, 'digest', counted)
+    assert evidence.source_run_ids(studies) == expected
+    assert full_hashes == ['left', 'right']
+
+
+def test_scoped_attempt_snapshot_ignores_unrelated_jobs_and_rehashes_changed_sources():
+    from experiments.pirc28.evidence import source_run_ids
+    study = {'study_id': 'source', 'experiment_id': 'bounded-index', 'cells': [
+        {'arm_id': 'original-arm', 'seed': 19, 'block_id': 'block'}]}
+    run_id = next(iter(source_run_ids([study])))
+    source = {'run_id': run_id, 'state': 'SUCCEEDED', 'artifact_id': digest('original')}
+    states = {'source-attempt': source, 'unrelated': {'run_id': digest('elsewhere'), 'state': 'RUNNING'}}
+    before = source_attempts_hash(None, [study], attempts=states)
+    assert before == digest({'source-attempt': source})
+    states['unrelated']['state'] = 'FAILED'
+    assert source_attempts_hash(None, [study], attempts=states) == before
+    states['source-attempt']['artifact_id'] = digest('changed')
+    assert source_attempts_hash(None, [study], attempts=states) != before
+
+
+def test_managed_pilot_scope_stays_incomplete_until_registered_fits_exist(tmp_path):
+    store, study, definition, grant, _ = prepared(tmp_path/'scoped-pilot', pilot=True, explicit_scope=True)
+    result = QualificationRunner(store).run(definition, [study['study_id']], {study['study_id']: grant},
+        budget=BudgetSpec(90, category='pilot'))
+    if result['state'] != 'SUCCEEDED':
+        path = store.path/'artifacts'/('.attempt-'+result['attempt_id'])/'worker.log'
+        pytest.fail(str(result)+'\n'+path.read_text(errors='replace'))
+    assert result['qualification_state'] == 'INCOMPLETE'
+    receipt = store.manifest(result['receipt_id'])
+    assert receipt['qualified_identifiability'] is receipt['real_data_authorized'] is False
+    with store.lock():
+        value = json.loads(store._verified_artifact_content(store._manifest('artifact-'+result['artifact_id'])))
+    assert value['report']['gate']['scenario_roles'] == definition.scenario_roles
+    assert value['report']['gate']['applicable_ranges'] == []
+    assert all(row['state'] == 'NOT_RUN' for row in value['report']['rows'])
+
+
 def test_cli_uses_registered_definition_and_existing_grants(computed, monkeypatch, capsys):
     from experiments.pirc28.__main__ import main
     data, first, _ = computed

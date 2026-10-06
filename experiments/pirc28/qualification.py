@@ -219,6 +219,7 @@ class IdentifiabilitySpec:
     initialization_selection: str = 'selection-observation-objective-only'
     collapse_criterion: str = 'inference-frozen-low-occupancy-or-identical-dynamics'
     stop_rule: str = 'shared-arm-closure-stops-all-cells; no-budget-reset'
+    scenario_roles: dict | None = None
 
     def validate(self):
         if (type(self.scenario_axes) is not dict or not self.scenario_axes or len(self.scenario_axes) > 10_000
@@ -263,19 +264,30 @@ class IdentifiabilitySpec:
             raise SwitchingError('CONTRACT_MISMATCH', 'frozen interval, selection or stopping rule differs')
         if len(self.scenario_axes)*len(self.replicate_ids)*2 > 10_000:
             raise SwitchingError('RESOURCE_LIMIT', 'paired qualification matrix exceeds cell quota')
+        if self.scenario_roles is not None and (type(self.scenario_roles) is not dict
+                or set(self.scenario_roles) != set(self.scenario_axes)
+                or any(role not in ('required-qualified', 'required-unidentifiable', 'phase-diagram-only')
+                       for role in self.scenario_roles.values())
+                or 'required-qualified' not in self.scenario_roles.values()):
+            raise SwitchingError('CONTRACT_MISMATCH', 'exact preregistered scenario roles and a required qualification range needed')
         return self
 
     def to_dict(self):
         self.validate()
-        return {'schema_version': 'pirc28-identifiability-spec-v1', **self.__dict__,
+        fields = dict(self.__dict__)
+        if self.scenario_roles is None:
+            fields.pop('scenario_roles')
+        return {'schema_version': 'pirc28-identifiability-spec-v1' if self.scenario_roles is None else 'pirc28-identifiability-spec-v2', **fields,
                 'replicate_ids': list(self.replicate_ids), 'sampling_unit': 'independent-synthetic-replicate'}
 
     @classmethod
     def from_dict(cls, value):
-        if type(value) is not dict or value.get('schema_version') != 'pirc28-identifiability-spec-v1':
+        if type(value) is not dict or value.get('schema_version') not in ('pirc28-identifiability-spec-v1', 'pirc28-identifiability-spec-v2'):
             raise SwitchingError('CONTRACT_MISMATCH', 'identifiability specification schema differs')
         try:
-            supplied = {name: value[name] for name in cls.__dataclass_fields__}
+            supplied = {name: value[name] for name in cls.__dataclass_fields__ if name != 'scenario_roles'}
+            if value['schema_version'] == 'pirc28-identifiability-spec-v2':
+                supplied['scenario_roles'] = value['scenario_roles']
             supplied['replicate_ids'] = tuple(supplied['replicate_ids'])
             result = cls(**supplied)
         except (KeyError, TypeError) as error:
@@ -355,11 +367,14 @@ def qualify(spec, rows, aggregate_hash, *, check_budget):
         elif any(row[name] is not None for name in ('metrics', 'posterior_occupancy', 'collapsed')):
             raise SwitchingError('CONTRACT_MISMATCH', 'non-successful rows cannot carry successful-fit metrics')
         indexed[key] = row
-    report = {'schema_version': 'pirc28-identifiability-gate-v1', 'spec_hash': digest(spec.to_dict()),
+    report = {'schema_version': 'pirc28-identifiability-gate-v1' if spec.scenario_roles is None else 'pirc28-identifiability-gate-v2', 'spec_hash': digest(spec.to_dict()),
         'aggregate_hash': aggregate_hash, 'real_data_authorized': False,
         'evidence_binding': 'requires-shared-store-source-attempt-admission-validation',
         'interpretation_level': 'synthetic-statistical-only', 'expected_rows': len(expected),
         'observed_rows': len(indexed), 'missing_fields': spec.missing_fields, 'scenarios': {}}
+    if spec.scenario_roles is not None:
+        report.update(scenario_roles=dict(spec.scenario_roles), applicable_scenarios=[], applicable_ranges=[],
+                      scope_dispositions={}, scope_rule='preregistered-required-ranges-and-controls; no-posthoc-range-selection')
     if spec.missing_fields:
         report['scenarios'] = {name: {'state': 'NEEDS_PREREGISTRATION', 'axes': axes,
             'registered_replicates': len(spec.replicate_ids), 'effective_replicates': None}
@@ -406,7 +421,8 @@ def qualify(spec, rows, aggregate_hash, *, check_budget):
             reasons.append('RECOVERY_OR_CALIBRATION_GATE_FAILED')
         if collapsed/total > spec.maximum_collapse_fraction:
             reasons.append('COLLAPSE_GATE_FAILED')
-        state = 'INCOMPLETE' if missing else 'BUDGET_EXHAUSTED' if any('BUDGET_EXHAUSTED' in (value['K1'], value['K2']) for value in failures) else 'UNIDENTIFIABLE' if reasons else 'PASSED'
+        budget_failed = any(value[k] in ('TIMEOUT', 'BUDGET_EXHAUSTED') for value in failures for k in ('K1', 'K2'))
+        state = 'INCOMPLETE' if missing else 'BUDGET_EXHAUSTED' if budget_failed else 'UNIDENTIFIABLE' if reasons else 'PASSED'
         report['scenarios'][scenario] = {'state': state, 'axes': spec.scenario_axes[scenario],
             'reasons': reasons, 'registered_replicates': total,
             'effective_replicates': len(candidates), 'recovering_replicates': good, 'recovery_fraction': good/total,
@@ -427,4 +443,36 @@ def qualify(spec, rows, aggregate_hash, *, check_budget):
     states = {value['state'] for value in report['scenarios'].values()}
     report['state'] = ('INCOMPLETE' if 'INCOMPLETE' in states else 'BUDGET_EXHAUSTED' if 'BUDGET_EXHAUSTED' in states
                        else 'UNIDENTIFIABLE' if 'UNIDENTIFIABLE' in states else 'PASSED')
+    if spec.scenario_roles is not None:
+        required_failed, controls_failed, budget_failures = [], [], []
+        for scenario, point in report['scenarios'].items():
+            check_budget()
+            role = spec.scenario_roles[scenario]
+            complete_pairs = (point['effective_replicates'] == point['registered_replicates']
+                              and not point['failures'] and not point['missing_replicates'])
+            if role == 'required-qualified':
+                met = point['state'] == 'PASSED'
+                if not met:
+                    required_failed.append(scenario)
+                else:
+                    report['applicable_scenarios'].append(scenario)
+                    # Exact frozen points, not an untested Cartesian bounding box.
+                    report['applicable_ranges'].append({'scenario_id': scenario, 'axes': point['axes']})
+            elif role == 'required-unidentifiable':
+                met = point['state'] == 'UNIDENTIFIABLE' and complete_pairs
+                if not met:
+                    controls_failed.append(scenario)
+            else:
+                met = point['state'] not in ('INCOMPLETE', 'BUDGET_EXHAUSTED')
+            if any(value[k] in ('TIMEOUT', 'BUDGET_EXHAUSTED') for value in point['failures'] for k in ('K1', 'K2')):
+                budget_failures.append(scenario)
+            report['scope_dispositions'][scenario] = {'role': role, 'observed_state': point['state'],
+                'expectation_met': met, 'complete_successful_pairs': complete_pairs}
+        report.update(required_qualification_failures=required_failed, negative_control_failures=controls_failed,
+                      budget_failure_scenarios=budget_failures)
+        report['state'] = ('INCOMPLETE' if 'INCOMPLETE' in states else 'BUDGET_EXHAUSTED' if 'BUDGET_EXHAUSTED' in states or budget_failures
+                           else 'UNIDENTIFIABLE' if required_failed else 'CONTROL_GATE_FAILED' if controls_failed else 'PASSED')
+        report['passed_required_scenarios'] = list(report['applicable_scenarios'])
+        if report['state'] != 'PASSED':
+            report['applicable_scenarios'], report['applicable_ranges'] = [], []
     return report

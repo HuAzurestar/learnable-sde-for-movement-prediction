@@ -256,6 +256,120 @@ def test_identifiability_spec_round_trip_refuses_unbound_fields():
         IdentifiabilitySpec.from_dict(value)
 
 
+def scoped_spec():
+    baseline = spec()
+    point = baseline.scenario_axes['scenario']
+    return replace(baseline, scenario_axes={
+        'qualified-range': point, 'negative': {**point, 'mode_separation': 0},
+        'exploratory': {**point, 'mode_separation': 0.5}}, scenario_roles={
+            'qualified-range': 'required-qualified', 'negative': 'required-unidentifiable',
+            'exploratory': 'phase-diagram-only'})
+
+
+def scoped_rows(value):
+    result = []
+    for name in value.scenario_axes:
+        for row in rows(value):
+            result.append({**row, 'scenario_id': name, 'input_hash': digest([name, row['replicate_id']]),
+                'artifact_hash': digest([name, row['replicate_id'], row['K']]),
+                'collapsed': name != 'qualified-range' and row['K'] == 2})
+    return result
+
+
+def test_preregistered_negative_controls_allow_only_frozen_qualified_range():
+    value = scoped_spec()
+    result = run(value, scoped_rows(value))
+    assert result['state'] == 'PASSED' and result['real_data_authorized'] is False
+    assert result['schema_version'] == 'pirc28-identifiability-gate-v2'
+    assert result['scenarios']['negative']['state'] == result['scenarios']['exploratory']['state'] == 'UNIDENTIFIABLE'
+    assert result['applicable_scenarios'] == ['qualified-range']
+    assert result['applicable_ranges'] == [{'scenario_id': 'qualified-range', 'axes': value.scenario_axes['qualified-range']}]
+    assert result['scope_dispositions']['negative']['complete_successful_pairs'] is True
+    assert result['negative_control_failures'] == result['required_qualification_failures'] == []
+    assert set(result['scenarios']) == set(value.scenario_axes)
+
+
+@pytest.mark.parametrize('state,expected', [('FAILED', 'CONTROL_GATE_FAILED'),
+    ('INFERENCE_INAPPLICABLE', 'CONTROL_GATE_FAILED'), ('NOT_RUN', 'INCOMPLETE'),
+    ('TIMEOUT', 'BUDGET_EXHAUSTED'), ('BUDGET_EXHAUSTED', 'BUDGET_EXHAUSTED')])
+def test_negative_control_cannot_pass_by_runtime_failure_or_missing_outcome(state, expected):
+    value, data = scoped_spec(), scoped_rows(scoped_spec())
+    row = next(row for row in data if row['scenario_id'] == 'negative' and row['K'] == 1)
+    row.update(state=state, metrics=None, posterior_occupancy=None, collapsed=None)
+    result = run(value, data)
+    assert result['state'] == expected
+    assert result['applicable_scenarios'] == result['applicable_ranges'] == []
+    assert result['passed_required_scenarios'] == ['qualified-range']
+    assert result['scope_dispositions']['negative']['expectation_met'] is False
+
+
+def test_unexpectedly_identifiable_negative_control_refuses_scope_qualification():
+    value, data = scoped_spec(), scoped_rows(scoped_spec())
+    for row in data:
+        if row['scenario_id'] == 'negative':
+            row['collapsed'] = False
+    result = run(value, data)
+    assert result['scenarios']['negative']['state'] == 'PASSED'
+    assert result['state'] == 'CONTROL_GATE_FAILED'
+    assert result['negative_control_failures'] == ['negative']
+    assert not result['applicable_ranges']
+
+
+@pytest.mark.parametrize('state,expected', [('NOT_RUN', 'INCOMPLETE'), ('TIMEOUT', 'BUDGET_EXHAUSTED')])
+def test_phase_diagram_only_does_not_waive_missing_cells_or_budget_fuse(state, expected):
+    value, data = scoped_spec(), scoped_rows(scoped_spec())
+    row = next(row for row in data if row['scenario_id'] == 'exploratory' and row['K'] == 2)
+    row.update(state=state, metrics=None, posterior_occupancy=None, collapsed=None)
+    result = run(value, data)
+    assert result['state'] == expected and not result['applicable_ranges']
+    assert result['scope_dispositions']['exploratory']['expectation_met'] is False
+    assert result['scenarios']['exploratory']['failures'] or result['scenarios']['exploratory']['missing_replicates']
+
+
+def test_required_range_failure_cannot_be_replaced_by_an_exploratory_success():
+    value, data = scoped_spec(), scoped_rows(scoped_spec())
+    for row in data:
+        if row['K'] == 2 and row['scenario_id'] in ('qualified-range', 'exploratory'):
+            row['collapsed'] = row['scenario_id'] == 'qualified-range'
+    result = run(value, data)
+    assert result['state'] == 'UNIDENTIFIABLE'
+    assert result['required_qualification_failures'] == ['qualified-range']
+    assert result['scenarios']['exploratory']['state'] == 'PASSED'
+    assert not result['applicable_scenarios']
+
+
+def test_legacy_required_range_deadline_failure_is_budget_exhaustion_not_a_tolerated_fit_failure():
+    value, data = spec(), rows(spec())
+    data[1].update(state='TIMEOUT', metrics=None, posterior_occupancy=None, collapsed=None)
+    result = run(value, data)
+    # Seven good replicates would otherwise meet the frozen recovery threshold.
+    assert result['scenarios']['scenario']['recovery_fraction_interval'][0] >= value.minimum_recovery_fraction
+    assert result['state'] == result['scenarios']['scenario']['state'] == 'BUDGET_EXHAUSTED'
+    assert result['scenarios']['scenario']['failures'][0]['K2'] == 'TIMEOUT'
+
+
+def test_scope_version_round_trips_without_rewriting_legacy_all_required_definition():
+    legacy = spec().to_dict()
+    assert legacy['schema_version'] == 'pirc28-identifiability-spec-v1' and 'scenario_roles' not in legacy
+    assert IdentifiabilitySpec.from_dict(legacy).to_dict() == legacy
+    current = scoped_spec().to_dict()
+    assert current['schema_version'] == 'pirc28-identifiability-spec-v2'
+    assert IdentifiabilitySpec.from_dict(current).to_dict() == current
+    assert digest(current) != digest(replace(scoped_spec(), scenario_roles=None).to_dict())
+    for damaged in ({**legacy, 'scenario_roles': current['scenario_roles']}, {**current, 'scenario_roles': None}):
+        with pytest.raises(SwitchingError):
+            IdentifiabilitySpec.from_dict(damaged)
+
+
+@pytest.mark.parametrize('roles', [{}, {'qualified-range': 'required-qualified'},
+    {'qualified-range': 'phase-diagram-only', 'negative': 'required-unidentifiable', 'exploratory': 'phase-diagram-only'},
+    {'qualified-range': 'required-qualified', 'negative': 'ignore-after-result', 'exploratory': 'phase-diagram-only'}])
+def test_undeclared_or_posthoc_scope_roles_are_not_canonical(roles):
+    with pytest.raises(SwitchingError) as failure:
+        replace(scoped_spec(), scenario_roles=roles).to_dict()
+    assert failure.value.code == 'CONTRACT_MISMATCH'
+
+
 def test_frozen_recipe_emits_evaluator_recovery_without_promoting_cell():
     from experiments.pirc28.pipeline import execute_recipe
     from tests.test_pirc28_runtime import recipe

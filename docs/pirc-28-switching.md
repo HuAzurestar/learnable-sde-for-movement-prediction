@@ -131,6 +131,30 @@ bootstrap seed/draw count, selection-only initialization choice and shared-arm
 stop rule. Unfilled thresholds are `NEEDS_PREREGISTRATION`, not an implicit pass.
 No default scientific success thresholds are chosen from observed results.
 
+Explicit scenario roles use `pirc28-identifiability-spec-v2` and are part of the
+same immutable recipe/definition/preregistration hashes. They cover exactly
+every registered scenario, with at least one `required-qualified` point. Legacy
+v1 definitions round-trip unchanged and still require every scenario to pass;
+they are not silently upgraded or assigned new roles after outcomes.
+
+| Preregistered role | Scope requirement |
+| --- | --- |
+| required-qualified | This point must pass recovery/collapse/calibration qualification. |
+| required-unidentifiable | Complete successful paired fits and complete metrics must yield UNIDENTIFIABLE. Runtime failures are not successful negative controls. |
+| phase-diagram-only | Retain the measured terminal outcome without claiming it is an applicable range. Missing cells and deadline/budget failures still block the aggregate. |
+
+The v2 gate preserves every scenario's axes, state, replicate denominators and
+failure/collapse/metric disclosure. A passed required range plus expected
+negative controls can qualify even with unidentifiable descriptive points.
+An unexpectedly passing negative control is CONTROL_GATE_FAILED; failures,
+inapplicability or insufficient complete pairs cannot establish that control.
+Only an overall PASSED gate emits `applicable_scenarios`/`applicable_ranges`,
+and these contain exact preregistered required points, not an interpolated or
+Cartesian bounding box. `passed_required_scenarios` remains visible when a
+control or another prerequisite fails. An exploratory success cannot substitute
+for a failing required point. Scope changes require a new pre-fit frozen
+definition/preregistration; they cannot relabel existing evidence into a pass.
+
 An optional canonical `identifiability_spec` inside the frozen synthetic recipe
 adds evaluator-only diagnostics to each result. Parameter matching enumerates
 the two label maps with unit-specific normalized errors; Q is relabeled on both
@@ -156,6 +180,9 @@ fractions use Wilson binomial intervals, including the all-success boundary;
 successful-fit metric means and paired energy differences use a bounded
 replicate-level percentile bootstrap. Those conditional intervals are not used
 to hide failed fits. Polls occur between bounded bootstrap batches.
+Deadline failures remain TIMEOUT in the raw rows/cost lineage but make their
+scenario gate BUDGET_EXHAUSTED, including legacy all-required definitions; they
+cannot be tolerated as ordinary fit failures when enough other replicates pass.
 
 K=2 collapse and successful-fit diagnostic intervals retain observed K=2 outcomes
 even if their K=1 reference fails. Paired scores and the recovery gate still
@@ -212,6 +239,9 @@ cells remain uncompleted; arm closure without a run is budget exhaustion, not a
 successful zero. One pass indexes source events/attempts instead of comparing
 every trajectory with every other trajectory. Per-result, total-input and final
 aggregate byte quotas refuse oversized collections rather than truncate rows.
+Each scoped source-run index hashes a complete immutable study once and reuses
+that hash only for its own cell identities. Snapshot/run hashes are unchanged;
+there is no cross-call permission, ledger or outcome cache.
 
 Grant checks also protect empty/failure-only metadata, and are repeated after
 extra source integrity and bootstrap work before disclosure. Complete source

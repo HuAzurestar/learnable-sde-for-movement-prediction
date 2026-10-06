@@ -31,9 +31,18 @@ def _run_id(study, cell, spec_hash=None):
         'seed': cell.get('seed'), 'cell': cell})
 
 
+def source_run_ids(studies):
+    """Derive the exact registered identities with one study hash per pass."""
+    runs = set()
+    for study in studies:
+        study_hash = digest(study)
+        runs.update(_run_id(study, cell, study_hash) for cell in study['cells'])
+    return runs
+
+
 def source_attempts_hash(store, studies, *, attempts=None):
     """Scoped immutable outcome snapshot, excluding unrelated computation jobs."""
-    runs = {_run_id(study, cell) for study in studies for cell in study['cells']}
+    runs = source_run_ids(studies)
     states = store.attempts() if attempts is None else attempts
     return digest({key: value for key, value in states.items() if value['run_id'] in runs})
 

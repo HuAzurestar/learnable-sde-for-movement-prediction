@@ -21,7 +21,7 @@ from tests.test_pirc28_synthetic import fixture_poll
 from tests.test_research_store import spec
 
 
-def prepared(root, *, pilot=False):
+def prepared(root, *, pilot=False, explicit_scope=False):
     root.mkdir()
     store = ResearchStore(root, 'pirc28-evidence-test-only', initialize=True)
     value = spec()
@@ -37,6 +37,8 @@ def prepared(root, *, pilot=False):
         value['switching_recipe']['scenario'] = matrix['scenarios'][0]['scenario']
     identifier = value['switching_recipe']['scenario']['scenario_id']
     definition = replace(original, scenario_axes={identifier: original.scenario_axes['scenario']})
+    if explicit_scope:
+        definition = replace(definition, scenario_roles={identifier: 'required-qualified'})
     value['switching_recipe']['identifiability_spec'] = definition.to_dict()
     value['arms'] = [{'arm_id': 'pirc28-k'+str(k), 'model_family_id': 'pirc28-affine-k'+str(k),
         'method_family_id': 'pirc28-approximate-gem', 'objective_id': 'position-energy',
@@ -225,8 +227,9 @@ def test_disclosure_rechecks_grant_after_extra_processing(completed_pair, monkey
     assert calls
 
 
-def test_pilot_source_plan_is_validated_without_formal_blind_test_prerequisite(tmp_path):
-    store, value, definition, grant, runner = prepared(tmp_path / 'pilot-fixture', pilot=True)
+@pytest.mark.parametrize('explicit_scope', [False, True])
+def test_pilot_source_plan_is_validated_without_formal_blind_test_prerequisite(tmp_path, explicit_scope):
+    store, value, definition, grant, runner = prepared(tmp_path / 'pilot-fixture', pilot=True, explicit_scope=explicit_scope)
     executed = runner.run_cell(value['study_id'], digest(value['cells'][1]), budget=BudgetSpec(45, category='pilot'))
     if executed['state'] != 'SUCCEEDED':
         logs = list((store.path / 'artifacts').glob('.attempt-*/worker.log'))
@@ -236,6 +239,19 @@ def test_pilot_source_plan_is_validated_without_formal_blind_test_prerequisite(t
     assert result['qualified_identifiability'] is result['real_data_authorized'] is False
     assert result['preregistration_hashes']
     assert any(row['state'] == 'SUCCEEDED' for row in result['rows'])
+    if explicit_scope:
+        assert result['gate']['scenario_roles'] == definition.scenario_roles
+        assert result['gate']['applicable_ranges'] == []
+        assert result['gate']['schema_version'] == 'pirc28-identifiability-gate-v2'
+
+
+def test_changing_the_frozen_scope_definition_requires_new_preregistration(tmp_path):
+    from experiments.pirc28.evidence import _preregistration
+    store, study, definition, _, _ = prepared(tmp_path/'scope-identity', pilot=True)
+    changed = replace(definition, scenario_roles={next(iter(definition.scenario_axes)): 'required-qualified'})
+    assert digest(changed.to_dict()) != digest(definition.to_dict())
+    with pytest.raises(ResearchError, match='NEEDS_PREREGISTRATION'):
+        _preregistration(store, study, changed, study['cells'][0], store.events())
 
 
 def test_empty_scientific_matrix_still_requires_scope_authorization(tmp_path):

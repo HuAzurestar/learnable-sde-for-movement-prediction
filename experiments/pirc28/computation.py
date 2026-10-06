@@ -15,7 +15,7 @@ from application.research_supervisor import ResearchSupervisor
 from experiments.pirc25.affine import code_hash
 from infrastructure.research_store import ResearchError, atomic_write, digest, encode
 from infrastructure.research_visibility import combine_visibility, study_visibility
-from .evidence import MAXIMUM_RESULT_BYTES, _cost_history, source_attempts_hash
+from .evidence import MAXIMUM_RESULT_BYTES, _cost_history, source_attempts_hash, source_run_ids
 from .qualification import IdentifiabilitySpec, METRICS
 
 MAXIMUM_REQUEST_BYTES = 4*1024*1024
@@ -61,9 +61,7 @@ def _sources(store, frozen, *, authorize=True):
     if source_attempts_hash(store, studies) != frozen['source_attempts_hash']:
         raise ResearchError('INDEX_STALE', 'qualification computation source attempts changed')
     # Results can carry a stricter admission/source label than their cells.
-    runs = {digest({'study_id': study['study_id'], 'experiment_id': study['experiment_id'],
-        'spec_hash': digest(study), 'arm_id': cell['arm_id'], 'cell_hash': digest(cell),
-        'seed': cell.get('seed'), 'cell': cell}) for study in studies for cell in study['cells']}
+    runs = source_run_ids(studies)
     for attempt in store.attempts().values():
         if attempt['run_id'] in runs and attempt.get('artifact_id'):
             metadata = store.manifest('artifact-'+attempt['artifact_id'])
