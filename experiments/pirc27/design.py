@@ -99,18 +99,15 @@ class PropagationStudyManifest:
         return json.loads(self._document)
 
     def study_spec(self, *, expected_hash):
-        """Return an unadmitted draft only for a wholly executable matrix.
+        """Return the complete unadmitted draft, including non-executable rows.
 
-        Missing/unsupported cells cannot disappear from the denominator. A
-        future shared disposition workflow must retain them before execution.
+        Declared refusals use shared PREFLIGHT_FAILED metadata, not workers.
         This draft intentionally has neither runtime_binding nor admission.
         """
         from experiments.pirc25.affine import code_hash
         document = self.manifest()
         if expected_hash != self.manifest_hash or document["code_hash"] != code_hash():
             raise DataValidationError("frozen study content or current source differs")
-        if any(row["disposition"] != "PLANNED" for row in document["matrix"]):
-            raise DataValidationError("complete matrix contains non-runnable rows; do not filter them")
         return {"schema_version": "pirc25-contract-v1",
                 **{key: document[key] for key in ("study_id", "experiment_id", "comparison_family",
                     "code_hash", "protocol_hash", "data_hash", "feature_hash", "selection_hash", "arms")},
@@ -272,18 +269,29 @@ def freeze_design(design):
                "functional_id": functional.functional_id, "horizon": horizon, "seed": seed,
                "arm_id": arm_id, "disposition": disposition, "reason": reason,
                "model_package_hash": model.package.package_hash, "request_hash": request.request_hash}
+        dimensions = {"functional_id": functional.functional_id, "functional_kind": functional.kind,
+                      "functional_version": request.functional_version,
+                      "region": {"coordinate_system": request.region_coordinate_system,
+                                 "normal": functional.normal, "threshold": functional.threshold,
+                                 "closed": functional.closed},
+                      "initialization": content_hash({"mean": model.initial_mean, "covariance": model.initial_covariance}),
+                      "prediction_origin": design.origin}
+        row["cell"] = {"arm_id": arm_id, "block_id": model.family_id, "seed": seed, "horizon": horizon,
+                       "visibility": "synthetic", "frozen_dynamics": model.package.manifest(),
+                       "propagation_request": json.loads(_encode(asdict(request))), "resource_class": "cpu",
+                       "functional_id": functional.functional_id, "comparison_dimensions": dimensions}
         if disposition == "PLANNED":
             synthetic = isinstance(model.package, FrozenNonlinearPackage)
             plugin = plugins[(synthetic, method.recovery)]
             config = execution_config(request, method.method, level_samples=method.level_samples,
                                       proposal=method.proposal, recovery=method.recovery, synthetic=synthetic)
-            row["cell"] = {"arm_id": arm_id, "block_id": model.family_id, "seed": seed, "horizon": horizon,
-                "plugin_id": plugin.plugin_id, "capability": {"exact": "exact-transition", "mlmc": "coupled-level",
+            row["cell"].update({"plugin_id": plugin.plugin_id, "capability": {"exact": "exact-transition", "mlmc": "coupled-level",
                     "importance": "rare-event"}.get(method.method, "generic-rollout"),
-                "visibility": "synthetic", "frozen_dynamics": model.package.manifest(),
-                "propagation_request": json.loads(_encode(asdict(request))), "resource_class": "cpu",
-                "functional_id": functional.functional_id,
-                "execution": execution_binding(plugin.registry_entry, config, execution_inputs(request), matrix_cells=count)}
+                "execution": execution_binding(plugin.registry_entry, config, execution_inputs(request), matrix_cells=count)})
+        else:
+            row["cell"].update({"plugin_id": "propagation-declared-unavailable", "capability": "generic-rollout",
+                "execution_disposition": {"schema_version": "pirc25-execution-disposition-v1",
+                                          "status": disposition, "reason": reason}})
         rows.append(row)
     document = {"schema_version": "propagation-study-manifest-v1", "study_id": design.study_id,
         "experiment_id": design.experiment_id, "comparison_family": design.comparison_family,

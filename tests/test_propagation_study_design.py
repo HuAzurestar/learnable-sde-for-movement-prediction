@@ -88,7 +88,7 @@ def test_multiple_regions_share_the_same_objective_arm_but_not_requests():
     assert len({r["arm_id"] for r in doc["matrix"] if r["method"] == "euler"}) == 1
 
 
-def test_unsupported_and_affine_only_rows_are_retained_and_cannot_be_filtered_for_execution():
+def test_unsupported_and_affine_only_rows_are_retained_in_the_registered_draft():
     methods = tuple(StudyMethod(method, samples=8, steps=2) for method in
                     ("euler", "exact", "gaussian", "mixture", "reversible-heun", "pde"))
     frozen = freeze_design(fixture(nonlinear=True, methods=methods))
@@ -97,9 +97,15 @@ def test_unsupported_and_affine_only_rows_are_retained_and_cannot_be_filtered_fo
     assert {r["method"]: r["disposition"] for r in doc["matrix"]} == {
         "euler": "PLANNED", "exact": "INELIGIBLE", "gaussian": "INELIGIBLE",
         "mixture": "NOT_IMPLEMENTED", "reversible-heun": "NOT_IMPLEMENTED", "pde": "NOT_IMPLEMENTED"}
-    assert all(("cell" in row) == (row["disposition"] == "PLANNED") for row in doc["matrix"])
-    with pytest.raises(DataValidationError, match="do not filter"):
-        frozen.study_spec(expected_hash=frozen.manifest_hash)
+    spec = frozen.study_spec(expected_hash=frozen.manifest_hash)
+    assert len(spec["cells"]) == 24
+    for row, cell in zip(doc["matrix"], spec["cells"]):
+        assert cell == row["cell"]
+        if row["disposition"] == "PLANNED":
+            validate_propagation_cell(spec, cell)
+        else:
+            assert "execution" not in cell
+            assert cell["execution_disposition"]["status"] == row["disposition"]
 
 
 def test_matrix_cap_precedes_package_validation_and_cartesian_materialization(monkeypatch):

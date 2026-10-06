@@ -37,22 +37,47 @@ budgets.
 
 The complete expected matrix retains `NOT_IMPLEMENTED` mixture, reversible-Heun
 and PDE rows and `INELIGIBLE` affine-only methods on nonlinear packages. These
-have reasons and request hashes, not executable bindings. `PLANNED` means only
+have reasons, requests and immutable shared non-execution declarations, not
+executable bindings. `PLANNED` means only
 that the engineering adapter supports the declared input/configuration. It does
 not mean scientific eligibility or a passing reference/pilot qualification.
 
 `manifest()` returns detached data. `study_spec(expected_hash=...)` also verifies
-the current runtime source and refuses any matrix containing non-runnable rows,
-so unsupported comparisons cannot disappear from the denominator. A future
-shared disposition workflow is needed to register/run such partial matrices.
-For a wholly supported matrix, the returned draft contains all cells and shared
-resource bindings but intentionally has no `runtime_binding` or `admission`.
+the current runtime source and returns **all** cells, including declared
+non-executable rows. `SharedRunner` records those as `PREFLIGHT_FAILED` with their
+immutable reason/error code; repetition reuses that refusal, not numerical
+results. No worker, reservation or retry is permitted for such a row. Both direct
+execution resolution, owner admission and direct shared budget reservation reject
+a non-execution marker, including
+malformed declarations or declarations combined with an executable binding.
+This records a planned lack of capability, not a qualification decision or
+scientific failure. Existing evidence export retains each row/reason/history.
+The ordinary frozen cost report retains missing measurements as unknown; the
+original budget ledger has no reservation/charge for an unlaunched refusal.
+
+Endpoint identity/geometry, initialization and origin are explicit comparison
+dimensions, so regions sharing a budget arm do not merge statistical strata or
+produce duplicate block/seed identities. Horizon remains a separate dimension;
+seed is still not an independent block.
+
+Runnable cells have shared resource bindings, but the complete draft intentionally
+has no `runtime_binding` or `admission`.
 Operators must supply an existing absolute Git-external root/store and obtain
 normal shared grants, preregistration, upstream/qualification/pilot decisions and
 budget admission before execution. Supplying digest-shaped metadata alone is
 not evidence of those checks, and this draft is not an approved study.
+The current shared admission package binds one execution plugin identity. A
+heterogeneous affine/nonlinear or restart/chunk matrix also needs explicit
+per-cell package admission support; this preparation/disposition feature does
+not silently select another package or claim to solve that remaining binding.
 
 `tests/test_propagation_study_design.py` covers immutability, deterministic content
 hashing, exact owner preflight compatibility, paired inputs, stable budget arms,
 cap-before-expansion, invalid metadata/configuration, retained missing methods,
 source freshness and tampered resource bindings without executing research.
+`tests/test_research_declared_disposition.py` checks terminal/concurrent refusal,
+malformed declarations and direct owner-plan bypasses.
+`tests/test_propagation_matrix_dispositions.py` exports the actual registered
+matrix and exercises the unchanged paired paper aggregator: all region/method/
+horizon/seed rows and reasons survive, with zero successful independent blocks.
+Those disposable engineering exports are not formal research evidence.
