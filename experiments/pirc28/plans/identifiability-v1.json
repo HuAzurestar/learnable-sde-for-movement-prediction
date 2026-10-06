@@ -91,9 +91,9 @@
     },
     "event_driven_reference": {
       "algorithm": "event-driven-bootstrap-particle-filter-v1",
-      "particles": 512,
-      "independent_batches": 4,
-      "maximum_jumps_per_particle_interval": 256,
+      "particles": 2048,
+      "independent_batches": 8,
+      "maximum_jumps_per_particle_interval": 32,
       "minimum_ess_fraction": 0.1,
       "confidence": 0.95,
       "maximum_mc_half_width_fraction": 0.25,

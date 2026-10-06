@@ -8,7 +8,8 @@ import pytest
 
 from experiments.pirc28.approximation import ApproximationSpec
 from experiments.pirc28.approximation_checks import (MC_METHOD, _event_predict, _known_mode_checks, _reference_batch,
-    check_prefix_approximation, numerical_plan, observation_prefix, reference_summary, student_t_critical)
+    check_prefix_approximation, numerical_plan, observation_prefix, reference_design_preflight,
+    reference_summary, schedule_plan, student_t_critical)
 from experiments.pirc28.plan import load_plan, REFERENCE_PLAN
 from experiments.pirc28.synthetic import generate_scenario
 from inference.switching import InferenceSpec
@@ -24,6 +25,8 @@ def settings():
     # These legacy test models permit fitted rates to 100, not production 5.
     value['step_halving']['maximum_substeps'] = 4000
     value['event_driven_reference']['particles'] = 64
+    value['event_driven_reference']['independent_batches'] = 4
+    value['event_driven_reference']['maximum_jumps_per_particle_interval'] = 256
     return ApproximationSpec.from_dict(value)
 
 
@@ -262,3 +265,107 @@ def test_known_mode_control_independently_detects_covariance_corruption(monkeypa
     checks = _known_mode_checks(observation_prefix(batch, 2), fitted, means, covariances, InferenceSpec(),
         settings().to_dict()['known_mode_boundary'], 0, fixture_poll)
     assert checks[0]['passed'] is False and checks[0]['covariance_max_abs'] >= 0.009
+
+
+@pytest.mark.parametrize('seed,particles', [(12, 64), (901, 128)])
+def test_initial_mixture_conditioning_is_exact_with_unequal_priors_and_covariances(seed, particles):
+    batch, fitted = observations(k=2, rate=0)
+    values = np.full((1, 4, 1), 0.75)
+    batch = replace(batch, values=values, H=np.eye(4)[:1], R=np.array([[0.5]]))
+    means = np.zeros((2, 4)); means[1, 0] = 2.0
+    covariances = np.array([np.eye(4), 2*np.eye(4)])
+    prior = np.array([0.3, 0.7])
+    innovation = np.array([1.5, 2.5])
+    residual = 0.75-means[:, 0]
+    weighted_density = prior*np.exp(-residual**2/(2*innovation))/np.sqrt(2*math.pi*innovation)
+    expected_p = weighted_density/weighted_density.sum()
+    expected_mean = means.copy()
+    expected_mean[:, 0] += np.array([1.0, 2.0])/innovation*residual
+    config = settings().to_dict()['event_driven_reference']; config['particles'] = particles
+    result = _reference_batch(observation_prefix(batch, 2), fitted, prior, means, covariances,
+                              config, seed, 0, 0, fixture_poll)
+    assert np.allclose(result['probabilities'][0], expected_p, atol=1e-14, rtol=0)
+    assert np.allclose(result['means'][0], expected_p@expected_mean, atol=1e-14, rtol=0)
+    assert math.isclose(result['log_likelihood'][0], math.log(weighted_density.sum()), abs_tol=1e-14)
+
+
+def test_initial_zero_probability_singular_component_is_not_conditioned():
+    batch, fitted = observations(k=2, rate=0)
+    batch = replace(batch, H=np.eye(4)[:1], R=np.zeros((1, 1)), values=batch.values[:, :, :1])
+    means = np.zeros((2, 4)); covariances = np.array([np.zeros((4, 4)), np.eye(4)])
+    result = _reference_batch(observation_prefix(batch, 2), fitted, np.array([0.0, 1.0]), means, covariances,
+                              settings().to_dict()['event_driven_reference'], 123, 0, 0, fixture_poll)
+    assert np.array_equal(result['probabilities'][0], [0, 1])
+    assert np.isfinite(result['log_likelihood']).all()
+
+
+def test_exact_initial_posterior_is_sampled_once_without_redundant_resampling(monkeypatch):
+    batch, fitted = observations(k=2, rate=0)
+    original = np.random.default_rng
+    calls = {role: [] for role in range(3)}
+    class Recorded:
+        def __init__(self, entropy):
+            self.role = entropy.entropy[-1]; self.rng = original(entropy)
+        def choice(self, a, size=None, p=None):
+            calls[self.role].append(np.array(p))
+            return self.rng.choice(a, size=size, p=p)
+        def exponential(self, scale): return self.rng.exponential(scale)
+    monkeypatch.setattr(np.random, 'default_rng', Recorded)
+    prior, means, covariances = initial(2)
+    result = _reference_batch(observation_prefix(batch, 2), fitted, prior, means, covariances,
+                              settings().to_dict()['event_driven_reference'], 123, 0, 0, fixture_poll)
+    assert len(calls[0]) == 1 and np.array_equal(calls[0][0], result['probabilities'][0])
+    assert len(calls[2]) == 1  # Three observations: only propagation toward the third resamples.
+
+
+def test_metadata_and_observation_core_work_plans_are_identical():
+    batch, fitted = observations(k=2)
+    prefix = observation_prefix(batch, 2)
+    assert numerical_plan(settings(), InferenceSpec(), prefix, fitted) == schedule_plan(
+        settings(), InferenceSpec(), batch.times, 2, 1, 2, fitted.rate_bounds[1], 2)
+
+
+def test_reference_design_rejects_old_balanced_mc_floor_without_data_or_fit():
+    spec = load_plan(REFERENCE_PLAN)['approximation_spec']
+    spec['event_driven_reference'].update(particles=512, independent_batches=4, maximum_jumps_per_particle_interval=256)
+    with pytest.raises(SwitchingError, match='balanced IID'):
+        reference_design_preflight(ApproximationSpec.from_dict(spec), InferenceSpec(), [0, 0.5, 1, 1.5, 2], 4, 8, 5, 2)
+
+
+def test_reference_design_exceeding_segment_quota_is_refused_even_with_more_particles():
+    spec = load_plan(REFERENCE_PLAN)['approximation_spec']
+    spec['event_driven_reference'].update(particles=4096, independent_batches=32)
+    with pytest.raises(SwitchingError, match='core quota'):
+        reference_design_preflight(ApproximationSpec.from_dict(spec), InferenceSpec(), [0, 0.5, 1, 1.5, 2], 4, 8, 5, 2)
+
+
+@pytest.mark.parametrize('rate,expected', [(0, 0.0), (1e6, 1.0)])
+def test_jump_tail_bound_discloses_absorbing_or_nonrare_quota_risk(rate, expected):
+    spec = load_plan(REFERENCE_PLAN)['approximation_spec']
+    spec['step_halving']['maximum_substeps'] = 100_000
+    # Tiny time step makes the fine grid feasible even at rate 1e6; its large
+    # rate-step setting cannot be relaxed. A low jump quota gives nonrare risk.
+    spec['event_driven_reference']['maximum_jumps_per_particle_interval'] = 1
+    inference = InferenceSpec(max_substeps=100_000)
+    report = reference_design_preflight(ApproximationSpec.from_dict(spec), inference, [0, 1e-5], 1, 8, rate, 2)
+    assert report['particle_interval_jump_quota_exceedance_union_bound'] == expected
+    assert report['actual_mc_precision_proven'] is report['finite_particle_bias_bounded'] is False
+
+
+def test_positive_rate_jump_tail_underflow_is_not_reported_as_exact_zero():
+    spec = ApproximationSpec.from_dict(load_plan(REFERENCE_PLAN)['approximation_spec'])
+    report = reference_design_preflight(spec, InferenceSpec(), [0, 1e-308], 1, 1, 1e-308, 2)
+    assert report['particle_interval_jump_quota_exceedance_union_bound'] > 0
+
+
+@pytest.mark.parametrize('damage', ['paths', 'modes', 'dimension', 'rate', 'origin', 'schedule'])
+def test_schedule_metadata_refuses_invalid_dimensions_and_nonfinite_prefix(damage):
+    arguments = [settings(), InferenceSpec(), [0, 0.5, 1], 2, 1, 2, 100, 2]
+    if damage == 'paths': arguments[4] = True
+    elif damage == 'modes': arguments[5] = 3
+    elif damage == 'dimension': arguments[7] = 0
+    elif damage == 'rate': arguments[6] = math.nan
+    elif damage == 'origin': arguments[3] = 0
+    else: arguments[2] = [0, math.nan, 1]
+    with pytest.raises(SwitchingError, match='reference'):
+        schedule_plan(*arguments)

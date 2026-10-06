@@ -52,17 +52,37 @@ def numerical_plan(spec, inference, prefix, model):
     """
     if not isinstance(spec, ApproximationSpec) or not isinstance(model, SwitchingSDEModel):
         raise SwitchingError('CONTRACT_MISMATCH', 'canonical specification and model required')
+    return schedule_plan(spec, inference, prefix.times, len(prefix.times)-1,
+        len(prefix.values), model.n_modes, model.rate_bounds[1], prefix.values.shape[-1])
+
+
+def schedule_plan(spec, inference, times, origin_index, paths, k, rate_upper, observation_dimension):
+    """The same core bounds from schedule metadata, without allocating fake data."""
+    if (not isinstance(spec, ApproximationSpec) or not isinstance(inference, InferenceSpec)
+            or type(paths) is not int or not 1 <= paths <= 64
+            or type(k) is not int or k not in (1, 2)
+            or type(observation_dimension) is not int or not 1 <= observation_dimension <= 4
+            or type(rate_upper) not in (int, float) or not math.isfinite(rate_upper) or rate_upper < 0):
+        raise SwitchingError('CONTRACT_MISMATCH', 'bounded canonical reference schedule required')
+    times = np.asarray(times, dtype=float)
+    if (times.ndim != 1 or type(origin_index) is not int or not 1 <= origin_index < len(times)
+            or origin_index >= 100_000):
+        raise SwitchingError('CONTRACT_MISMATCH', 'nonempty bounded reference prefix required')
+    times = times[:origin_index+1]
+    if not np.isfinite(times).all() or times[0] != 0 or np.any(np.diff(times) <= 0):
+        raise SwitchingError('CONTRACT_MISMATCH', 'finite increasing reference prefix required')
+    inference.validate()
     settings = spec.to_dict()
-    fine = spec.prefix_preflight(inference, prefix.times, len(prefix.times)-1, model.rate_bounds[1])
-    delta = min(inference.max_step_seconds, inference.max_rate_step/model.rate_bounds[1]) if model.rate_bounds[1] else inference.max_step_seconds
-    coarse_steps = sum(math.ceil(float(dt)/delta) for dt in np.diff(prefix.times))
+    fine = spec.prefix_preflight(inference, times, origin_index, rate_upper)
+    delta = min(inference.max_step_seconds, inference.max_rate_step/rate_upper) if rate_upper else inference.max_step_seconds
+    coarse_steps = sum(math.ceil(float(dt)/delta) for dt in np.diff(times))
     if coarse_steps > inference.max_substeps:
         raise SwitchingError('INFERENCE_INAPPLICABLE', 'coarse prefix exceeds its permitted-rate quota')
-    n, paths, k = len(prefix.times), len(prefix.values), model.n_modes
+    n = len(times)
     ref = settings['event_driven_reference']
     elements = (max(coarse_steps, fine['maximum_prefix_substeps'])*k*k*16*24
         + ref['particles']*96 + paths*ref['independent_batches']*n*(k+5)
-        + paths*n*(k+4+16)*4 + prefix.values.size)
+        + paths*n*(k+4+16)*4 + paths*n*observation_dimension)
     segments = paths*ref['independent_batches']*ref['particles']*(n-1)*(ref['maximum_jumps_per_particle_interval']+1)
     if elements > MAXIMUM_ELEMENTS or segments > MAXIMUM_SEGMENTS:
         raise SwitchingError('RESOURCE_LIMIT', 'reference allocation or worst-case segment work exceeds the core quota')
@@ -72,6 +92,44 @@ def numerical_plan(spec, inference, prefix, model):
         'reference_particles': ref['particles'], 'independent_batches': ref['independent_batches'],
         'reference_storage': 'sequential-path-and-batch; no-particle-or-jump-history',
         'resource_admitted': False, 'managed_executor_implemented': False}
+
+
+def reference_design_preflight(spec, inference, times, origin_index, paths, rate_upper, observation_dimension):
+    """Pre-data K2 design sanity, NOT empirical precision or shared admission.
+
+    A balanced IID Bernoulli benchmark is only a necessary engineering check;
+    actual weighted/resampled filtering batches can have much greater variance.
+    Uniformisation bounds jump counts by Poisson(rate_upper*dt). Chernoff bounds
+    and a union bound need no independence of ancestor paths or intervals.
+    """
+    plan = schedule_plan(spec, inference, times, origin_index, paths, 2, rate_upper, observation_dimension)
+    ref = spec.to_dict()['event_driven_reference']
+    critical = student_t_critical(ref['independent_batches']-1, ref['confidence'], check_budget=lambda: None)
+    benchmark = critical*0.5/math.sqrt(ref['particles']*ref['independent_batches'])
+    limit = ref['maximum_mc_half_width_fraction']*ref['thresholds']['mode_total_variation']
+    if benchmark > limit:
+        raise SwitchingError('CONTRACT_MISMATCH', 'balanced IID reference precision benchmark exceeds its frozen MC limit')
+    m = ref['maximum_jumps_per_particle_interval']+1
+    tail_sum = 0.0
+    for dt in np.diff(np.asarray(times, dtype=float)[:origin_index+1]):
+        lam = rate_upper*float(dt)
+        if rate_upper == 0:
+            bound = 0.0
+        elif m <= lam:
+            bound = 1.0
+        else:
+            # A positive-rate mathematical tail must not become an exact zero
+            # assertion when multiplication/exponentiation underflows.
+            smallest = float(np.nextafter(0.0, 1.0))
+            bound = smallest if lam == 0 else max(smallest, math.exp(-lam+m*(1+math.log(lam)-math.log(m))))
+        tail_sum += bound
+    union = min(1.0, paths*ref['independent_batches']*ref['particles']*tail_sum)
+    return {'schema_version': 'pirc28-reference-design-sanity-v1', 'core_plan': plan,
+        'balanced_iid_nominal_half_width_benchmark': benchmark, 'registered_mode_mc_half_width_limit': limit,
+        'particle_interval_jump_quota_exceedance_union_bound': union,
+        'jump_tail_method': 'Poisson-uniformisation-Chernoff-union; exceeding-quota-still-fails',
+        'actual_mc_precision_proven': False, 'finite_particle_bias_bounded': False,
+        'qualified_identifiability': False}
 
 
 def _initial(model, probability, means, covariances):
@@ -179,27 +237,41 @@ def _reference_batch(prefix, model, probability, means, covariances, settings, s
     # generator/truth RNG or consume extra batches after seeing an MC interval.
     streams = [np.random.default_rng(np.random.SeedSequence([seed, path_index, batch_index, role])) for role in range(3)]
     rng_initial, rng_events, rng_resample = streams
-    modes = rng_initial.choice(k, size=particles, p=probability)
-    particle_means, particle_covariances = means[modes].copy(), covariances[modes].copy()
-    scores, weights = np.zeros(particles), np.ones(particles)/particles
-    probabilities, marginal_means, ess, log_trace = [], [], [], []
-    likelihood, jumps = 0.0, 0
-    for index in range(n):
+    # Condition the finite initial Gaussian mixture analytically BEFORE sampling.
+    # This supplies exact y0 evidence/summaries and IID particles from p(z0|y0),
+    # not a noisy importance-weighted sample from p(z0). Zero-prior modes need
+    # neither log(0) nor a meaningless singular Kalman update.
+    initial_means, initial_covariances = means.copy(), covariances.copy()
+    initial_scores = np.full(k, -math.inf)
+    for mode in range(k):
         check_budget()
-        if index:
+        if probability[mode] > 0:
+            initial_means[mode], initial_covariances[mode], score = _kalman_update(
+                means[mode], covariances[mode], prefix.values[path_index, 0], prefix.H, prefix.R)
+            initial_scores[mode] = math.log(probability[mode])+score
+    initial_posterior, likelihood = normalize_log_weights(initial_scores)
+    modes = rng_initial.choice(k, size=particles, p=initial_posterior)
+    particle_means, particle_covariances = initial_means[modes].copy(), initial_covariances[modes].copy()
+    scores, weights = np.zeros(particles), np.ones(particles)/particles
+    probabilities, marginal_means = [initial_posterior], [initial_posterior@initial_means]
+    ess, log_trace, jumps = [1.0], [likelihood], 0
+    for index in range(1, n):
+        check_budget()
+        # Fresh initial particles already have the exact initial posterior law.
+        # Resampling them again would add avoidable genealogical variance.
+        if index > 1:
             ancestors = rng_resample.choice(particles, size=particles, p=weights)
             modes = modes[ancestors].copy()
             particle_means, particle_covariances = particle_means[ancestors].copy(), particle_covariances[ancestors].copy()
-            dt = float(prefix.times[index]-prefix.times[index-1])
-            kernels = [[item.numpy() for item in model.conditional_affine_transition(mode, dt)] for mode in range(k)]
+        dt = float(prefix.times[index]-prefix.times[index-1])
+        kernels = [[item.numpy() for item in model.conditional_affine_transition(mode, dt)] for mode in range(k)]
         for particle in range(particles):
             check_budget()
-            if index:
-                mode, mean, covariance, count = _event_predict(model, int(modes[particle]),
-                    particle_means[particle], particle_covariances[particle], dt, rng_events,
-                    settings['maximum_jumps_per_particle_interval'], kernels, check_budget)
-                modes[particle], particle_means[particle], particle_covariances[particle] = mode, mean, covariance
-                jumps += count
+            mode, mean, covariance, count = _event_predict(model, int(modes[particle]),
+                particle_means[particle], particle_covariances[particle], dt, rng_events,
+                settings['maximum_jumps_per_particle_interval'], kernels, check_budget)
+            modes[particle], particle_means[particle], particle_covariances[particle] = mode, mean, covariance
+            jumps += count
             particle_means[particle], particle_covariances[particle], scores[particle] = _kalman_update(
                 particle_means[particle], particle_covariances[particle], prefix.values[path_index, index], prefix.H, prefix.R)
         weights, normalization = normalize_log_weights(scores)
@@ -342,7 +414,9 @@ def check_prefix_approximation(observations, model, probability, means, covarian
         'inference_hash': digest(inference.to_dict()), 'reference_seed': seed, 'origin_index': origin_index,
         'state': 'INFERENCE_INAPPLICABLE' if any(value['reasons'] for value in paths) else 'NUMERICAL_CHECKS_PASSED',
         'paths': paths, 'resource_plan': plan, 'reference_continuous_state': 'path-conditional-affine-Kalman; no-state-particle-sampling',
-        'reference_resampling': 'multinomial-every-observation', 'reference_interval_method': MC_METHOD,
+        'reference_initial_conditioning': 'analytic-Gaussian-mode-mixture; iid-from-initial-posterior',
+        'reference_resampling': 'multinomial-before-subsequent-intervals; no-redundant-initial-resampling',
+        'reference_interval_method': MC_METHOD,
         'comparison': 'marginal-mode-probabilities-and-state-means; not-full-distribution-distance',
         'accuracy': 'finite-particle-reference; not-exact-joint-likelihood-or-posterior',
         'managed_evidence_bound': False, 'qualified_identifiability': False, 'real_data_authorized': False}

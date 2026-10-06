@@ -88,6 +88,33 @@ def test_every_declared_source_fits_existing_resources_and_substep_rate_family(r
                 assert sum(math.ceil(float(dt)/delta) for dt in np.diff(times)) <= recipe['inference']['max_substeps']
 
 
+def test_reference_design_summary_is_pre_data_bounded_and_not_scientific_precision(reference):
+    plan, _ = reference
+    summary = describe_plan(plan)['reference_design_sanity']
+    assert plan['approximation_spec']['event_driven_reference']['particles'] == 2048
+    assert plan['approximation_spec']['event_driven_reference']['independent_batches'] == 8
+    assert plan['approximation_spec']['event_driven_reference']['maximum_jumps_per_particle_interval'] == 32
+    assert summary['balanced_iid_nominal_half_width_benchmark'] < 0.01
+    assert summary['maximum_event_segments_per_K2_cell'] == 34_603_008
+    assert summary['maximum_core_tensor_elements'] <= 20_000_000
+    assert 0 < summary['full_master_jump_quota_exceedance_union_bound'] < 1e-12
+    assert summary['actual_mc_precision_proven'] is summary['finite_particle_bias_bounded'] is False
+
+
+@pytest.mark.parametrize('damage', ['old-mc-floor', 'event-work'])
+def test_plan_rejects_insufficient_fixed_reference_design_without_filtering(reference, monkeypatch, damage):
+    plan = copy.deepcopy(reference[0])
+    reference_config = plan['approximation_spec']['event_driven_reference']
+    if damage == 'old-mc-floor':
+        reference_config.update(particles=512, independent_batches=4, maximum_jumps_per_particle_interval=256)
+    else:
+        reference_config['maximum_jumps_per_particle_interval'] = 256
+    monkeypatch.setattr('experiments.pirc28.approximation_checks.filter_switching',
+                        lambda *a, **k: pytest.fail('metadata preflight must not filter'))
+    with pytest.raises(ResearchError, match='balanced IID|core quota'):
+        prepare_definition(plan)
+
+
 def test_required_negative_controls_have_actual_common_observation_laws(reference):
     _, definition = reference
     value = definition.to_dict()

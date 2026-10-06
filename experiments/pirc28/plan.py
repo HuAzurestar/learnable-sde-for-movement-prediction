@@ -18,6 +18,7 @@ from .qualification import AXES, PARAMETERS, IdentifiabilitySpec, _wilson, phase
 from .study import SCHEMA_V2, SyntheticStudyDefinition, arm_bindings
 from .synthetic import ScenarioSpec
 from .approximation import ApproximationSpec, RECIPE_SCHEMA
+from .approximation_checks import reference_design_preflight
 
 PLAN_SCHEMA = 'pirc28-scientific-plan-v2'
 MAXIMUM_PLAN_BYTES = 64*1024
@@ -183,6 +184,8 @@ def _prepare(plan):
         if sum(math.ceil(float(dt)/delta) for dt in np.diff(times)) > inference.max_substeps:
             raise ResearchError('RESOURCE_PLAN_REJECTED', 'frozen rate family exceeds the declared substep quota')
         approximation.prefix_preflight(inference, times, index_of(origin), truth.rate_bounds[1])
+        reference_design_preflight(approximation, inference, times, index_of(origin),
+            sampling['test_paths'], truth.rate_bounds[1], len(row['scenario']['H']))
         recipes[name] = {'schema_version': RECIPE_SCHEMA, 'scenario': row['scenario'],
             'approximation_spec': approximation.to_dict(),
             'initializations': copy.deepcopy(initializations), 'inference': copy.deepcopy(frozen['inference']),
@@ -208,6 +211,10 @@ def describe_plan(plan):
     definition = prepare_definition(plan)
     value = definition.to_dict()
     qualification = IdentifiabilitySpec.from_dict(value['identifiability_spec'])
+    checks = {name: reference_design_preflight(ApproximationSpec.from_dict(value['approximation_spec']),
+        InferenceSpec(**plan['inference']), recipe['scenario']['times'], recipe['forecast_origin_index'],
+        recipe['test_paths'], recipe['scenario']['model']['rate_bounds'][1], len(recipe['scenario']['H']))
+        for name, recipe in value['recipes'].items()}
     return {'schema_version': 'pirc28-scientific-plan-summary-v1', 'plan_id': plan['plan_id'],
         'plan_hash': digest(plan), 'definition_hash': definition.definition_hash,
         'runtime_code_hash': value['runtime_code_hash'], 'definition_bytes': len(definition.content),
@@ -220,6 +227,13 @@ def describe_plan(plan):
         'thresholds': qualification.thresholds, 'prepared_only': True, 'registered_studies': False,
         'approximation_spec_hash': digest(value['approximation_spec']),
         'approximation_executor_implemented': False, 'approximation_resource_admitted': False,
+        'reference_design_sanity': {'balanced_iid_nominal_half_width_benchmark':
+            max(check['balanced_iid_nominal_half_width_benchmark'] for check in checks.values()),
+            'maximum_core_tensor_elements': max(check['core_plan']['tensor_elements'] for check in checks.values()),
+            'maximum_event_segments_per_K2_cell': max(check['core_plan']['maximum_event_segments'] for check in checks.values()),
+            'full_master_jump_quota_exceedance_union_bound': min(1.0, len(qualification.replicate_ids)*sum(
+                check['particle_interval_jump_quota_exceedance_union_bound'] for check in checks.values())),
+            'actual_mc_precision_proven': False, 'finite_particle_bias_bounded': False},
         'scientific_groups_executed': 0, 'qualified_identifiability': False, 'real_data_authorized': False}
 
 

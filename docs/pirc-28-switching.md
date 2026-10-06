@@ -560,8 +560,8 @@ full 16-second trajectory. The fine specification retains other fit policies.
 Coarse/fine agreement alone does not validate moment matching or true likelihood.
 
 The registered reference candidate is a conditional-affine, event-driven
-bootstrap particle filter with 512 particles, four independent MC batches,
-at most 256 jumps per particle/observation interval and minimum ESS fraction
+bootstrap particle filter with 2048 particles, eight independent MC batches,
+at most 32 jumps per particle/observation interval and minimum ESS fraction
 0.1. Its confidence setting is 0.95; MC half-widths must be at most one quarter
 of the corresponding reference tolerance. Insufficient MC precision must fail,
 not cause adaptive extra batches, particle counts, selective batch deletion or
@@ -572,6 +572,32 @@ posteriors/likelihoods, not just unconditioned forward moments. The known-mode
 affine K=1/Kalman boundary has absolute and relative tolerances 1e-8. All required
 checks and failures must remain disclosed; failure state is
 `INFERENCE_INAPPLICABLE`, never a fabricated successful diagnostic.
+
+This is a pre-data design revision, not an outcome-conditioned change. The prior
+512-particle/four-batch candidate had a balanced-IID population-SD nominal
+Student half-width benchmark 0.0351614, exceeding its unchanged 0.025 mode
+precision limit. Eight batches of 2048 particles give a benchmark below 0.01.
+This necessary sanity check does NOT establish actual weighted/resampled batch
+variance, bias, simultaneous coverage or later-observation precision. The
+compiler now refuses a reference whose balanced-IID benchmark already exceeds
+its precision gate; every actual batch still must pass the frozen checks.
+
+The reduced jump quota keeps worst-case work within the SAME 50-million-segment
+core ceiling while increasing independent reference samples. At the registered
+rate upper bound 5 s^-1 and interval at most 0.5 s, uniformisation dominates
+actual K=2 event counts by Poisson(2.5). For quota J, the pre-data Chernoff bound
+on exceeding it uses m=J+1 and exp(-lambda+m*(1+log(lambda)-log(m))) when
+m>lambda, otherwise 1. Summing over every prefix interval, particle, batch,
+held-out path and registered K=2 cell gives a union bound without assuming
+independence. This is an application of the
+[Poisson Chernoff derivation](https://www.cs.cmu.edu/~harchol/Probability/slides/Chpt18.pdf),
+not an empirical failure-rate estimate or permission to truncate paths. An
+actual quota exceedance still fails and remains disclosed. Positive-rate tail
+underflow is floored rather than falsely reported as exact zero; only an
+absorbing rate has zero event risk. Schedule-only preparation reports these
+design/work bounds without generating data, fitting, admitting resources or
+creating a store. Plan changes alter full-master/seed identities and require
+new pre-fit registration, never a new original-arm budget identity.
 
 CURRENT LIMITATION: the immutable contract, fine-grid metadata preflight,
 fail-closed publication boundary and bounded numerical core below are implemented.
@@ -609,12 +635,25 @@ oversized work; this is a core plan, NOT shared resource admission or accounting
 for concurrent source-fit/forecast allocations. The future adapter must register
 and verify the whole live allocation/work plan under the existing caps.
 
-The reference draws initial modes and autonomous CTMC jump paths, with zero or
-multiple events in each observation interval. Each particle carries a Gaussian
+The reference conditions the finite initial Gaussian mode mixture analytically:
+each positive-prior component receives its conditional Kalman update, exact
+initial evidence normalizes prior times likelihood, and initial mode/state-mean
+summaries use the full posterior mixture. Zero-prior components are not updated.
+It then draws IID initial modes from that posterior, not the unconditioned prior;
+their Gaussian states already include the initial observation. It does not
+resample these fresh uniform-weight particles before the first propagation.
+Subsequent observation-weighted particles use multinomial resampling before
+the next interval. Analytic initial conditioning removes unnecessary initial
+sampling noise but cannot guarantee later precision. This initialization is
+also consistent with the importance-distribution derivation in
+[Doucet, Godsill and Andrieu, 2000](https://www.stats.ox.ac.uk/~doucet/doucet_godsill_andrieu_sequentialmontecarloforbayesfiltering.pdf).
+
+Autonomous CTMC jump paths contain zero or multiple events per interval.
+Each particle carries a Gaussian
 continuous mean/covariance: fixed-mode affine kernels compose over actual jump
 segments, and a direct conditional Kalman update supplies observation weights.
 It uses independent initial/event/resampling streams per seed/path/batch and
-multinomial resampling at every observation. It keeps compact prefix summaries,
+the resampling schedule above. It keeps compact prefix summaries,
 not all jump/particle histories. The conditional continuous marginalisation
 follows the structure described by [Doucet et al., UAI 2000](https://arxiv.org/abs/1301.3853);
 this particular CTMC implementation is ours, not a claim that the paper supplies
