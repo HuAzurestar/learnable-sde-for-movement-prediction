@@ -132,8 +132,88 @@ def test_f32_collapsing_time_grid_is_refused_before_drift_and_no_ambient_rng_is_
     assert torch.equal(torch.get_rng_state(),cpu)
 
 
-@pytest.mark.parametrize("operation", ["forecast", "fit-and-forecast"])
-def test_actual_owner_forecast_ack_reopen_and_fresh_cost_preserve_complete_samples_and_moments(tmp_path, operation):
+def test_completed_solver_state_can_resume_after_evaluation_row_cancellation(monkeypatch):
+    from evaluation.phase_space import evaluate_forecast
+    import evaluation.phase_space as evaluation
+    m,req = model("M0"),request()
+    with torch.no_grad():
+        result = forecast(m,req,checkpoint_requested=lambda:False,checkpoint_handler=lambda *_:pytest.fail("unexpected save"))
+    completion = result.pop("completion_state")
+    assert completion["first"] == req.sample_count and completion["pending"] is None
+    calls = []
+    real = evaluation.energy_score_value
+    def counted(*args,**kwargs):
+        calls.append(1)
+        return real(*args,**kwargs)
+    monkeypatch.setattr(evaluation,"energy_score_value",counted)
+    truth = torch.zeros_like(result["samples"][0])
+    with pytest.raises(ModelContractError,match="INTERRUPTED"):
+        evaluate_forecast(result,truth,cancellation=lambda:len(calls)==2)
+    assert len(calls) == 2  # No partial metric is returned.
+    monkeypatch.setattr(m,"drift",lambda *_:pytest.fail("completed population recomputed drift"))
+    with torch.no_grad():
+        resumed = forecast(m,req,resume_state=completion)
+    assert torch.equal(resumed["samples"],result["samples"])
+    assert resumed["moments"] == result["moments"]
+    assert evaluate_forecast(resumed,truth) == evaluate_forecast(result,truth)
+
+
+@pytest.mark.parametrize("fault",[None,"progress","phase","binary"])
+def test_owned_phase_prepare_validates_before_retry_or_provider_read(tmp_path,monkeypatch,fault):
+    from application.pirc26_forecast_control import pack_fit,SCHEMA
+    from application.pirc26_runtime import validate_checkpoint_progress
+    from application.research_recovery import SharedRecovery
+    from tests.test_pirc26_runtime import prepare,owner_admit
+    from dataclasses import asdict
+    from infrastructure.pirc26_forecast_codec import pack_json
+    store,value,plugin,job,registry,recovery,grant = prepare(tmp_path,operation="forecast",role="validation")
+    _,receipt = owner_admit(store,value,plugin)
+    cfg = receipt["cell"]["execution"]["config"]
+    m = model("M0")
+    recipe = job["origins"][0]
+    # Use the fixture's actual causal request, never a self-issued admission.
+    from application.pirc26_data import decode_block
+    from tests.test_pirc26_components_data import admitted,document
+    block = decode_block(admitted(document(m)),m)
+    req = block.forecast_request(recipe["segment_id"],recipe["origin_index"],recipe["time_grid"],
+        sample_count=recipe["sample_count"],brownian_root_id=recipe["brownian_root_id"],chunk_size=recipe["chunk_size"])
+    assert digest(asdict(req)) == cfg["forecast_request_hashes"][0]
+    active,row = interrupted(m,req,2)
+    method = {"schema_version":SCHEMA,"job_hash":digest(job),"origin_index":0,
+        "fit":pack_fit({"status":"FROZEN","checkpoint":job["initial_checkpoint"]},job,cfg,0),
+        "finished":pack_json([]),"active":active}
+    state = {"step":row["completed_steps"],"data_position":{"origin_index":0,"first":active["first"],"step":active["step"]},
+        "method_state":{**method,"sha256":digest(method)},"rng_state":{}}
+    progress = {**row,"throughput_per_second":1.,"eta_seconds":1.}
+    validate_checkpoint_progress(receipt,state,progress)
+    if fault == "progress":
+        progress["completed_steps"] += 1
+    elif fault == "phase":
+        state["method_state"]["schema_version"] = "unknown-phase"
+    elif fault == "binary":
+        active["m2"]["data"] = ["invalid!"]
+        active["sha256"] = digest({k:v for k,v in active.items() if k != "sha256"})
+    state["method_state"]["sha256"] = digest({k:v for k,v in state["method_state"].items() if k != "sha256"})
+    owned = SharedRecovery(store,registry,recovery)
+    # Negative fixtures use explicit owner save, NOT claimed worker ACK proof.
+    artifact = owned.checkpoint(receipt["attempt_id"],state,admission_hash=receipt["admission_hash"],progress=progress)
+    store.transition(receipt["attempt_id"],"FAILED",error_code="TRANSIENT")
+    previous = len(store.events())
+    for name in ("tensor","empty","zeros","frombuffer"):
+        monkeypatch.setattr(torch,name,lambda *_a,**_k:pytest.fail("owner phase validation allocated tensors"))
+    if fault is None:
+        assert owned.prepare(receipt["attempt_id"],artifact,authorization=grant)["state"] == state
+    else:
+        with pytest.raises(ResearchError):
+            owned.prepare(receipt["attempt_id"],artifact,authorization=grant)
+    assert len(store.attempts()) == 1
+    assert not any(e["event_kind"] in {"ADMISSION","RESUME","ATTEMPT_CREATED"} for e in store.events()[previous:])
+    assert not any(e["event_kind"] == "READ_STARTED" and e["payload"].get("purpose") != "resume"
+                   for e in store.events()[previous:])
+
+
+@pytest.mark.parametrize("operation,two_origins", [("forecast",False),("fit-and-forecast",False),("forecast",True)])
+def test_actual_owner_forecast_ack_reopen_and_fresh_cost_preserve_complete_samples_and_moments(tmp_path, operation,two_origins):
     import json
     import math
     from application.research_budget import BudgetSpec,BudgetLedger
@@ -142,20 +222,23 @@ def test_actual_owner_forecast_ack_reopen_and_fresh_cost_preserve_complete_sampl
     from infrastructure.research_store import ResearchStore
     from tests.test_pirc26_runtime import prepare
     role = "validation" if operation == "forecast" else "train"
-    baseline,value,_,_,registry,recovery,_ = prepare(tmp_path/"baseline",operation=operation,role=role,long_forecast=True)
+    baseline,value,_,_,registry,recovery,_ = prepare(tmp_path/"baseline",operation=operation,role=role,long_forecast=True,two_origins=two_origins)
     expected = SharedRunner(baseline,registry,recovery_registry=recovery).run_cell(value["study_id"],digest(value["cells"][0]),budget=BudgetSpec(90))
     assert expected["state"] == "SUCCEEDED",expected
     target = json.loads((baseline.path/"artifacts"/expected["artifact_id"]).read_bytes())
     # Calibrate a separate finite engineering reservation from observed native
     # baseline cost. No synthetic time/delay/request/ACK or production budget.
     measured = BudgetLedger(baseline).balance("affine")["committed_ms"]/1000
-    stopped_seconds = max(5,math.floor(measured*.75))
-    store,value,_,_,registry,recovery,grant = prepare(tmp_path/"resumed",operation=operation,role=role,long_forecast=True)
+    stopped_seconds = max(5,math.floor(measured*(.95 if two_origins else .75)))
+    store,value,_,_,registry,recovery,grant = prepare(tmp_path/"resumed",operation=operation,role=role,long_forecast=True,two_origins=two_origins)
     stopped = SharedRunner(store,registry,recovery_registry=recovery).run_cell(value["study_id"],digest(value["cells"][0]),budget=BudgetSpec(stopped_seconds))
     assert stopped["state"] == "FAILED", (stopped,measured,stopped_seconds)
     assert store.attempts()[stopped["attempt_id"]]["error_code"] == "CHECKPOINT_SAVED"
     saves = [e["payload"] for e in store.events() if e["event_kind"] == "CHECKPOINT_SAVED"]
     assert len(saves) == 1 and 0 < saves[0]["progress"]["completed_steps"] < 256*63
+    if two_origins:
+        saved = json.loads(store.read_artifact(saves[0]["artifact_id"],purpose="resume",authorization=grant))
+        assert saved["state"]["method_state"]["origin_index"] == 1  # Genuine completed-origin prefix, not just chunk reuse.
     before = BudgetLedger(store).balance("affine")["committed_ms"]
     assert before > 0
     reopened = ResearchStore(tmp_path/"resumed",store.store_id)
@@ -167,7 +250,8 @@ def test_actual_owner_forecast_ack_reopen_and_fresh_cost_preserve_complete_sampl
     if operation == "fit-and-forecast":
         assert actual["fit"]["history"] == target["fit"]["history"]
         assert actual["fit"]["producer_attempt_id"] == stopped["attempt_id"] != resumed["attempt_id"]
-    assert len(actual["forecast"]["origins"][0]["sample_ids"]) == 256
+    assert len(actual["forecast"]["origins"]) == (2 if two_origins else 1)
+    assert all(len(o["sample_ids"]) == (128 if two_origins else 256) for o in actual["forecast"]["origins"])
     assert BudgetLedger(reopened).balance("affine")["committed_ms"] > before
     assert reopened.attempts()[resumed["attempt_id"]]["parent_attempt_id"] == stopped["attempt_id"]
     requests = [e["payload"] for e in reopened.events() if e["event_kind"] == "CHECKPOINT_REQUESTED"]

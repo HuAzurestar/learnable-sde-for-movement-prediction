@@ -32,7 +32,7 @@ def energy_score_value(samples, target, *, pair_seed=None, pair_count=65536):
         "pair_seed": pair_seed, "pair_sampling_se": .5 * distances.detach().std().item() / math.sqrt(pair_count)}
 
 
-def evaluate_forecast(result, authorized_truth, *, pair_seed=None, pair_count=65536):
+def evaluate_forecast(result, authorized_truth, *, pair_seed=None, pair_count=65536, cancellation=None):
     """Truth is supplied only after the caller's exposure/authorization gate."""
     samples = result["samples"]
     if (samples.ndim != 3 or samples.shape[2] != 4 or authorized_truth.shape != samples.shape[1:]
@@ -44,6 +44,8 @@ def evaluate_forecast(result, authorized_truth, *, pair_seed=None, pair_count=65
                 "failure_rate": result["failure_rate"]}
     rows = []
     for index, timestamp in enumerate(result["time_grid"]):
+        if cancellation is not None and cancellation():
+            raise ModelContractError("INTERRUPTED: forecast evaluation cancelled at a complete row boundary")
         position, truth = samples[:, index, :2], authorized_truth[index, :2]
         value, estimator = energy_score_value(position, truth, pair_seed=pair_seed, pair_count=pair_count)
         score_se = None

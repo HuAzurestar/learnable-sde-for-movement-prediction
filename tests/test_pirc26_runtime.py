@@ -40,7 +40,8 @@ def one_thread():
 
 
 def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=False, long_training=False, family="M0", rank_failure=False,
-            formal=False, metric_policy=None, pilot=False, long_forecast=False):
+            formal=False, metric_policy=None, pilot=False, long_forecast=False, two_origins=False):
+    assert not two_origins or long_forecast
     m = model("M2" if long_training or long_forecast else family)
     doc = document(m)
     doc["block_id"] = "fixture-1"
@@ -66,13 +67,17 @@ def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=Fal
             doc["segments"][0]["velocity"] = [[0., 0.] for _ in times]
     dto = decode_block(admitted(doc), m)
     grid = tuple(doc["segments"][0]["time"][2:(66 if long_forecast else 5)])
-    paths, chunk = (256,1) if long_forecast else (8,8)
+    paths, chunk = ((128 if two_origins else 256),1) if long_forecast else (8,8)
     req = dto.forecast_request("synthetic-segment", 2, grid, sample_count=paths, brownian_root_id="a" * 64, chunk_size=chunk)
     cfg, profile, _, _, _, _ = declarations(m)
     cfg["forecast_request_hashes"] = [digest(asdict(req))]
+    if two_origins:
+        second_grid = tuple(doc["segments"][0]["time"][3:67])
+        second = dto.forecast_request("synthetic-segment",3,second_grid,sample_count=paths,brownian_root_id="b"*64,chunk_size=chunk)
+        cfg["forecast_request_hashes"].append(digest(asdict(second)))
     profile["steps"] = 4
     if long_forecast:
-        profile.update(steps=64, observations=67, paths=256)
+        profile.update(steps=64, observations=67, paths=paths, origins=2 if two_origins else 1)
     if long_training:
         cfg["plan"].update(max_steps=RECOVERY_STEPS, patience=RECOVERY_STEPS, tolerance=0.)
         profile.update(steps=RECOVERY_STEPS, observations=4098)
@@ -91,6 +96,9 @@ def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=Fal
         "o1_result": None, "batch_size": 32 if basis_family(family) else (4096 if long_training or long_forecast else 4),
         "origins": [{"segment_id": "synthetic-segment", "origin_index": 2,
             "time_grid": list(grid), "sample_count": paths, "brownian_root_id": "a" * 64, "chunk_size": chunk}]}
+    if two_origins:
+        job["origins"].append({"segment_id":"synthetic-segment","origin_index":3,"time_grid":list(second_grid),
+                              "sample_count":paths,"brownian_root_id":"b"*64,"chunk_size":chunk})
     if corrupt:
         doc["state_units"] = ["unknown"] * 4  # hash-admitted but semantically invalid, worker must refuse.
     grant = admit_fixture(store, value, plugin, root, formal=formal, execution_config=cfg,

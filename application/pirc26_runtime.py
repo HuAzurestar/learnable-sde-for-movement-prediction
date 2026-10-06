@@ -61,15 +61,34 @@ def pre_read_validate(receipt):
 
 
 def validate_checkpoint_progress(receipt, state, progress):
+    import math
     from application.pirc26_forecast_control import validate_saved_job, is_forecast_state
+    if (type(state) is not dict or type(progress) is not dict
+            or set(progress) != {"completed_steps","total_steps","throughput_per_second","eta_seconds"}
+            or any(type(progress[k]) is not int for k in ("completed_steps","total_steps"))
+            or not 0 <= progress["completed_steps"] <= progress["total_steps"]
+            or progress["total_steps"] <= 0 or progress["completed_steps"] != state.get("step")
+            or any(type(progress[k]) not in (int,float) or not math.isfinite(progress[k]) or progress[k] < 0
+                   for k in ("throughput_per_second","eta_seconds"))):
+        raise ResearchError("CONTRACT_MISMATCH", "closed checkpoint work/progress differs")
     job = receipt["documents"]["package"]["payload"]["pirc26_job"]
     if is_forecast_state(state):
         validate_saved_job(state, job, receipt)
         total = sum(r["sample_count"] * (len(r["time_grid"]) - 1) for r in job["origins"])
         if progress["total_steps"] != total:
             raise ResearchError("CONTRACT_MISMATCH", "forecast progress differs from registered per-path grid work")
-    elif (job["operation"] != "fit-and-forecast" or progress["total_steps"] != receipt["cell"]["execution"]["config"]["plan"]["max_steps"]):
-        raise ResearchError("CONTRACT_MISMATCH", "training progress differs from frozen plan")
+    else:
+        method = state.get("method_state") if type(state) is dict else None
+        plan = receipt["cell"]["execution"]["config"]["plan"]
+        if (job["operation"] != "fit-and-forecast" or progress["total_steps"] != plan["max_steps"]
+                or set(state) != {"step","data_position","method_state","rng_state"}
+                or type(state["step"]) is not int or not 1 <= state["step"] <= plan["max_steps"]
+                or type(state["data_position"]) is not int or state["data_position"] != state["step"] or type(method) is not dict
+                or set(method) != {"schema_version","scope_hash","initial_model_hash","state","sha256"}
+                or method["schema_version"] != "pirc26-training-state-v2"
+                or method["initial_model_hash"] != job["initial_checkpoint"]["sha256"]
+                or method["sha256"] != digest({k:v for k,v in method.items() if k != "sha256"})):
+            raise ResearchError("CONTRACT_MISMATCH", "training phase/position/identity differs from frozen plan")
 
 
 def validate_job(job, receipt):

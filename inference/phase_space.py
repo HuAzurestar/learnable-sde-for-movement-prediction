@@ -162,7 +162,7 @@ def _forecast(model, request: ForecastRequest, *, cancellation=None, increments_
     if saved is not None:
         return saved
     samples = all_samples()
-    return {"schema_version": "pirc26-forecast-result-v1", "samples": samples,
+    result = {"schema_version": "pirc26-forecast-result-v1", "samples": samples,
             "sample_ids": sample_ids, "failed_sample_ids": failed_ids,
             "requested_paths": request.sample_count, "valid_paths": len(sample_ids),
             "failure_rate": len(failed_ids) / request.sample_count,
@@ -175,6 +175,9 @@ def _forecast(model, request: ForecastRequest, *, cancellation=None, increments_
             "error_budget": {"time_discretization_sensitivity": None,
                 "mean_state_standard_error": ((samples.detach().std(0) / math.sqrt(len(samples))).cpu().tolist()
                                                if len(samples) >= 2 else None)}}
+    if managed:
+        result["completion_state"] = snapshot(identity, first, step, samples, sample_ids, failed_ids, None, None, mean, m2)
+    return result
 
 
 def forecast(model, request: ForecastRequest, *, cancellation=None, resume_state=None,

@@ -22,6 +22,7 @@ def run(output, handoff_hash):
         pack_fit, ManagedForecastControl)
     from inference.phase_space_resume import array, materialize, moments
     from infrastructure.pirc26_forecast_codec import inspect_array, require
+    from models.phase_space import ModelContractError
     from evaluation.phase_space import evaluate_forecast
     from application.pirc26_metrics import metric_binding, aggregate_metric
     from estimation.phase_space_o2 import HorizonTrainingExample
@@ -92,10 +93,21 @@ def run(output, handoff_hash):
                 checkpoint_handler=None if managed_forecast is None else managed_forecast.save)
             if prediction.get("status") == "CHECKPOINTED":
                 return 85  # Actual control.save has received the owner's ACK.
-            completed_predictions.append({**prediction, "samples": array(prediction["samples"])})
-        evaluation = evaluate_forecast(prediction, block.truth(recipe["segment_id"], req))
+        completion = prediction.pop("completion_state", None)
+        try:
+            evaluation = evaluate_forecast(prediction, block.truth(recipe["segment_id"], req),
+                cancellation=None if control is None or index < origin_index else managed_forecast.requested)
+        except ModelContractError as exc:
+            if (completion is None or control is None or not str(exc).startswith("INTERRUPTED:")
+                    or not managed_forecast.requested()):
+                raise
+            managed_forecast.save(completion,{"completed_steps": req.sample_count*(len(req.time_grid)-1),
+                                              "total_steps": req.sample_count*(len(req.time_grid)-1)})
+            return 85
         if evaluation["status"] != "SUCCEEDED":
             raise ResearchError("NONFINITE", "incomplete paths cannot become a successful comparison result")
+        if index >= origin_index:
+            completed_predictions.append({**prediction, "samples": array(prediction["samples"])})
         forecasts.append({"request_hash": digest(asdict(req)), "evaluation": evaluation,
                           "sample_ids": prediction["sample_ids"],
                           "moments": prediction["moments"],

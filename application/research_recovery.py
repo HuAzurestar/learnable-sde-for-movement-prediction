@@ -167,6 +167,19 @@ class SharedRecovery:
                 or not any(event["event_kind"] == "CHECKPOINT" and event["payload"] == saved
                            for event in self.store.events())):
             raise ResearchError("CONTRACT_MISMATCH", "checkpoint lacks authoritative source save and scope")
+        if plugin.checkpoint_validator is not None:
+            reference = value.get("admission_hash")
+            if not isinstance(reference, str) or not isinstance(value.get("progress"), dict):
+                raise ResearchError("CONTRACT_MISMATCH", "owned phase recovery requires its original admission and progress")
+            receipt = self.store.manifest("admission-" + reference)
+            if (receipt.get("admission_hash") != reference
+                    or digest({k:v for k,v in receipt.items() if k != "admission_hash"}) != reference
+                    or receipt.get("attempt_id") != attempt_id or receipt.get("spec_hash") != digest(spec)
+                    or receipt.get("cell_hash") != digest(cell)):
+                raise ResearchError("CONTRACT_MISMATCH", "checkpoint original admission differs")
+            # Before retry creation/admission/provider reads, not only after a
+            # worker has consumed the data. Validation grants no new authority.
+            plugin.checkpoint_validator(receipt, value["state"], value["progress"])
         self.store.verify_artifact_read(checkpoint_id, purpose="resume", authorization=authorization)
         return {"run": run, "spec": spec, "cell": cell, "plugin": plugin,
                 "adapter": adapter, "state": value["state"], "checkpoint_id": checkpoint_id}
