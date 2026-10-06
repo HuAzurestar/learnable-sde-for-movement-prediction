@@ -1,6 +1,7 @@
 """Explicit synthetic managed adapters; no trained data or official ledger."""
 
 import json
+import math
 import time
 
 import pytest
@@ -13,6 +14,19 @@ from experiments.pirc25.runner import SharedRunner
 from experiments.pirc27.plugin import execution_config, propagation_plugin, propagation_recovery_plugin
 from infrastructure.research_store import ResearchError, ResearchStore, digest, encode
 from tests.test_propagation_shared_adapter import prepare
+
+
+def _checkpoint_fixture_samples(calibration_seconds):
+    # Size this engineering-only workload BEFORE registration/reservation. Fast
+    # CI otherwise finishes before the old ten-second minimum can request save.
+    # Keep actual work under the shared one-million-update declaration.
+    return max(1024, min(1_000_000 // 128, math.ceil(16.0 * 128 / calibration_seconds)))
+
+
+@pytest.mark.parametrize("seconds", [0.01, 0.5, 1.0, 4.0, 10.0])
+def test_checkpoint_fixture_calibration_stays_within_the_frozen_work_quota(seconds):
+    samples = _checkpoint_fixture_samples(seconds)
+    assert 1024 <= samples and samples*128 <= 1_000_000
 
 
 @pytest.mark.parametrize("method", ["euler", "heun", "mlmc", "importance", "cubature"])
@@ -56,12 +70,26 @@ def test_cubature_workspace_reserves_eight_points_even_when_path_chunk_is_one(tm
 
 
 def test_real_nonlinear_chunk_worker_restores_actual_statistics_and_original_arm_cost(tmp_path):
+    from domain.propagation import PropagationRequest
+    from experiments.pirc27.nonlinear import nonlinear_package
+    from experiments.pirc27.oracles import oracle_suite
+    from inference.propagation_methods import monte_carlo
+    case = oracle_suite()[0]
+    package = nonlinear_package()
+    calibration = PropagationRequest("timing-fixture", package.package_hash, case.initial_mean,
+        case.initial_covariance, 0.0, 0.0, (1.0,), "endpoint-x", 11, "paired-root", "synthetic-method",
+        samples=128, steps=128, chunk_size=1)
+    started = time.monotonic()
+    monte_carlo(package, calibration)
+    samples = _checkpoint_fixture_samples(time.monotonic()-started)
     store, spec, registry = prepare(tmp_path, synthetic=True, recovery=True,
-        changes={"samples": 1024, "steps": 128, "chunk_size": 1})
+        changes={"samples": samples, "steps": 128, "chunk_size": 1})
     cell = spec["cells"][0]
     started = time.monotonic()
     expected = execute_propagation(spec, cell)
-    job_seconds = max(10., min(20., (time.monotonic()-started)*0.5))
+    # Real owner deadlines and soft-save condition are unchanged. No fake
+    # clocks, sleeps, live reservation extension, or weakened restore assertions.
+    job_seconds = max(3., min(20., (time.monotonic()-started)*0.5))
     store.register(spec, digest(spec))
     adapters = RecoveryRegistry()
     adapters.register(propagation_recovery_plugin(synthetic=True))
