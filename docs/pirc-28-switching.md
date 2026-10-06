@@ -783,3 +783,40 @@ by these disposable software controls.
 ```console
 python -m pytest tests/test_pirc28_approximation_evidence.py -q
 ```
+
+## Independent selected-model choice verification
+
+`experiments.pirc28.selection_evidence.validate_selected_fit` replays the
+selection-role observations from the frozen recipe/K/cell seed and recomputes
+the score of every disclosed successful fitted candidate. It never calls the
+producer's selection or fit/filter-aggregation helpers. It checks the entire
+ordered initializer/candidate/source-role roster, retained typed fit failures,
+bounded accepted/rejected progress, canonical model/rate family, typed inference
+and model arrays, the selection source hashes, approximate-objective declaration
+and stable largest-score tie rule. A coherently forged score/winner or modified
+unselected score is not accepted merely because metadata and hashes agree.
+
+Only selection inputs are generated; training, test and evaluator-only truth
+diagnostics are not numerical selection inputs. Claimed selection failures must
+recur under the fixed candidate/filter inputs with the same typed numerical
+diagnostic. An actual successful replay cannot be hidden as a failed candidate.
+Previously failed fits are retained with unavailable scores and never retried by
+this verifier. Authority, timeout/budget and unknown implementation errors
+propagate instead of becoming eligible numerical failures. The complete
+registered additive resource plan is checked before generation; every numerical
+operation uses the supplied budget poll. No store or budget identity is created.
+
+The receipt binds a bounded projection of recipe, selected/disclosed models,
+complete initialization/selection records and generated source identities;
+it does not claim validation of ignored evaluator fields or the whole parent
+artifact. `selection_input_replayed` and `selection_scores_recomputed` may be
+true, but training execution, actual fit-failure execution, full generated input
+hashes, reference sampling, managed authority and scientific qualification remain
+unverified/false. A declared final model need not have been produced by authentic
+GEM execution merely because its selection score is correct. The original-K2
+managed source/reference/authorization/containment/cost path still has to bind
+those obligations, and V2 generation/fitting remains `NEEDS_IMPLEMENTATION`.
+
+```console
+python -m pytest tests/test_pirc28_selection_evidence.py -q
+```
