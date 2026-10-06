@@ -48,10 +48,36 @@ and arm closure remain mandatory. The immutable study spec must supply
 `runtime_binding = {"root": <absolute existing runtime root>, "store_id": <ID>}`.
 The worker never initializes a store, supplies authorization or resets budgets.
 
-This first adapter is fixture-only and declares `restart-only`. Computational
+Both adapters remain fixture-only. The original adapter declares `restart-only`.
+`propagation_plugin(recovery=True)` registers the separate
+`affine-propagation-chunk` adapter for Euler/Heun MC, MLMC and importance sampling.
+Register `propagation_recovery_plugin()` with the shared recovery registry and
+bind its command in the admitted package before running. Analytic exact and
+Gaussian methods retain the original restart-only adapter; they have no streaming
+sample accumulator to resume.
+
+Chunk state retains sample position, Welford moments/hits, MLMC per-level signed
+statistics, or IS log-weight/event moments and maximum weight. It binds the
+request, allocation, proposal, phase, NumPy/PCG64 version and per-sample RNG root.
+At a completed chunk, there is no partially consumed Brownian stream: the next
+sample stream is reconstructed from the stored immutable root and sample/level
+identity. Changing chunk size or the numerical environment refuses resume.
+No uncommitted partial chunk or arbitrary internal time step is restorable.
+Identical results are tested within one environment and frozen configuration,
+not promised bit-for-bit across different libraries/platforms.
+
+The chunk adapter explicitly counts total fine/coarse path-step updates for its
+progress/resource plan (maximum 1,000,000), separately from the finest temporal
+grid (maximum 8192). Checkpoints contain no budget balance; normal shared resume
+creates a linked attempt and charges both attempts to the original arm. The
+worker polls at completed chunks, not within a long chunk. If that boundary or
+owner acknowledgement cannot be reached before the existing hard deadline, the
+normal timeout/closed-arm rule applies; no grace period is added.
+
+Computational
 completion retains an estimator's unresolved/low-ESS diagnostics as evidence;
-it does not promote the estimate to scientific qualification. Exact method-state
-checkpoint/restore, standalone study registration, formal qualification,
+it does not promote the estimate to scientific qualification. Standalone study
+registration, formal qualification,
 nonlinear stress extension, benchmark/paper/UI evidence adaptation and independent
 research acceptance remain subsequent work. The raw numerical functions are for
 unit qualification; actual research must run through the shared supervisor.
@@ -59,7 +85,7 @@ unit qualification; actual research must run through the shared supervisor.
 Validation:
 
 ```console
-python -m pytest tests/test_propagation_oracles.py tests/test_propagation_methods.py tests/test_propagation_shared_adapter.py -q
+python -m pytest tests/test_propagation_oracles.py tests/test_propagation_methods.py tests/test_propagation_recovery.py tests/test_propagation_shared_adapter.py -q
 ```
 
 Synthetic integration tests create disposable test stores outside Git, run actual

@@ -157,12 +157,18 @@ def _merge_moments(n, mean, m2, values):
     return total, mean + delta*count/total, m2 + local_m2 + delta*delta*n*count/total
 
 
-def monte_carlo(package, request, *, solver="euler"):
-    n, mean, m2, hits = 0, 0.0, 0.0, 0
-    for _, _, endpoint, _, _ in endpoint_chunks(package, request, solver=solver):
+def monte_carlo(package, request, *, solver="euler", resume_state=None, checkpoint=None):
+    from .propagation_recovery import ChunkState
+    _inputs(package, request)
+    state = ChunkState(request, solver, (request.samples,), (request.steps,), restored=resume_state)
+    stats = state.statistics[0]
+    for _, stop, endpoint, _, _ in endpoint_chunks(package, request, solver=solver,
+            start_sample=state.position, sample_count=request.samples-state.position) if state.level == 0 else ():
         values = _functional(endpoint, request)
-        n, mean, m2 = _merge_moments(n, mean, m2, values)
-        hits += int(np.count_nonzero(values))
+        stats["n"], stats["mean"], stats["m2"] = _merge_moments(stats["n"], stats["mean"], stats["m2"], values)
+        stats["hits"] += int(np.count_nonzero(values))
+        state.completed(0, stop, checkpoint)
+    n, mean, m2, hits = (stats[key] for key in ("n", "mean", "m2", "hits"))
     se = math.sqrt(m2/(n-1)/n)
     interval, kind = (mean-1.959963984540054*se, mean+1.959963984540054*se), "normal-approximation-95"
     # Explicit exact one-sided upper bound for zero independent Bernoulli hits.
@@ -173,22 +179,31 @@ def monte_carlo(package, request, *, solver="euler"):
         (("brownian_scheme", "per-sample-seedsequence-v1"), ("coupling_id", request.coupling_id), ("hits", hits)))
 
 
-def importance_sampling(package, request, *, proposal):
+def importance_sampling(package, request, *, proposal, resume_state=None, checkpoint=None):
     if request.functional != "endpoint-halfspace":
         raise DataValidationError("importance estimator supports only the registered endpoint event")
-    log_sum_weight, log_sum_square = -math.inf, -math.inf
-    log_sum_event, log_sum_event_square = -math.inf, -math.inf
-    n, hits, max_log_weight = 0, 0, -math.inf
-    for start, stop, endpoint, _, log_weights in endpoint_chunks(package, request, proposal=proposal):
+    from .propagation_recovery import ChunkState
+    _inputs(package, request)
+    state = ChunkState(request, "importance", (request.samples,), (request.steps,), proposal=proposal, restored=resume_state)
+    stats = state.statistics[0]
+    def add_log(key, values):
+        previous = -math.inf if stats[key] is None else stats[key]
+        stats[key] = float(np.logaddexp(previous, np.logaddexp.reduce(values)))
+    for start, stop, endpoint, _, log_weights in endpoint_chunks(package, request, proposal=proposal,
+            start_sample=state.position, sample_count=request.samples-state.position) if state.level == 0 else ():
         events = _functional(endpoint, request).astype(bool)
-        n += stop-start
-        hits += int(events.sum())
-        log_sum_weight = float(np.logaddexp(log_sum_weight, np.logaddexp.reduce(log_weights)))
-        log_sum_square = float(np.logaddexp(log_sum_square, np.logaddexp.reduce(2*log_weights)))
-        max_log_weight = max(max_log_weight, float(log_weights.max()))
+        stats["n"] += stop-start
+        stats["hits"] += int(events.sum())
+        add_log("log_w", log_weights)
+        add_log("log_w2", 2*log_weights)
+        stats["max_log_w"] = max(-math.inf if stats["max_log_w"] is None else stats["max_log_w"], float(log_weights.max()))
         if events.any():
-            log_sum_event = float(np.logaddexp(log_sum_event, np.logaddexp.reduce(log_weights[events])))
-            log_sum_event_square = float(np.logaddexp(log_sum_event_square, np.logaddexp.reduce(2*log_weights[events])))
+            add_log("log_event", log_weights[events])
+            add_log("log_event2", 2*log_weights[events])
+        state.completed(0, stop, checkpoint)
+    n, hits = stats["n"], stats["hits"]
+    log_sum_weight, log_sum_square, max_log_weight = (stats[key] for key in ("log_w", "log_w2", "max_log_w"))
+    log_sum_event, log_sum_event_square = stats["log_event"], stats["log_event2"]
     try:
         estimate = math.exp(log_sum_event-math.log(n)) if hits else 0.0
         second = math.exp(log_sum_event_square-math.log(n)) if hits else 0.0
@@ -209,7 +224,7 @@ def importance_sampling(package, request, *, proposal):
          ("max_log_weight", max_log_weight), ("hits", hits), ("self_normalized", False)))
 
 
-def mlmc_estimate(package, request, *, level_samples, phase=1):
+def mlmc_estimate(package, request, *, level_samples, phase=1, resume_state=None, checkpoint=None):
     """A fixed registered allocation; pilot proposals do not start extra work."""
     if (type(level_samples) is not tuple or not 1 <= len(level_samples) <= 9
             or any(type(n) is not int or not 2 <= n <= 1_000_000 for n in level_samples)
@@ -218,17 +233,23 @@ def mlmc_estimate(package, request, *, level_samples, phase=1):
     request.validate()
     if request.steps*2**(len(level_samples)-1) > 8192:
         raise DataValidationError("MLMC finest grid exceeds registered step limit")
-    means, variances = [], []
-    for level, count in enumerate(level_samples):
-        n, mean, m2 = 0, 0.0, 0.0
-        for _, _, fine, coarse, _ in endpoint_chunks(package, request, level=level, paired=level>0,
-                                                    phase=phase, sample_count=count):
+    from .propagation_recovery import ChunkState
+    _inputs(package, request)
+    costs = tuple(request.steps*2**level + (request.steps*2**(level-1) if level else 0) for level in range(len(level_samples)))
+    state = ChunkState(request, "mlmc", level_samples, costs, phase=phase, restored=resume_state)
+    for level in range(state.level, len(level_samples)):
+        count, stats = level_samples[level], state.statistics[level]
+        offset = state.position if level == state.level else 0
+        for _, stop, fine, coarse, _ in endpoint_chunks(package, request, level=level, paired=level>0,
+                                                    phase=phase, start_sample=offset, sample_count=count-offset):
             values = _functional(fine, request)
             if level:
                 values = values - _functional(coarse, request)
-            n, mean, m2 = _merge_moments(n, mean, m2, values)
-        means.append(mean)
-        variances.append(m2/(n-1))
+            stats["n"], stats["mean"], stats["m2"] = _merge_moments(stats["n"], stats["mean"], stats["m2"], values)
+            stats["hits"] += int(np.count_nonzero(values))
+            state.completed(level, stop, checkpoint)
+    means = [stats["mean"] for stats in state.statistics]
+    variances = [stats["m2"]/(stats["n"]-1) for stats in state.statistics]
     estimate = math.fsum(means)
     se = math.sqrt(math.fsum(v/n for v, n in zip(variances, level_samples)))
     # Never clip a noisy signed MLMC probability estimator to [0,1].
