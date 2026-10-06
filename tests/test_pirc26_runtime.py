@@ -176,6 +176,25 @@ def test_actual_shared_runner_versioned_worker_publishes_or_fails_and_settles(tm
         assert actual["component_plan_hash"] == value["cells"][0]["execution"]["component_plan_hash"]
         assert actual["fit"]["status"] == ("MAX_STEPS" if operation == "fit-and-forecast" else "FROZEN")
         assert actual["source_identity"]["dataset_id"] == "synthetic"
+        from tests.test_pirc26_process_resources import assert_observation
+        observation = actual["fit"]["worker_resource_observation"]
+        assert_observation(observation, pid=observation["process_id"])
+        assert observation["point"] == "job-payload-before-encoding"
+        if operation == "fit-and-forecast":
+            assert actual["fit"]["peak_memory_bytes"] == actual["fit"]["resource_observation"]["peak_resident_bytes"]
+    from tests.test_pirc26_process_resources import assert_observation
+    terminal = json.loads((store.path / "artifacts" / (".attempt-" + result["attempt_id"]) / "pirc26-resources.json").read_bytes())
+    assert_observation(terminal, pid=terminal["process_id"])
+    assert terminal["point"] == "worker-exit-after-output-or-ack"
+    assert terminal["attempt_id"] == result["attempt_id"]
+    if not corrupt:
+        assert observation["process_id"] == terminal["process_id"]
+        assert observation["attempt_id"] == terminal["attempt_id"]
+        if terminal["status"] == observation["status"] == "MEASURED":
+            assert terminal["peak_resident_bytes"] >= observation["peak_resident_bytes"]
+    workers = [e["payload"] for e in store.events() if e["event_kind"] == "WORKER_STARTED"
+               and e["payload"].get("attempt_id") == result["attempt_id"]]
+    assert terminal["parent_process_id"] == workers[0]["pid"]
     assert BudgetLedger(store).balance("affine")["committed_ms"] > 0
     assert not any(e["event_kind"] == "READ_STARTED" and e["payload"].get("split_role") == "final-eval" for e in store.events())
 
@@ -197,6 +216,11 @@ def test_actual_versioned_worker_reopens_exact_training_and_forecasts_under_new_
     assert store.attempts()[stopped["attempt_id"]]["error_code"] == "CHECKPOINT_SAVED"
     saves = [event["payload"] for event in store.events() if event["event_kind"] == "CHECKPOINT_SAVED"]
     assert len(saves) == 1 and 0 < saves[0]["progress"]["completed_steps"] < RECOVERY_STEPS
+    from tests.test_pirc26_process_resources import assert_observation
+    saved_resources = json.loads((store.path / "artifacts" / (".attempt-" + stopped["attempt_id"]) / "pirc26-resources.json").read_bytes())
+    assert_observation(saved_resources, pid=saved_resources["process_id"])
+    assert saved_resources["point"] in {"checkpoint-save-before-ack", "worker-exit-after-output-or-ack"}
+    assert saved_resources["attempt_id"] == stopped["attempt_id"]
     requests = [event["payload"] for event in store.events() if event["event_kind"] == "CHECKPOINT_REQUESTED"]
     assert len(requests) == 1 and requests[0]["supported"]
     assert 0 < requests[0]["remaining_seconds"] <= 40 * .2
@@ -205,6 +229,12 @@ def test_actual_versioned_worker_reopens_exact_training_and_forecasts_under_new_
         authorization=grant, budget=BudgetSpec(100))
     assert result["state"] == "SUCCEEDED", result
     actual = json.loads((reopened.path / "artifacts" / result["artifact_id"]).read_bytes())
+    observation = actual["fit"]["worker_resource_observation"]
+    assert_observation(observation, pid=observation["process_id"])
+    # A PID may be reused. The authenticated new attempt, not a PID inequality,
+    # separates observations and prevents copying a previous native counter.
+    assert observation["attempt_id"] == result["attempt_id"] != saved_resources["attempt_id"]
+    assert not observation["includes_previous_attempts"]
     assert actual["forecast"] == target["forecast"] and actual["metrics"] == target["metrics"]
     for key in ("checkpoint", "history", "best_train_objective", "steps"):
         assert actual["fit"][key] == target["fit"][key]
@@ -222,6 +252,9 @@ def test_actual_restart_only_qr_worker_fits_or_retains_typed_failure_and_charges
     result = SharedRunner(store, registry, recovery_registry=recovery).run_cell(
         value["study_id"], digest(value["cells"][0]), budget=BudgetSpec(70))
     directory = store.path / "artifacts" / (".attempt-" + result["attempt_id"])
+    from tests.test_pirc26_process_resources import assert_observation
+    terminal = json.loads((directory / "pirc26-resources.json").read_bytes())
+    assert_observation(terminal, pid=terminal["process_id"])
     if rank_failure:
         assert result["state"] == "FAILED", (result, (directory / "worker.log").read_text())
         diagnostic = json.loads((directory / "pirc26-failure.json").read_bytes())
@@ -240,5 +273,7 @@ def test_actual_restart_only_qr_worker_fits_or_retains_typed_failure_and_charges
             assert torch.equal(tensor, fitted.acceleration_model.affine.state_dict()[name])
         assert not torch.equal(fitted.acceleration_model.coefficients, initial.acceleration_model.coefficients)
         assert output["qualification"] == "fixture"
+        assert output["fit"]["resource_observation"]["point"] == "basis-return-before-encoding"
+        assert output["fit"]["peak_memory_bytes"] == output["fit"]["resource_observation"]["peak_resident_bytes"]
     assert BudgetLedger(store).balance("affine")["committed_ms"] > 0
     assert not any(e["event_kind"] == "CHECKPOINT_SAVED" for e in store.events())

@@ -12,6 +12,7 @@ import time
 import torch
 
 from infrastructure.research_store import digest
+from infrastructure.pirc26_process_resources import process_resources
 from models.phase_space import ModelContractError, RBFResidualDrift, SplineResidualDrift
 
 
@@ -195,7 +196,7 @@ def fit_basis(model, batches, plan, *, cancellation=None, progress=None):
         checkpoint = candidate.checkpoint()
         check()
         drift.coefficients.copy_(candidate.acceleration_model.coefficients)
-    return {"schema_version": "pirc26-basis-fit-v2", "status": "SUCCEEDED", "objective_id": "O1", "gradient_route": "G0",
+    result = {"schema_version": "pirc26-basis-fit-v2", "status": "SUCCEEDED", "objective_id": "O1", "gradient_route": "G0",
         "solver_id": plan.solver_id, "objective_hash": digest(scope), "scope": scope, "steps": len(batches),
         "observations": count, "basis_count": len(drift.coefficients), "free_basis_count": q,
         "identifiability": plan.identifiability, "constrained_coefficient_indices": constrained,
@@ -203,5 +204,7 @@ def fit_basis(model, batches, plan, *, cancellation=None, progress=None):
         "curvature_definition": "normalized-feature-integrated-second-derivative-v1" if plan.curvature_penalty else None,
         "penalty_strength_units": "s", "condition_number": condition, "raw_condition_number": raw_condition,
         "effective_degrees_of_freedom": degrees, "train_objective": objective, "penalized_train_objective": penalized,
-        "resume_level": "restart-only", "wall_seconds": time.perf_counter() - started, "peak_memory_bytes": None,
+        "resume_level": "restart-only", "wall_seconds": time.perf_counter() - started,
         "checkpoint": checkpoint}
+    observation = process_resources("basis-return-before-encoding")
+    return {**result, "peak_memory_bytes": observation["peak_resident_bytes"], "resource_observation": observation}

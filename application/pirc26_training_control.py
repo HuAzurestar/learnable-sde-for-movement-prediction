@@ -11,7 +11,8 @@ import os
 from estimation.phase_space import fit_o1
 from estimation.phase_space_checkpoint import decode_state, encode_state, managed_envelope, LIMIT
 from estimation.phase_space_o2 import fit_o2
-from infrastructure.research_control import WorkerControl
+from infrastructure.research_control import WorkerControl, write_frame
+from infrastructure.pirc26_process_resources import process_resources
 from infrastructure.research_store import ResearchError
 
 
@@ -58,6 +59,11 @@ class ManagedTrainingControl:
         progress = {"completed_steps": completed, "total_steps": self.total_steps,
                     "throughput_per_second": rate, "eta_seconds": (self.total_steps - completed) / max(rate, 1e-9)}
         envelope = managed_envelope(state, decoded["rng"], completed)
+        # Persist before ACK: the owner may stop the tree immediately after
+        # accepting a checkpoint. This observation is never restored as state.
+        write_frame(self.control.directory / "pirc26-resources.json",
+            {**process_resources("checkpoint-save-before-ack"), "attempt_id": self.control.descriptor["attempt_id"]},
+            16384, deadline=self.control.descriptor["deadline"])
         self.control.save(envelope, progress)
 
     def arguments(self, state):

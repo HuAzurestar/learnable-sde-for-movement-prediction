@@ -14,6 +14,7 @@ import torch
 from infrastructure.research_files import source_file_hash
 from infrastructure.research_control import canonical, ControlError, SCHEMA as CONTROL_SCHEMA
 from infrastructure.pirc26_checkpoint_contract import array as validate_array, CheckpointContractError
+from infrastructure.pirc26_process_resources import process_resources
 from infrastructure.research_store import digest
 from models.phase_space import ModelContractError, PhaseSpaceSDE
 
@@ -24,6 +25,7 @@ HISTORY_SCHEMA = "pirc26-history-columns-v1"
 SOURCE_FILES = ("estimation/phase_space_checkpoint.py", "estimation/phase_space.py",
                 "infrastructure/pirc26_checkpoint_contract.py",
                 "infrastructure/research_control.py",
+                "infrastructure/pirc26_process_resources.py",
                 "estimation/phase_space_basis.py",
                 "estimation/phase_space_o2.py", "models/phase_space.py",
                 "inference/phase_space.py", "evaluation/phase_space.py")
@@ -410,13 +412,15 @@ def train_loop(model, parameters, plan, scope, objective, monitor, *, auxiliary=
             break
     if best_checkpoint is not None:
         restore_model(model, best_checkpoint)
-    return {"schema_version": "pirc26-fit-result-v1", "objective": scope["objective"],
+    result = {"schema_version": "pirc26-fit-result-v1", "objective": scope["objective"],
             "gradient_route": "G0" if scope["objective"] == "O1" else "G1", "status": status,
             "steps": len(history), "best_train_objective": best, "history": history,
             "checkpoint": model.checkpoint(), "scope_hash": scope_hash, "code_hash": scope["code_hash"],
             "training_state": last_state, "resume_level": "exact",
             "checkpoint_capacity": capacity,
-            "wall_seconds": time.perf_counter() - started, "peak_memory_bytes": None}
+            "wall_seconds": time.perf_counter() - started}
+    observation = process_resources("fit-return-before-encoding")
+    return {**result, "peak_memory_bytes": observation["peak_resident_bytes"], "resource_observation": observation}
 
 
 def math_isfinite(value):

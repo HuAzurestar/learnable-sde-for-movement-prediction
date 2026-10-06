@@ -3,7 +3,8 @@
 from pathlib import Path
 import sys
 
-from infrastructure.research_control import WorkerControl
+from infrastructure.research_control import WorkerControl, write_frame
+from infrastructure.pirc26_process_resources import process_resources
 from infrastructure.research_store import ResearchError, atomic_write, digest, encode
 
 
@@ -60,6 +61,10 @@ def run(output, handoff_hash):
                           "sample_ids": prediction["sample_ids"],
                           "samples": prediction["samples"].detach().cpu().tolist()})
     scores = [row["metrics"]["energy_score"] for item in forecasts for row in item["evaluation"]["rows"][1:]]
+    # Hash-covered observation through fitting/forecast/evaluation. Keep
+    # telemetry out of exact scientific forecast/history equality comparisons.
+    fit["worker_resource_observation"] = {**process_resources("job-payload-before-encoding"),
+                                          "attempt_id": ownership.attempt_id}
     payload = {"metrics": {"energy_score": sum(scores) / len(scores)}, "forecast": {"origins": forecasts},
         "fit": fit, "source_schema": "pirc26-observed-phase-space-result-v1"}
     result = {"schema_version": "pirc25-result-v1", "status": "SUCCEEDED", "spec_hash": digest(spec),
@@ -95,6 +100,14 @@ def main():
                 "CHECKPOINT_INCOMPATIBLE", "UNAUTHORIZED_DATA", "NONFINITE", "ILL_CONDITIONED", "INTERRUPTED"} else "WORKER_FAILED"
         diagnostic = {"schema_version": "pirc26-worker-failure-v1", "error_code": error_code}
         atomic_write(ownership.directory / "pirc26-failure.json", encode(diagnostic))
+    try:
+        write_frame(ownership.directory / "pirc26-resources.json",
+            {**process_resources("worker-exit-after-output-or-ack"), "attempt_id": ownership.attempt_id},
+            16384, deadline=ownership.deadline)
+    except (OSError, ValueError):
+        # Hard stop/IO failure may prevent this optional terminal observation.
+        # Never replace a prior pre-ACK report, actual outcome or native exit.
+        pass
     from application.pirc26_training_control import exit_managed_worker
     exit_managed_worker(code, output=sys.argv[1])
 
