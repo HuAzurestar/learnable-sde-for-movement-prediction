@@ -30,6 +30,13 @@ Gaussian upper tails using `erfc`. It computes an endpoint probability, not a
 continuous first-passage event or PDE solution. General region integrals and
 nonlinear dynamics are not provided by this slice.
 
+A separate [bounded rational reference enclosure](affine-reference-enclosures.md)
+now encloses the declared affine Gaussian endpoint law and permits recomputed
+absolute-error bounds for a finite reference approximation. It does not silently
+change the ordinary float64 result/error contract, reserve budget or
+grant scientific qualification. Its exact input/PSD, precision/resource, tail and
+degenerate-boundary limits are explicit; a wide enclosure remains wide.
+
 `experiments.pirc27.oracles.oracle_suite` generates stable, near-critical,
 anisotropic/correlated-noise and uncertain-initial-state fixtures with frozen
 horizons. `matrix_cardinality` checks a maximum of 10,000 cells before a caller

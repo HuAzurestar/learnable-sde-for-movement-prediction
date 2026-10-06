@@ -42,7 +42,9 @@ jobs:
     # Keep these check names aligned with the required status contexts on main.
     name: test (${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Covers dependency installation plus the complete version-specific suite.
+    # Shared research/fixture worker budgets and watchdog deadlines are separate.
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: PSDE-SDE
