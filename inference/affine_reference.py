@@ -354,6 +354,28 @@ def bound_affine_reference(package, request):
         # Exactly zero initial/diffusion covariance, not a PSD projection.
         covariance = _zeros(a, 4, 4)
         Q = _zeros(a, 4, 4)
+    status, functional = _functional(a, request, mean, covariance)
+    # Exact implementation/source binding, not an off-platform attestation.
+    from experiments.pirc25.affine import code_hash
+    document = {"schema_version": "affine-reference-certificate-v1", "algorithm": algorithm_manifest(),
+        "code_hash": code_hash(), "model_package_hash": package.package_hash, "request_hash": request.request_hash,
+        "scope": "declared-affine-Gaussian-endpoint-law", "scientific_qualification": False,
+        "status": status, "doublings": doublings, "operations": a.operations,
+        "units": "m" if request.functional == "endpoint-x" else "1",
+        "functional_bounds": _interval_manifest(functional),
+        "mean_bounds": [_interval_manifest(row[0]) for row in mean],
+        "covariance_bounds": [[_interval_manifest(value) for value in row] for row in covariance],
+        "transition_bounds": {"F": [[_interval_manifest(value) for value in row] for row in F],
+            "offset": [_interval_manifest(row[0]) for row in c],
+            "covariance": [[_interval_manifest(value) for value in row] for row in Q]}}
+    encoded = _encode(document)
+    if len(encoded) > MAX_BYTES:
+        raise NumericalError("reference certificate exceeds fixed byte quota")
+    return AffineReferenceCertificate(encoded)
+
+
+def _functional(a, request, mean, covariance):
+    """Shared endpoint projection; no sampling or qualification decision."""
     status = "BOUNDED"
     if request.functional == "endpoint-x":
         functional = mean[0][0]
@@ -381,23 +403,7 @@ def bound_affine_reference(package, request):
                 status, functional = "UNRESOLVED_DEGENERATE_BOUNDARY", a.box(0, 1)
         else:
             status, functional = "UNRESOLVED_VARIANCE", a.box(0, 1)
-    # Exact implementation/source binding, not an off-platform attestation.
-    from experiments.pirc25.affine import code_hash
-    document = {"schema_version": "affine-reference-certificate-v1", "algorithm": algorithm_manifest(),
-        "code_hash": code_hash(), "model_package_hash": package.package_hash, "request_hash": request.request_hash,
-        "scope": "declared-affine-Gaussian-endpoint-law", "scientific_qualification": False,
-        "status": status, "doublings": doublings, "operations": a.operations,
-        "units": "m" if request.functional == "endpoint-x" else "1",
-        "functional_bounds": _interval_manifest(functional),
-        "mean_bounds": [_interval_manifest(row[0]) for row in mean],
-        "covariance_bounds": [[_interval_manifest(value) for value in row] for row in covariance],
-        "transition_bounds": {"F": [[_interval_manifest(value) for value in row] for row in F],
-            "offset": [_interval_manifest(row[0]) for row in c],
-            "covariance": [[_interval_manifest(value) for value in row] for row in Q]}}
-    encoded = _encode(document)
-    if len(encoded) > MAX_BYTES:
-        raise NumericalError("reference certificate exceeds fixed byte quota")
-    return AffineReferenceCertificate(encoded)
+    return status, functional
 
 
 def verify_affine_reference(certificate, package, request):

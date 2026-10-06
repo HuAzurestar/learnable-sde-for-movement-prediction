@@ -1,5 +1,9 @@
 # Bounded affine reference enclosures
 
+For an explicitly frozen solver/grid law and signed discretization bias, see
+[finite-grid enclosures](affine-discrete-enclosures.md). Continuous reference,
+finite-grid law, sampling error and implemented path roundoff are distinct.
+
 `inference.affine_reference.bound_affine_reference(package, request)` encloses
 the moments and requested endpoint functional of the **declared** four-state
 constant-affine Gaussian law. Its immutable certificate binds the model package,
