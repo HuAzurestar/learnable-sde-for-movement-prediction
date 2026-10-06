@@ -368,9 +368,11 @@ def qualify(spec, rows, aggregate_hash, *, check_budget):
     rng = np.random.default_rng(spec.bootstrap_seed)
     for scenario in sorted(spec.scenario_axes):
         check_budget()
-        candidates, paired, missing, failures = [], [], [], []
+        candidates, paired, missing, failures, successful_k2 = [], [], [], [], []
         for replicate in spec.replicate_ids:
             one, two = indexed.get((scenario, replicate, 1)), indexed.get((scenario, replicate, 2))
+            if two is not None and two['state'] == 'SUCCEEDED':
+                successful_k2.append(two)
             if one is None or two is None or one['state'] == 'NOT_RUN' or two['state'] == 'NOT_RUN':
                 missing.append(replicate)
                 continue
@@ -384,12 +386,16 @@ def qualify(spec, rows, aggregate_hash, *, check_budget):
                 continue
             candidates.append(two)
             paired.append(two['metrics']['position_energy_score_d2']-one['metrics']['position_energy_score_d2'])
-        collapsed = sum(value['collapsed'] for value in candidates)
+        # Collapse and K=2 recovery diagnostics are observable even when its
+        # reference K=1 fit fails. Only genuinely paired scores/recovery gates
+        # require the reference; do not censor independent K=2 outcomes.
+        collapsed = sum(value['collapsed'] for value in successful_k2)
         good = sum(not value['collapsed'] and min(value['posterior_occupancy']) >= spec.minimum_occupancy
                    and all(value['metrics'][name] <= limit for name, limit in spec.thresholds.items()) for value in candidates)
         total = len(spec.replicate_ids)
-        intervals = {name: _interval(np.asarray([value['metrics'][name] for value in candidates]), spec, rng, check_budget)
-                     for name in METRICS} if len(candidates) >= 2 else {}
+        metric_candidates = [value for value in successful_k2 if not set(METRICS)-set(value['metrics'])]
+        intervals = {name: _interval(np.asarray([value['metrics'][name] for value in metric_candidates]), spec, rng, check_budget)
+                     for name in METRICS} if len(metric_candidates) >= 2 else {}
         # Failure-inclusive fractions use all registered replicates. Bootstrap
         # confidence intervals for successful fits are separately conditioned.
         recovery_interval = _wilson(good, total, spec.confidence)
@@ -404,7 +410,15 @@ def qualify(spec, rows, aggregate_hash, *, check_budget):
         report['scenarios'][scenario] = {'state': state, 'axes': spec.scenario_axes[scenario],
             'reasons': reasons, 'registered_replicates': total,
             'effective_replicates': len(candidates), 'recovering_replicates': good, 'recovery_fraction': good/total,
-            'recovery_fraction_interval': recovery_interval, 'observed_collapse_fraction': collapsed/total,
+            'recovery_fraction_interval': recovery_interval,
+            'successful_K2_fits': len(successful_k2), 'known_K2_collapse_count': collapsed,
+            'observed_collapse_fraction': None if not successful_k2 else collapsed/len(successful_k2),
+            'observed_collapse_denominator': 'successful-K2-fits',
+            'registered_collapse_lower_bound': collapsed/total,
+            'collapse_threshold_denominator': 'all-registered-replicates',
+            'unknown_K2_collapse_replicates': [replicate for replicate in spec.replicate_ids
+                if not any(value['replicate_id'] == replicate for value in successful_k2)],
+            'metric_effective_replicates': len(metric_candidates),
             'failures': failures, 'missing_replicates': missing, 'successful_fit_metric_mean_intervals': intervals,
             'paired_energy_difference_interval': _interval(np.asarray(paired), spec, rng, check_budget) if len(paired) >= 2 else None,
             'interval_sampling_unit': 'independent-synthetic-replicate', 'interval_method': 'bounded-percentile-bootstrap',

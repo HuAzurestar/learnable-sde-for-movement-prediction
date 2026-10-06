@@ -161,6 +161,55 @@ def test_collapse_and_bad_calibration_do_not_disappear_from_denominator():
     assert point['successful_fit_metric_mean_intervals']['mode_ece'] == [0.5, 0.5]
 
 
+def test_k1_failure_does_not_censor_successful_k2_collapse_or_metrics():
+    value, data = spec(), rows(spec())
+    for row in data:
+        if row['K'] == 1:
+            row.update(state='FAILED', metrics=None, posterior_occupancy=None, collapsed=None)
+        else:
+            row['collapsed'] = True
+    result = run(value, data)
+    point = result['scenarios']['scenario']
+    assert result['state'] == 'UNIDENTIFIABLE'
+    assert point['effective_replicates'] == point['recovering_replicates'] == 0
+    assert point['successful_K2_fits'] == point['metric_effective_replicates'] == 8
+    assert point['known_K2_collapse_count'] == 8
+    assert point['observed_collapse_fraction'] == point['registered_collapse_lower_bound'] == 1
+    assert point['paired_energy_difference_interval'] is None
+    assert point['successful_fit_metric_mean_intervals']['mode_ece'] == [0.01, 0.01]
+    assert 'COLLAPSE_GATE_FAILED' in point['reasons']
+
+
+def test_no_successful_k2_fit_has_unknown_collapse_not_observed_zero():
+    value, data = spec(), rows(spec())
+    for row in data:
+        if row['K'] == 2:
+            row.update(state='FAILED', metrics=None, posterior_occupancy=None, collapsed=None)
+    point = run(value, data)['scenarios']['scenario']
+    assert point['observed_collapse_fraction'] is None
+    assert point['registered_collapse_lower_bound'] == 0
+    assert point['unknown_K2_collapse_replicates'] == list(value.replicate_ids)
+    assert point['metric_effective_replicates'] == 0
+    assert point['successful_fit_metric_mean_intervals'] == {}
+
+
+def test_partial_collapse_separates_observed_share_from_registered_lower_bound():
+    value, data = spec(), rows(spec())
+    for row in data:
+        if row['K'] == 2:
+            if row['replicate_id'] == value.replicate_ids[0]:
+                row['collapsed'] = True
+            else:
+                row.update(state='NOT_RUN', metrics=None, posterior_occupancy=None, collapsed=None)
+    result = run(value, data)
+    point = result['scenarios']['scenario']
+    assert result['state'] == 'INCOMPLETE'
+    assert point['observed_collapse_fraction'] == 1
+    assert point['registered_collapse_lower_bound'] == 1/8
+    assert point['collapse_threshold_denominator'] == 'all-registered-replicates'
+    assert point['unknown_K2_collapse_replicates'] == list(value.replicate_ids[1:])
+
+
 @pytest.mark.parametrize('change', ['duplicate', 'repeated-input', 'unpaired-input', 'hash', 'negative', 'nan'])
 def test_invalid_aggregate_refuses_qualification(change):
     value, data = spec(), rows(spec())

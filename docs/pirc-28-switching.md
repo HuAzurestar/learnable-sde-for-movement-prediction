@@ -157,6 +157,14 @@ successful-fit metric means and paired energy differences use a bounded
 replicate-level percentile bootstrap. Those conditional intervals are not used
 to hide failed fits. Polls occur between bounded bootstrap batches.
 
+K=2 collapse and successful-fit diagnostic intervals retain observed K=2 outcomes
+even if their K=1 reference fails. Paired scores and the recovery gate still
+require successful pairs. Observed collapse is conditional on successful K=2
+fits (unavailable when there are none); its separate registered-denominator
+lower bound and unknown replicate IDs prevent missing results from becoming
+observed zeros. The collapse threshold retains the all-registered-replicate
+denominator; it is not silently retuned to the successful-fit denominator.
+
 Raw evaluator rows and a passing mathematical report never authorize real-data
 access. Their source, immutable artifacts, attempts, admission and qualification
 bindings must still be validated through the shared store. Neither cell outputs
