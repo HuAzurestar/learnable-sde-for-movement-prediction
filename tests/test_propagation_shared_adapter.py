@@ -2,6 +2,7 @@
 
 from dataclasses import asdict, replace
 import json
+import math
 import time
 
 import pytest
@@ -17,6 +18,22 @@ from experiments.pirc27.plugin import (propagation_plugin, execution_config, exe
     propagation_resume_command, propagation_recovery_plugin)
 from infrastructure.research_store import ResearchError, ResearchStore, digest, encode
 from tests.research_admission_fixtures import admit_fixture
+
+
+def _mlmc_checkpoint_allocation(calibration_seconds):
+    # Engineering-only sizing before creating/registering/reserving the store.
+    # Three levels at 128 base steps cost 2048 real fine+coarse updates per unit.
+    units = max(16, min(1_000_000 // 2048, math.ceil(16.0 * 16 / calibration_seconds)))
+    return (4*units, 2*units, units)
+
+
+@pytest.mark.parametrize("seconds", [0.01, 0.5, 1.0, 4.0, 10.0])
+def test_mlmc_checkpoint_fixture_calibration_preserves_all_levels_and_work_quota(seconds):
+    allocation = _mlmc_checkpoint_allocation(seconds)
+    assert len(allocation) == 3 and min(allocation) >= 16
+    work = sum(n*(128*2**level + (128*2**(level-1) if level else 0))
+               for level, n in enumerate(allocation))
+    assert work <= 1_000_000 and sum(allocation) <= 1_000_000
 
 
 def prepare(tmp_path, method="euler", *, recovery=False, changes=None, level_samples=None, unbound_steps=None, synthetic=False):
@@ -112,16 +129,26 @@ def test_actual_chunk_worker_stops_and_reopened_resume_preserves_computation_and
     # Real numerical work, with tiny chunks to make the owner's real 80% signal
     # reachable at a completed boundary. No fake clock, sleep-only worker,
     # budget extension, forced checkpoint file or state-only roundtrip.
-    changes = {"samples": 896 if method == "mlmc" else 2048, "steps": 128, "chunk_size": 1}
+    allocation = None
+    if method == "mlmc":
+        from inference.propagation_methods import mlmc_estimate
+        case = oracle_suite()[0]
+        calibration = PropagationRequest("timing-fixture", case.package.package_hash, case.initial_mean,
+            case.initial_covariance, 0.0, 0.0, (1.0,), "endpoint-x", 11, "paired-root", "affine-method",
+            samples=112, steps=128, chunk_size=1)
+        started = time.monotonic()
+        mlmc_estimate(case.package, calibration, level_samples=(64, 32, 16))
+        allocation = _mlmc_checkpoint_allocation(time.monotonic()-started)
+    changes = {"samples": sum(allocation) if allocation else 2048, "steps": 128, "chunk_size": 1}
     store, spec, registry = prepare(tmp_path, method, recovery=True, changes=changes,
-        level_samples=(512, 256, 128) if method == "mlmc" else None)
+        level_samples=allocation)
     cell = spec["cells"][0]
     started = time.monotonic()
     expected = execute_propagation(spec, cell)
     # Calibrate only this synthetic test's job duration, not a research arm.
     # Faster hosts must still exercise a real save before workload completion;
     # no clock or deadline is altered after the reservation is made.
-    job_seconds = max(5.0, min(20.0, (time.monotonic()-started)*0.5))
+    job_seconds = max(3.0 if method == "mlmc" else 5.0, min(20.0, (time.monotonic()-started)*0.5))
     store.register(spec, digest(spec))
     adapters = RecoveryRegistry()
     adapters.register(propagation_recovery_plugin())

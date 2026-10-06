@@ -239,6 +239,9 @@ def _assemble_evidence(store, study_id, authorization):
                         or admission["attempt_id"] != latest["attempt_id"] or admission["run_id"] != latest["run_id"]
                         or admission["qualification"] != result["qualification"]):
                     raise ResearchError("UNQUALIFIED", "result admission identity differs from authoritative attempt")
+                if "cell_packages" in (spec.get("admission") or {}) or "admission_selection" in admission:
+                    from infrastructure.research_admission_selection import verify_admission_selection
+                    verify_admission_selection(spec, cell, admission)
                 require_export_visibility(store, spec, [{"admission": admission}], authorization)
                 # Qualification attachments are additional disclosures, not
                 # automatically public because execution was authorized.
@@ -258,8 +261,8 @@ def _assemble_evidence(store, study_id, authorization):
                         if content != encode(attachment["content"]):
                             raise ResearchError("CORRUPT_ARTIFACT", "model qualification export binding changed")
                 row.update(admission=admission, admission_hash=result["admission_hash"])
-            elif result["qualification"] == "qualified":
-                raise ResearchError("UNQUALIFIED", "qualified result lacks execution admission evidence")
+            elif result["qualification"] == "qualified" or "cell_packages" in (spec.get("admission") or {}):
+                raise ResearchError("UNQUALIFIED", "qualified or per-cell-bound result lacks execution admission evidence")
         cells.append(row)
     visibility = require_export_visibility(store, spec, cells, authorization)
     payload = {"schema_version": "pirc25-evidence-bundle-v1", "study_id": study_id,

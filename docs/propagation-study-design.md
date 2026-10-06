@@ -66,10 +66,30 @@ Operators must supply an existing absolute Git-external root/store and obtain
 normal shared grants, preregistration, upstream/qualification/pilot decisions and
 budget admission before execution. Supplying digest-shaped metadata alone is
 not evidence of those checks, and this draft is not an approved study.
-The current shared admission package binds one execution plugin identity. A
-heterogeneous affine/nonlinear or restart/chunk matrix also needs explicit
-per-cell package admission support; this preparation/disposition feature does
-not silently select another package or claim to solve that remaining binding.
+Shared runtime admission supports an explicit complete per-cell package table
+for heterogeneous affine/nonlinear or restart/chunk matrices. Under
+`admission.cell_packages`, schema `pirc25-cell-packages-v1` fixes `bindings` with
+each executable `cell_hash` and its registered `package_hash`. Only optional
+model-source `model_authorization_id`, `model_authorization_version` and
+`model_protocol_id` may differ by cell. Every runnable row is covered exactly
+once; unavailable, foreign, duplicate and missing rows are refused. A table
+cannot coexist with a default package or default model-source references. No
+fallback selection, implicit package/grant creation or permission widening occurs.
+
+Mode, execution grant, protocol, data and upstream snapshot remain common frozen
+study authority. Normal plugin/payload/qualification and budget checks still
+apply. Owner receipts bind the selected cell/package, entry hash and whole table
+hash; run/resume admission, result validation, verified reuse and source evidence
+export check that binding. Source visibility includes all mapped packages, model
+lineage and qualification artifacts, even for unexecuted cells. Legacy explicit
+single-package studies remain supported. Tables and matrices are bounded to
+10,000 entries, table metadata to 4 MiB, lineage to 10,000 visits and 32 levels.
+
+The paired paper offline admission validator has **not yet** adopted this table
+schema. Source-side engineering export is not an end-to-end qualified paper
+delivery; update and verify that independent reader before formal heterogeneous
+evidence consumption. This addition does not qualify any method/model or permit
+research without the existing shared store and grants.
 
 `tests/test_propagation_study_design.py` covers immutability, deterministic content
 hashing, exact owner preflight compatibility, paired inputs, stable budget arms,
@@ -81,3 +101,8 @@ malformed declarations and direct owner-plan bypasses.
 matrix and exercises the unchanged paired paper aggregator: all region/method/
 horizon/seed rows and reasons survive, with zero successful independent blocks.
 Those disposable engineering exports are not formal research evidence.
+`tests/test_research_admission_selection.py` checks exact coverage, immutable
+authority, substituted selection refusal, conservative source visibility,
+resume-command admission, and a two-plugin shared worker/reuse/cost/export
+fixture. Resume-command admission is not an actual mapped interrupted restore
+test; that additional coverage remains pending.

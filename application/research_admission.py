@@ -14,6 +14,7 @@ from .research_contracts import validate_package, validate_result
 from .research_data import EvaluationExposureLedger
 from .research_preregistration import PreregistrationGate, hash_reference, source_identity, validate_preregistration, protocol_binding
 from infrastructure.research_store import ResearchError, digest, encode, utc_now
+from infrastructure.research_admission_selection import select_admission_package, verify_admission_selection
 
 
 def data_binding(protocol):
@@ -148,7 +149,9 @@ class AdmissionGate:
             receipt.update(mode="fixture", qualification="fixture", input_kind="builtin-affine-generator",
                            upstream=audit_inputs(ROOT, required))
         else:
-            settings = spec.get("admission") or {}
+            settings, selection = select_admission_package(spec, cell)
+            if selection is not None:
+                receipt["admission_selection"] = selection
             mode = settings.get("mode")
             if mode not in {"fixture", "pilot", "formal"}:
                 raise ResearchError("MISSING_INPUT", "explicit execution admission mode required")
@@ -259,6 +262,8 @@ class AdmissionGate:
 
     def result_validator(self, receipt, spec, cell, plugin):
         def validate(result):
+            if "cell_packages" in (spec.get("admission") or {}) or receipt.get("input_kind") == "registered-protocol":
+                verify_admission_selection(spec, cell, receipt)
             from .research_execution import execution_plan
             from .research_registry import validate_value
             plan = execution_plan(spec, cell, plugin)
