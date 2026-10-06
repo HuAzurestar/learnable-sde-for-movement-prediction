@@ -1,5 +1,5 @@
 {
-  "schema_version": "pirc28-scientific-plan-v1",
+  "schema_version": "pirc28-scientific-plan-v2",
   "plan_id": "pirc28-six-axis-identifiability-v1",
   "truth_parameters": {
     "Q": [[-1.0, 1.0], [1.0, -1.0]],
@@ -71,6 +71,45 @@
   },
   "forecast_origin_s": 2.0,
   "forecast_horizons_s": [0.5, 1.0],
+  "approximation_spec": {
+    "schema_version": "pirc28-approximation-spec-v1",
+    "sampling_unit": "independent-synthetic-replicate",
+    "scope": "all-registered-K2-cells; selected-fit; every-heldout-prefix-path",
+    "observation_role": "test-prefix-through-frozen-forecast-origin; no-future-no-truth",
+    "budget_rule": "original-K2-arm; shared-supervisor; no-extra-budget",
+    "failure_state": "INFERENCE_INAPPLICABLE",
+    "aggregation_rule": "all-required-checks; no-failure-dropping; no-optional-stopping",
+    "step_halving": {
+      "factor": 2,
+      "maximum_substeps": 400,
+      "thresholds": {
+        "mode_total_variation": 0.02,
+        "position_mean_max_abs_m": 0.02,
+        "velocity_mean_max_abs_m_s": 0.05,
+        "log_likelihood_per_observation_abs": 0.01
+      }
+    },
+    "event_driven_reference": {
+      "algorithm": "event-driven-bootstrap-particle-filter-v1",
+      "particles": 512,
+      "independent_batches": 4,
+      "maximum_jumps_per_particle_interval": 256,
+      "minimum_ess_fraction": 0.1,
+      "confidence": 0.95,
+      "maximum_mc_half_width_fraction": 0.25,
+      "thresholds": {
+        "mode_total_variation": 0.1,
+        "position_mean_max_abs_m": 0.1,
+        "velocity_mean_max_abs_m_s": 0.2,
+        "log_likelihood_per_observation_abs": 0.05
+      }
+    },
+    "known_mode_boundary": {
+      "algorithm": "conditional-affine-K1-Kalman-v1",
+      "absolute_tolerance": 0.00000001,
+      "relative_tolerance": 0.00000001
+    }
+  },
   "qualification": {
     "thresholds": {
       "rate_rmse_s_inv": 0.25,

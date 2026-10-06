@@ -19,8 +19,10 @@ from .pipeline import validate_recipe
 from .qualification import IdentifiabilitySpec, phase_manifest
 from .runtime import bind_recipe_execution
 from .synthetic import ScenarioSpec
+from .approximation import ApproximationSpec, RECIPE_SCHEMA
 
 SCHEMA = 'pirc28-synthetic-study-definition-v1'
+SCHEMA_V2 = 'pirc28-synthetic-study-definition-v2'
 MAXIMUM_DEFINITION_BYTES = 4*1024*1024
 FAMILY = 'pirc28-synthetic-switching'
 EXPERIMENT = 'pirc28-identifiability-v1'
@@ -41,8 +43,11 @@ def arm_bindings(k1_arm_id, k2_arm_id):
 def _validate(value):
     fields = {'schema_version', 'runtime_code_hash', 'phase_matrix', 'identifiability_spec',
               'recipes', 'replicate_seeds', 'arms', 'forecast_origin_s', 'forecast_horizons_s'}
-    if type(value) is not dict or set(value) != fields or value['schema_version'] != SCHEMA:
+    if type(value) is dict and value.get('schema_version') == SCHEMA_V2:
+        fields = fields | {'approximation_spec'}
+    if type(value) is not dict or set(value) != fields or value['schema_version'] not in (SCHEMA, SCHEMA_V2):
         raise ResearchError('CONTRACT_MISMATCH', 'synthetic study definition schema differs')
+    approximation = ApproximationSpec.from_dict(value['approximation_spec']) if value['schema_version'] == SCHEMA_V2 else None
     if not hash_reference(value['runtime_code_hash']):
         raise ResearchError('CONTRACT_MISMATCH', 'frozen runtime code hash required')
     matrix = value['phase_matrix']
@@ -73,6 +78,10 @@ def _validate(value):
         recipe = recipes[name]
         if type(recipe) is not dict or 'identifiability_spec' in recipe or recipe.get('scenario') != row['scenario']:
             raise ResearchError('IDENTITY_CONFLICT', 'recipes must bind exact physical sources without duplicate qualification overrides')
+        if ((approximation is None and recipe.get('schema_version') != 'pirc28-synthetic-recipe-v1')
+                or (approximation is not None and (recipe.get('schema_version') != RECIPE_SCHEMA
+                    or recipe.get('approximation_spec') != approximation.to_dict()))):
+            raise ResearchError('IDENTITY_CONFLICT', 'master/recipe approximation schemas or complete specifications differ')
         if type(seeds[name]) is not dict or set(seeds[name]) != set(qualification.replicate_ids):
             raise ResearchError('CONTRACT_MISMATCH', 'every independent replicate needs an explicit source seed')
         for seed in seeds[name].values():

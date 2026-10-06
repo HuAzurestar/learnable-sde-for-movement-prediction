@@ -12,20 +12,24 @@ import numpy as np
 
 from estimation.switching import fit_switching, select_initialization
 from inference.switching import InferenceSpec, filter_switching, forecast_switching
-from infrastructure.research_store import digest
+from infrastructure.research_store import ResearchError, digest
 from models.switching import SwitchingError, SwitchingSDEModel, finite_array, psd_array
 from .synthetic import ScenarioSpec, generate_scenario
 from .failures import (NUMERICAL_EXCEPTIONS, NumericalCellFailure, numerical_diagnostic,
                        valid_numerical_diagnostic)
 from .qualification import IdentifiabilitySpec, forecast_coverage, jump_diagnostics, mode_diagnostics, parameter_recovery
+from .approximation import ApproximationSpec, RECIPE_SCHEMA
 
 
 def validate_recipe(recipe, k):
     keys = {'schema_version', 'scenario', 'initializations', 'inference', 'train_paths',
         'selection_paths', 'test_paths', 'forecast_paths', 'forecast_origin_index', 'horizon_indices',
         'prior_mean', 'prior_covariance'}
+    if type(recipe) is dict and recipe.get('schema_version') == RECIPE_SCHEMA:
+        keys = keys | {'approximation_spec'}
     if (type(recipe) is not dict or set(recipe) not in (keys, keys | {'identifiability_spec'})
-            or recipe['schema_version'] != 'pirc28-synthetic-recipe-v1' or type(k) is not int or k not in (1, 2)):
+            or recipe['schema_version'] not in ('pirc28-synthetic-recipe-v1', RECIPE_SCHEMA)
+            or type(k) is not int or k not in (1, 2)):
         raise SwitchingError('CONTRACT_MISMATCH', 'synthetic recipe schema or first-round K differs')
     scenario = ScenarioSpec.from_dict(recipe['scenario'])
     scenario.validated()
@@ -55,6 +59,10 @@ def validate_recipe(recipe, k):
         raise SwitchingError('CONTRACT_MISMATCH', 'forecast origin or horizon indices differ')
     mean = finite_array(recipe['prior_mean'], (4,), 'frozen filtering prior mean')
     covariance = psd_array(recipe['prior_covariance'], (4, 4), 'frozen filtering prior covariance')
+    if recipe['schema_version'] == RECIPE_SCHEMA:
+        approximation = ApproximationSpec.from_dict(recipe['approximation_spec'])
+        approximation.prefix_preflight(inference, scenario.times, origin,
+                                       max(model.rate_bounds[1] for model in models))
     return scenario, models, inference, mean, covariance
 
 
@@ -135,6 +143,11 @@ def _execute_recipe(recipe, k, seed, *, check_budget, progress_callback, resume_
     scenario, initial_models, inference, prior_mean, prior_covariance = validate_recipe(recipe, k)
     if type(seed) is not int or not 0 <= seed < 2**64:
         raise SwitchingError('CONTRACT_MISMATCH', 'cell seed must be unsigned 64-bit')
+    if recipe['schema_version'] == RECIPE_SCHEMA:
+        # Metadata/resource preflight is not an implemented diagnostic adapter.
+        # Refuse before any generation/fitting; do not create a numerical-failure
+        # artifact for a software implementation gap or invent successful proof.
+        raise ResearchError('NEEDS_IMPLEMENTATION', 'managed approximation executor/evidence adapter is not implemented')
     identity = digest({'recipe': recipe, 'K': k, 'seed': seed})
     context.update(stage='generation', recipe_hash=identity, generated_inputs=[], selection=None,
         initializations=[{'initialization_id': 'init-'+str(index), 'state': 'NOT_RUN',

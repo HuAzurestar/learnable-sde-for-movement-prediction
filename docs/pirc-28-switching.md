@@ -526,3 +526,72 @@ Actual operator protocols, packages, grants and pre-fit full-master publication
 remain mandatory. This plan does not replace known-state/K=1 numerical controls,
 scientific recovery, approximation/calibration verification, qualified real-data
 comparison, paper, independent review, human acceptance or merged delivery.
+
+## Frozen approximation contract and current execution stop
+
+The numeric plan now uses `pirc28-scientific-plan-v2`, master definition v2 and
+recipe v2. The filename remains `identifiability-v1.json` for the same research
+plan; its schema and content hashes change. Every recipe carries the complete
+same `pirc28-approximation-spec-v1` as its master, transitively binding protocol
+bytes, preregistration/master hash, source hash, seeds and admitted recipe. An
+old schema cannot silently drop this requirement. Legacy v1 recipes remain
+usable software diagnostics, never sufficient scientific approximation proof.
+
+All registered K=2 source cells must check the selection-only chosen fit on
+every held-out path's observation prefix through the frozen 2-second forecast
+origin. Future observations, true modes and true velocities are not reference
+filter inputs. Within-prefix points, paths, particles, batches and initializers
+do not become independent scientific replicates or tune the selected fit.
+
+| Error (maximum over the registered prefix paths/observation times) | Step-halving limit | Event-driven reference limit |
+| --- | --- | --- |
+| Mode posterior total variation | 0.02 | 0.1 |
+| Marginal position-mean maximum absolute difference (m) | 0.02 | 0.1 |
+| Marginal velocity-mean maximum absolute difference (m/s) | 0.05 | 0.2 |
+| Absolute log-likelihood difference per observation | 0.01 | 0.05 |
+
+These are pre-data operational accuracy tolerances, not established error
+bounds or universal identification constants. Step halving reduces BOTH
+`max_step_seconds` and `max_rate_step` by two; changing the time limit alone
+can leave the active rate-controlled grid unchanged. The fine prefix quota is
+400 substeps, checked at the whole permitted [0,5] s^-1 fitted rate family on
+every physical grid. Only the 2-second prefix is checked here, not silently the
+full 16-second trajectory. The fine specification retains other fit policies.
+Coarse/fine agreement alone does not validate moment matching or true likelihood.
+
+The registered reference candidate is a conditional-affine, event-driven
+bootstrap particle filter with 512 particles, four independent MC batches,
+at most 256 jumps per particle/observation interval and minimum ESS fraction
+0.1. Its confidence setting is 0.95; MC half-widths must be at most one quarter
+of the corresponding reference tolerance. Insufficient MC precision must fail,
+not cause adaptive extra batches, particle counts, selective batch deletion or
+unregistered retries. Conditional path propagation is not an exact joint
+switching likelihood or an exact posterior. The future implementation must
+specify and validate the MC uncertainty calculation and compare prefix marginal
+posteriors/likelihoods, not just unconditioned forward moments. The known-mode
+affine K=1/Kalman boundary has absolute and relative tolerances 1e-8. All required
+checks and failures must remain disclosed; failure state is
+`INFERENCE_INAPPLICABLE`, never a fabricated successful diagnostic.
+
+CURRENT LIMITATION: only the immutable contract, fine-grid metadata preflight
+and fail-closed publication boundary are implemented. The managed numerical
+executor, its registered allocation plan, reference algorithm/uncertainty
+implementation and independent evidence/provenance adapter are NOT implemented.
+V2 execution therefore refuses with `NEEDS_IMPLEMENTATION` before generation
+or fitting. This software gap is not published as a numerical-failure artifact.
+Preparation/staging is metadata only and admits no reference computation or
+additional memory. Existing 20-million-element/512-MiB caps remain unchanged.
+The future diagnostic executor must charge all work, checkpoints, retries and
+publication to the original K=2 arm under the same shared supervisor/store,
+without creating a reference method/arm or extra budget authority.
+
+Every shared qualification now discloses `approximation_qualification` as
+pending and `qualified_identifiability=false`. An otherwise mathematical
+`PASSED` production report becomes `NEEDS_APPROXIMATION_QUALIFICATION`, with
+no applicable ranges. Incomplete, exhausted, unidentifiable and control-failed
+conclusions retain their actual states. Fixture reports stay `FIXTURE_ONLY`.
+The owner independently derives the pending contract from actual source
+recipes; neither a forged passing worker status nor a recomputed report hash
+can promote it. Implementing a numerical checker alone will not lift this
+stop: actual managed cost, source, input, selected-fit and approximation evidence
+must be independently bound before scientific qualification is enabled.

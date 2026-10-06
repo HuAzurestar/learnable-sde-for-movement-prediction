@@ -21,6 +21,7 @@ from .pipeline import validate_recipe, validate_failed_fit
 from .failures import valid_numerical_diagnostic
 from models.switching import SwitchingError
 from .qualification import METRICS, IdentifiabilitySpec, phase_manifest, qualify
+from .approximation import withhold_scientific_pass
 from .runtime import PLUGIN_ID, switching_plugin
 from .synthetic import ScenarioSpec
 
@@ -486,6 +487,7 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
         report['missing_fields'].append('pirc28_study_definition_hash')
         if 'applicable_ranges' in report:
             report['applicable_scenarios'], report['applicable_ranges'] = [], []
+    approximation = withhold_scientific_pass(report, studies, fixture=fixture)
     if len(encode({'rows': rows, 'lineage': lineage, 'gate': report})) > MAXIMUM_RESULT_BYTES:
         raise ResearchError('RESOURCE_LIMIT', 'qualification aggregate exceeds its bounded byte quota')
     # Integrity reuse and interval computation occur after the actual read;
@@ -499,11 +501,12 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
             raise ResearchError('INDEX_STALE', 'source attempts changed during qualification')
     for study_id in study_ids:
         require_unexpired_disclosure(store, study_id, authorizations[study_id], 'evaluate')
-    scientific = not fixture and report['state'] == 'PASSED' and not definition.missing_fields
+    scientific = False  # No implemented, managed approximation proof adapter yet.
     return {'schema_version': 'pirc28-shared-qualification-v1', 'store_id': store.store_id,
         'definition_hash': digest(definition.to_dict()), 'aggregate_hash': digest(rows), 'rows': rows,
         'lineage': lineage, 'gate': report, 'state': 'FIXTURE_ONLY' if fixture else report['state'],
         'qualified_identifiability': scientific, 'real_data_authorized': False,
+        'approximation_qualification': approximation,
         'preregistration_hashes': sorted(preregistrations), 'code_hash': next(iter(sources)),
         'study_definition_hash': study_definition_hash, 'study_definition_bound': study_definition_hash is not None,
         'arm_balances': balances, 'read_bytes': consumed, 'selection_rule': SELECTION_RULE,

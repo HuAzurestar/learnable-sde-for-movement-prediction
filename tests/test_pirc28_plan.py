@@ -30,6 +30,10 @@ def test_real_reference_plan_covers_full_six_axis_cartesian_matrix(reference):
     plan, definition = reference
     value = definition.to_dict()
     assert value['runtime_code_hash'] == code_hash()
+    assert value['schema_version'] == 'pirc28-synthetic-study-definition-v2'
+    assert value['approximation_spec'] == plan['approximation_spec']
+    assert all(recipe['approximation_spec'] == plan['approximation_spec']
+               and recipe['schema_version'] == 'pirc28-synthetic-recipe-v2' for recipe in value['recipes'].values())
     assert len(value['recipes']) == 64 and len(definition.content) < 4*1024*1024
     expected = {tuple(point) for point in itertools.product(*(plan['axes'][name] for name in AXES))}
     actual = {tuple(row['axes'][name] for name in AXES) for row in value['phase_matrix']['scenarios']}

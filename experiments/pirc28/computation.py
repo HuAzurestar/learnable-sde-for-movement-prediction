@@ -18,6 +18,7 @@ from infrastructure.research_visibility import combine_visibility, study_visibil
 from .evidence import (MAXIMUM_RESULT_BYTES, _cost_history, source_attempts_hash,
                        source_run_ids, study_definition_binding)
 from .qualification import IdentifiabilitySpec, METRICS
+from .approximation import pending_qualification
 
 MAXIMUM_REQUEST_BYTES = 4*1024*1024
 MAXIMUM_BOOTSTRAP_ELEMENTS = 50_000_000
@@ -101,10 +102,13 @@ def validate_computation_result(store, value, request):
             or report['gate'].get('spec_hash') != digest(frozen['definition'])
             or report['gate'].get('real_data_authorized') is not False
             or report['state'] != ('FIXTURE_ONLY' if frozen['source_stage'] == 'fixture' else report['gate'].get('state'))
-            or report['qualified_identifiability'] != (report['state'] == 'PASSED' and not definition.missing_fields)
+            or report['qualified_identifiability'] is not False
             or (report['state'] == 'FIXTURE_ONLY' and not frozen['allow_fixture'])):
         raise ResearchError('CONTRACT_MISMATCH', 'qualification gate/fixture disposition differs')
     studies, _ = _sources(store, frozen)
+    if (digest(report.get('approximation_qualification')) != digest(pending_qualification(studies))
+            or (frozen['source_stage'] != 'fixture' and report['state'] == 'PASSED')):
+        raise ResearchError('CONTRACT_MISMATCH', 'managed approximation proof is missing; scientific promotion refused')
     reference = study_definition_binding(store, studies, definition)
     if ('study_definition_hash' not in report
             or report['study_definition_hash'] != reference

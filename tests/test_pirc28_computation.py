@@ -64,7 +64,8 @@ def test_successful_computation_reuse_has_no_new_reservation(computed):
 
 
 @pytest.mark.parametrize('damage', ['gate', 'report-hash', 'source-snapshot', 'request', 'real-authorization',
-    'fixture-promotion', 'master-hash', 'master-bound', 'master-bound-type', 'missing-master-hash', 'missing-master-bound'])
+    'fixture-promotion', 'master-hash', 'master-bound', 'master-bound-type', 'missing-master-hash', 'missing-master-bound',
+    'missing-approximation', 'approximation-promotion', 'approximation-hash', 'approximation-boolean-type'])
 def test_result_bindings_refuse_tampered_disposition(computed, damage):
     data, result, _ = computed
     store = data[0]
@@ -87,6 +88,16 @@ def test_result_bindings_refuse_tampered_disposition(computed, damage):
     elif damage == 'fixture-promotion':
         value['report']['state'] = value['report']['gate']['state'] = 'PASSED'
         value['report']['qualified_identifiability'] = True
+        value['report_hash'] = digest(value['report'])
+    elif damage in ('missing-approximation', 'approximation-promotion', 'approximation-hash', 'approximation-boolean-type'):
+        if damage == 'missing-approximation':
+            value['report'].pop('approximation_qualification')
+        elif damage == 'approximation-promotion':
+            value['report']['approximation_qualification'].update(state='PASSED', qualified=True, managed_evidence_bound=True)
+        elif damage == 'approximation-boolean-type':
+            value['report']['approximation_qualification']['qualified'] = 0
+        else:
+            value['report']['approximation_qualification']['spec_hash'] = '0'*64
         value['report_hash'] = digest(value['report'])
     else:
         if damage == 'master-hash':

@@ -15,10 +15,11 @@ from infrastructure.research_files import opened_regular_file
 from infrastructure.research_store import ResearchError, digest, encode, identifier
 from models.switching import SwitchingError, SwitchingSDEModel
 from .qualification import AXES, PARAMETERS, IdentifiabilitySpec, _wilson, phase_manifest
-from .study import SCHEMA, SyntheticStudyDefinition, arm_bindings
+from .study import SCHEMA_V2, SyntheticStudyDefinition, arm_bindings
 from .synthetic import ScenarioSpec
+from .approximation import ApproximationSpec, RECIPE_SCHEMA
 
-PLAN_SCHEMA = 'pirc28-scientific-plan-v1'
+PLAN_SCHEMA = 'pirc28-scientific-plan-v2'
 MAXIMUM_PLAN_BYTES = 64*1024
 REFERENCE_PLAN = Path(__file__).with_name('plans')/'identifiability-v1.json'
 PARAMETER_FIELDS = {'Q', 'A', 'B', 'a', 'L', 'rate_bounds'}
@@ -64,7 +65,8 @@ def prepare_definition(plan):
 
 def _prepare(plan):
     keys = {'schema_version', 'plan_id', 'truth_parameters', 'axes', 'initial_state', 'initializations',
-            'inference', 'sampling', 'forecast_origin_s', 'forecast_horizons_s', 'qualification', 'scope', 'arm_ids'}
+            'inference', 'sampling', 'forecast_origin_s', 'forecast_horizons_s', 'qualification', 'scope', 'arm_ids',
+            'approximation_spec'}
     _exact(plan, keys, 'scientific plan')
     if plan['schema_version'] != PLAN_SCHEMA:
         raise ResearchError('CONTRACT_MISMATCH', 'scientific plan schema differs')
@@ -93,6 +95,7 @@ def _prepare(plan):
             raise ResearchError('CONTRACT_MISMATCH', 'positive explicit sampling counts required')
     _exact(frozen['inference'], {field.name for field in fields(InferenceSpec)}, 'inference')
     inference = InferenceSpec(**frozen['inference']).validate()
+    approximation = ApproximationSpec.from_dict(frozen['approximation_spec'])
     _exact(frozen['initializations'], {'1', '2'}, 'initializations')
     initializations = {}
     for k in (1, 2):
@@ -179,7 +182,9 @@ def _prepare(plan):
         delta = min(inference.max_step_seconds, inference.max_rate_step/truth.rate_bounds[1]) if truth.rate_bounds[1] else inference.max_step_seconds
         if sum(math.ceil(float(dt)/delta) for dt in np.diff(times)) > inference.max_substeps:
             raise ResearchError('RESOURCE_PLAN_REJECTED', 'frozen rate family exceeds the declared substep quota')
-        recipes[name] = {'schema_version': 'pirc28-synthetic-recipe-v1', 'scenario': row['scenario'],
+        approximation.prefix_preflight(inference, times, index_of(origin), truth.rate_bounds[1])
+        recipes[name] = {'schema_version': RECIPE_SCHEMA, 'scenario': row['scenario'],
+            'approximation_spec': approximation.to_dict(),
             'initializations': copy.deepcopy(initializations), 'inference': copy.deepcopy(frozen['inference']),
             **{key: sampling[key] for key in ('train_paths', 'selection_paths', 'test_paths', 'forecast_paths')},
             'prior_mean': copy.deepcopy(mean), 'prior_covariance': copy.deepcopy(covariance),
@@ -192,7 +197,8 @@ def _prepare(plan):
             used.add(seed)
             seeds[name][replicate] = seed
     _exact(frozen['arm_ids'], {'1', '2'}, 'original arm IDs')
-    return SyntheticStudyDefinition.from_dict({'schema_version': SCHEMA, 'runtime_code_hash': code_hash(),
+    return SyntheticStudyDefinition.from_dict({'schema_version': SCHEMA_V2, 'runtime_code_hash': code_hash(),
+        'approximation_spec': approximation.to_dict(),
         'phase_matrix': matrix, 'identifiability_spec': qualification.to_dict(), 'recipes': recipes,
         'replicate_seeds': seeds, 'arms': arm_bindings(frozen['arm_ids']['1'], frozen['arm_ids']['2']),
         'forecast_origin_s': origin, 'forecast_horizons_s': horizons})
@@ -212,6 +218,8 @@ def describe_plan(plan):
         'all_success_recovery_wilson_lower_bound': _wilson(len(qualification.replicate_ids),
             len(qualification.replicate_ids), qualification.confidence)[0],
         'thresholds': qualification.thresholds, 'prepared_only': True, 'registered_studies': False,
+        'approximation_spec_hash': digest(value['approximation_spec']),
+        'approximation_executor_implemented': False, 'approximation_resource_admitted': False,
         'scientific_groups_executed': 0, 'qualified_identifiability': False, 'real_data_authorized': False}
 
 
