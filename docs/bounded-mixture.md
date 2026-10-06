@@ -64,6 +64,18 @@ save/ACK/charged linked-resume proof. Only these dedicated adapters accept the
 64 KiB checkpoint limit; existing methods retain their 16 KiB worker limit.
 The watchdog, 80% signal, ACK grace and original-arm settlement are unchanged.
 
+An engineering integration test runs the actual bounded affine-mixture worker,
+receives the owner's real80% signal, completes a partial-grid save/ACK, verifies
+native worker-tree stop before settlement, then reopens the physical store and
+resumes only through the verified checkpoint/recovery registry. It compares
+full functional/lineage/output content with an uninterrupted unit control and
+checks a fresh owner receipt and all-attempt charges on the same original arm.
+Resume permission is distinct from evaluate permission. At most two60s linked
+continuations are declared before fixture creation; only new verified partial
+saves may continue, never timeout/fused/numerical/admission failures. No forced
+save, fake clock, live budget extension or sleep-only worker is used. This is
+an engineering test, not formal mixture qualification or a research experiment.
+
 Engineering regressions cover moment-preserving reduction, the affine Euler
 moment limit, distinct nonlinear component centres, pruning accounting and
 cap failure, strict PSD refusal, complete policy bindings and exact bounded
