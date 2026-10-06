@@ -85,11 +85,14 @@ lineage and qualification artifacts, even for unexecuted cells. Legacy explicit
 single-package studies remain supported. Tables and matrices are bounded to
 10,000 entries, table metadata to 4 MiB, lineage to 10,000 visits and 32 levels.
 
-The paired paper offline admission validator has **not yet** adopted this table
-schema. Source-side engineering export is not an end-to-end qualified paper
-delivery; update and verify that independent reader before formal heterogeneous
-evidence consumption. This addition does not qualify any method/model or permit
-research without the existing shared store and grants.
+The paired paper offline admission validator independently checks the same
+table/selection and selected model-source references without importing runtime
+code or opening research roots. The CI paired-checkout ref fixes its exact
+version. Cross-repository synthetic formal-admission controls verify genuine
+shared receipts and resealed substitution denials; standalone paper aggregation
+remains descriptive and never creates managed computation proof. Engineering
+exports do not qualify any method/model or permit research without the existing
+shared store and grants.
 
 `tests/test_propagation_study_design.py` covers immutability, deterministic content
 hashing, exact owner preflight compatibility, paired inputs, stable budget arms,
@@ -104,5 +107,9 @@ Those disposable engineering exports are not formal research evidence.
 `tests/test_research_admission_selection.py` checks exact coverage, immutable
 authority, substituted selection refusal, conservative source visibility,
 resume-command admission, and a two-plugin shared worker/reuse/cost/export
-fixture. Resume-command admission is not an actual mapped interrupted restore
-test; that additional coverage remains pending.
+fixture. `tests/test_cell_admission_recovery.py` also exercises the real shared
+MLMC soft-save/ACK and reopened linked restore with a frozen per-cell table,
+checking original/resumed selection and original-arm accounting.
+`tests/test_cell_admission_paper_chain.py` exercises the independent paper CLI
+on shared synthetic formal receipts, with and without a foreign frozen-model
+source. These engineering attestations are not actual research qualification.
