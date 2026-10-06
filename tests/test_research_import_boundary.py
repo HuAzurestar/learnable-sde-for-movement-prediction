@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
     "application.pirc26_forecast_control", "infrastructure.pirc26_forecast_codec",
     "infrastructure.pirc26_worker_control",
     "infrastructure.pirc26_checkpoint_contract",
+    "infrastructure.pirc26_training_state_contract",
     "infrastructure.pirc26_process_resources",
 ])
 def test_actual_shared_entry_import_does_not_require_tensor_engines(module):

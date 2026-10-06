@@ -89,6 +89,13 @@ def validate_checkpoint_progress(receipt, state, progress):
                 or method["initial_model_hash"] != job["initial_checkpoint"]["sha256"]
                 or method["sha256"] != digest({k:v for k,v in method.items() if k != "sha256"})):
             raise ResearchError("CONTRACT_MISMATCH", "training phase/position/identity differs from frozen plan")
+        from infrastructure.pirc26_training_state_contract import inspect_training_envelope
+        from infrastructure.pirc26_checkpoint_contract import CheckpointContractError
+        try:
+            inspect_training_envelope(state, job, receipt["cell"]["execution"]["config"],
+                receipt["cell"]["execution"]["inputs"], model_preflight=preflight_model)
+        except CheckpointContractError as exc:
+            raise ResearchError(exc.code, "bounded typed training recovery refused") from exc
 
 
 def validate_job(job, receipt):
@@ -140,6 +147,16 @@ def validate_job(job, receipt):
     return job
 
 
+def validate_restored_state(receipt, state):
+    """Repeat state-only checks; zero rate is not published/charged telemetry."""
+    from application.pirc26_forecast_control import is_forecast_state
+    job = receipt["documents"]["package"]["payload"]["pirc26_job"]
+    total = (sum(r["sample_count"]*(len(r["time_grid"])-1) for r in job["origins"])
+             if is_forecast_state(state) else receipt["cell"]["execution"]["config"]["plan"]["max_steps"])
+    validate_checkpoint_progress(receipt,state,{"completed_steps":state.get("step") if type(state) is dict else None,
+        "total_steps":total,"throughput_per_second":0.,"eta_seconds":0.})
+
+
 def admitted_context(output, spec, cell, *, running=False, recovery=False):
     """Resolve only the store and attempt already owned by this output path."""
     binding = cell["execution"]
@@ -180,6 +197,8 @@ def admitted_context(output, spec, cell, *, running=False, recovery=False):
 
 def _dispatch(output, spec, cell, state, recovery):
     store, receipt, _, _ = admitted_context(output, spec, cell, recovery=recovery)
+    if recovery:
+        validate_restored_state(receipt,state)
     settings = spec["admission"]
     transport = read_block(store, settings["protocol_id"], cell["block_id"],
         authorization_id=settings["authorization_id"], authorization_version=settings.get("authorization_version"),
@@ -245,7 +264,5 @@ def load_handoff(output, expected_hash, control):
     if (digest(state) if handoff["recovery"] else None) != handoff["restored_hash"]:
         raise ResearchError("CHECKPOINT_INCOMPATIBLE", "owner restored state identity differs")
     if state is not None:
-        from application.pirc26_forecast_control import is_forecast_state, validate_saved_job
-        if is_forecast_state(state):
-            validate_saved_job(state, job, receipt)
+        validate_restored_state(receipt,state)
     return receipt, plugin, job, transport, state, ownership

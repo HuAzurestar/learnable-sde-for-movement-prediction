@@ -40,9 +40,9 @@ def one_thread():
 
 
 def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=False, long_training=False, family="M0", rank_failure=False,
-            formal=False, metric_policy=None, pilot=False, long_forecast=False, two_origins=False):
+            formal=False, metric_policy=None, pilot=False, long_forecast=False, two_origins=False, dtype=torch.float64):
     assert not two_origins or long_forecast
-    m = model("M2" if long_training or long_forecast else family)
+    m = model("M2" if long_training or long_forecast else family).to(dtype=dtype)
     doc = document(m)
     doc["block_id"] = "fixture-1"
     if long_training:
@@ -70,6 +70,7 @@ def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=Fal
     paths, chunk = ((128 if two_origins else 256),1) if long_forecast else (8,8)
     req = dto.forecast_request("synthetic-segment", 2, grid, sample_count=paths, brownian_root_id="a" * 64, chunk_size=chunk)
     cfg, profile, _, _, _, _ = declarations(m)
+    profile["dtype"] = str(dtype).split(".")[-1]
     cfg["forecast_request_hashes"] = [digest(asdict(req))]
     if two_origins:
         second_grid = tuple(doc["segments"][0]["time"][3:67])

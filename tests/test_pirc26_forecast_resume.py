@@ -39,9 +39,10 @@ def interrupted(m, req, boundary):
 
 
 @pytest.mark.parametrize("family", ["M0","M2"])
+@pytest.mark.parametrize("dtype", [torch.float32,torch.float64])
 @pytest.mark.parametrize("boundary", [1,7,24,47,80])
-def test_exact_resume_preserves_all_ids_paths_and_full_state_moments(family,boundary):
-    m, req = model(family), request()
+def test_exact_resume_preserves_all_ids_paths_and_full_state_moments(family,dtype,boundary):
+    m, req = model(family).to(dtype=dtype), request()
     state, row = interrupted(m,req,boundary)
     with torch.no_grad():
         resumed = forecast(m,req,resume_state=state)
@@ -158,7 +159,7 @@ def test_completed_solver_state_can_resume_after_evaluation_row_cancellation(mon
     assert evaluate_forecast(resumed,truth) == evaluate_forecast(result,truth)
 
 
-@pytest.mark.parametrize("fault",[None,"progress","phase","binary"])
+@pytest.mark.parametrize("fault",[None,"progress","phase","binary","rng"])
 def test_owned_phase_prepare_validates_before_retry_or_provider_read(tmp_path,monkeypatch,fault):
     from application.pirc26_forecast_control import pack_fit,SCHEMA
     from application.pirc26_runtime import validate_checkpoint_progress
@@ -182,8 +183,9 @@ def test_owned_phase_prepare_validates_before_retry_or_provider_read(tmp_path,mo
     method = {"schema_version":SCHEMA,"job_hash":digest(job),"origin_index":0,
         "fit":pack_fit({"status":"FROZEN","checkpoint":job["initial_checkpoint"]},job,cfg,0),
         "finished":pack_json([]),"active":active}
+    from estimation.phase_space_checkpoint import encode_state,rng_state
     state = {"step":row["completed_steps"],"data_position":{"origin_index":0,"first":active["first"],"step":active["step"]},
-        "method_state":{**method,"sha256":digest(method)},"rng_state":{}}
+        "method_state":{**method,"sha256":digest(method)},"rng_state":encode_state(rng_state())}
     progress = {**row,"throughput_per_second":1.,"eta_seconds":1.}
     validate_checkpoint_progress(receipt,state,progress)
     if fault == "progress":
@@ -193,6 +195,8 @@ def test_owned_phase_prepare_validates_before_retry_or_provider_read(tmp_path,mo
     elif fault == "binary":
         active["m2"]["data"] = ["invalid!"]
         active["sha256"] = digest({k:v for k,v in active.items() if k != "sha256"})
+    elif fault == "rng":
+        state["rng_state"]["map"][-1][1] = {"tensor":{"dtype":"uint8","shape":[1],"data":[256]}}
     state["method_state"]["sha256"] = digest({k:v for k,v in state["method_state"].items() if k != "sha256"})
     owned = SharedRecovery(store,registry,recovery)
     # Negative fixtures use explicit owner save, NOT claimed worker ACK proof.
@@ -212,8 +216,9 @@ def test_owned_phase_prepare_validates_before_retry_or_provider_read(tmp_path,mo
                    for e in store.events()[previous:])
 
 
-@pytest.mark.parametrize("operation,two_origins", [("forecast",False),("fit-and-forecast",False),("forecast",True)])
-def test_actual_owner_forecast_ack_reopen_and_fresh_cost_preserve_complete_samples_and_moments(tmp_path, operation,two_origins):
+@pytest.mark.parametrize("operation,two_origins,dtype", [("forecast",False,torch.float64),("fit-and-forecast",False,torch.float64),
+                                                       ("forecast",True,torch.float64),("forecast",False,torch.float32)])
+def test_actual_owner_forecast_ack_reopen_and_fresh_cost_preserve_complete_samples_and_moments(tmp_path, operation,two_origins,dtype):
     import json
     import math
     from application.research_budget import BudgetSpec,BudgetLedger
@@ -222,7 +227,7 @@ def test_actual_owner_forecast_ack_reopen_and_fresh_cost_preserve_complete_sampl
     from infrastructure.research_store import ResearchStore
     from tests.test_pirc26_runtime import prepare
     role = "validation" if operation == "forecast" else "train"
-    baseline,value,_,_,registry,recovery,_ = prepare(tmp_path/"baseline",operation=operation,role=role,long_forecast=True,two_origins=two_origins)
+    baseline,value,_,_,registry,recovery,_ = prepare(tmp_path/"baseline",operation=operation,role=role,long_forecast=True,two_origins=two_origins,dtype=dtype)
     expected = SharedRunner(baseline,registry,recovery_registry=recovery).run_cell(value["study_id"],digest(value["cells"][0]),budget=BudgetSpec(90))
     assert expected["state"] == "SUCCEEDED",expected
     target = json.loads((baseline.path/"artifacts"/expected["artifact_id"]).read_bytes())
@@ -230,7 +235,7 @@ def test_actual_owner_forecast_ack_reopen_and_fresh_cost_preserve_complete_sampl
     # baseline cost. No synthetic time/delay/request/ACK or production budget.
     measured = BudgetLedger(baseline).balance("affine")["committed_ms"]/1000
     stopped_seconds = max(5,math.floor(measured*(.95 if two_origins else .75)))
-    store,value,_,_,registry,recovery,grant = prepare(tmp_path/"resumed",operation=operation,role=role,long_forecast=True,two_origins=two_origins)
+    store,value,_,_,registry,recovery,grant = prepare(tmp_path/"resumed",operation=operation,role=role,long_forecast=True,two_origins=two_origins,dtype=dtype)
     stopped = SharedRunner(store,registry,recovery_registry=recovery).run_cell(value["study_id"],digest(value["cells"][0]),budget=BudgetSpec(stopped_seconds))
     assert stopped["state"] == "FAILED", (stopped,measured,stopped_seconds)
     assert store.attempts()[stopped["attempt_id"]]["error_code"] == "CHECKPOINT_SAVED"

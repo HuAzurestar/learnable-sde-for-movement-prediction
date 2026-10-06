@@ -74,6 +74,12 @@ def validate_saved_job(state, job, receipt):
     canonical(state, LIMIT)
     require(type(state) is dict and set(state) == {"step", "data_position", "method_state", "rng_state"}
             and type(state["step"]) is int and state["step"] >= 0, "closed owned forecast envelope")
+    from infrastructure.pirc26_training_state_contract import inspect_rng
+    from infrastructure.pirc26_checkpoint_contract import CheckpointContractError
+    try:
+        inspect_rng(state["rng_state"])
+    except CheckpointContractError as exc:
+        raise ResearchError(exc.code,"bounded typed forecast RNG recovery refused") from exc
     method = state["method_state"]
     require(type(method) is dict and set(method) == {"schema_version", "job_hash", "origin_index", "fit", "finished", "active", "sha256"}
             and method["schema_version"] == SCHEMA and method["job_hash"] == digest(job)
