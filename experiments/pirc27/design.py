@@ -16,6 +16,7 @@ from domain.errors import DataValidationError
 from domain.frozen_dynamics import FrozenDynamicsPackage, content_hash, _encode, _hash
 from domain.nonlinear_dynamics import FrozenNonlinearPackage
 from domain.propagation import PropagationRequest
+from domain.mixture import MixtureSettings
 from infrastructure.research_store import identifier
 
 from .oracles import matrix_cardinality
@@ -44,6 +45,7 @@ class StudyMethod:
     level_samples: tuple[int, ...] = ()
     proposal: tuple[float, float] = (0.0, 0.0)
     recovery: bool = False
+    mixture_settings: MixtureSettings | None = None
 
 
 @dataclass(frozen=True)
@@ -143,13 +145,22 @@ def _request(design, model, method, functional, horizon, seed, arm_id):
 
 
 def _disposition(model, method):
-    if method.method in {"mixture", "pde"}:
+    if method.method == "mixture" and method.mixture_settings is None:
+        return "INELIGIBLE", "no explicit frozen bounded mixture settings supplied"
+    if method.method == "pde":
         return "NOT_IMPLEMENTED", "no versioned qualified implementation in this adapter"
     if isinstance(model.package, FrozenNonlinearPackage) and method.method in {"exact", "gaussian"}:
         return "INELIGIBLE", "affine-only analytic method cannot replace nonlinear dynamics"
     if isinstance(model.package, FrozenDynamicsPackage) and method.method == "cubature":
         return "INELIGIBLE", "cubature adapter currently declares synthetic nonlinear input only"
     return "PLANNED", "engineering capability only; shared admission and scientific qualification still required"
+
+
+def _mixture_configuration(model, method, request):
+    from experiments.pirc25.affine import code_hash
+    from .mixture_plugin import mixture_config
+    policy = method.mixture_settings.bind(model.package, request, code_hash())
+    return policy, mixture_config(request, policy, synthetic=isinstance(model.package, FrozenNonlinearPackage))
 
 
 def freeze_design(design):
@@ -199,7 +210,10 @@ def freeze_design(design):
                 or type(method.level_samples) is not tuple or type(method.proposal) is not tuple
                 or len(method.proposal) != 2 or not all(_finite(x) for x in method.proposal)):
             raise DataValidationError("unknown or mutable method configuration")
-        if method.recovery and method.method not in {"euler", "heun", "reversible-heun", "mlmc", "importance"}:
+        if (method.mixture_settings is not None
+                and (type(method.mixture_settings) is not MixtureSettings or method.method != "mixture" or not method.recovery)):
+            raise DataValidationError("mixture requires explicit immutable settings and chunk adapter")
+        if method.recovery and method.method not in {"euler", "heun", "reversible-heun", "mlmc", "importance", "mixture"}:
             raise DataValidationError("method has no declared chunk continuation")
         if method.method == "mlmc":
             if (not 1 <= len(method.level_samples) <= 9
@@ -244,15 +258,23 @@ def freeze_design(design):
             if _disposition(model, method)[0] != "PLANNED":
                 continue
             synthetic = isinstance(model.package, FrozenNonlinearPackage)
-            key = (synthetic, method.recovery)
+            key = (synthetic, method.recovery, method.method == "mixture")
             if key not in plugins:
-                plugins[key] = propagation_plugin(synthetic=synthetic, recovery=method.recovery)
+                if method.method == "mixture":
+                    from .mixture_plugin import mixture_plugin
+                    plugins[key] = mixture_plugin(synthetic=synthetic)
+                else:
+                    plugins[key] = propagation_plugin(synthetic=synthetic, recovery=method.recovery)
             # Even restart-only affine work is bounded in the preparation layer;
             # total work must not be hidden behind a temporal-grid-only count.
-            config = execution_config(request, method.method, level_samples=method.level_samples,
-                                      proposal=method.proposal, recovery=method.recovery, synthetic=synthetic)
+            if method.method == "mixture":
+                _, config = _mixture_configuration(model, method, request)
+            else:
+                config = execution_config(request, method.method, level_samples=method.level_samples,
+                                          proposal=method.proposal, recovery=method.recovery, synthetic=synthetic)
             total = (sum(n * (method.steps * 2**level + (method.steps * 2**(level-1) if level else 0))
                          for level, n in enumerate(method.level_samples)) if method.method == "mlmc"
+                     else config["work_steps"] if method.method == "mixture"
                      else 8*method.steps if method.method == "cubature"
                      else method.steps if method.method in {"exact", "gaussian"} else method.samples*method.steps)
             if config["steps"] > 8192 or total > 1_000_000:
@@ -282,9 +304,13 @@ def freeze_design(design):
                        "functional_id": functional.functional_id, "comparison_dimensions": dimensions}
         if disposition == "PLANNED":
             synthetic = isinstance(model.package, FrozenNonlinearPackage)
-            plugin = plugins[(synthetic, method.recovery)]
-            config = execution_config(request, method.method, level_samples=method.level_samples,
-                                      proposal=method.proposal, recovery=method.recovery, synthetic=synthetic)
+            plugin = plugins[(synthetic, method.recovery, method.method == "mixture")]
+            if method.method == "mixture":
+                policy, config = _mixture_configuration(model, method, request)
+                row["cell"]["mixture_policy"] = policy.manifest()
+            else:
+                config = execution_config(request, method.method, level_samples=method.level_samples,
+                                          proposal=method.proposal, recovery=method.recovery, synthetic=synthetic)
             row["cell"].update({"plugin_id": plugin.plugin_id, "capability": {"exact": "exact-transition", "mlmc": "coupled-level",
                     "importance": "rare-event"}.get(method.method, "generic-rollout"),
                 "execution": execution_binding(plugin.registry_entry, config, execution_inputs(request), matrix_cells=count)})

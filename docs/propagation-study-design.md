@@ -35,7 +35,8 @@ shared store's cross-study identity/conflict and closed-arm checks. An operator
 must reuse the existing bindings; renamed identities are not permission to reset
 budgets.
 
-The complete expected matrix retains `NOT_IMPLEMENTED` mixture and PDE rows and
+The complete expected matrix retains `NOT_IMPLEMENTED` PDE rows,
+`INELIGIBLE` mixture rows lacking explicit frozen settings, and
 `INELIGIBLE` affine-only methods on nonlinear packages. These
 have reasons, requests and immutable shared non-execution declarations, not
 executable bindings. `PLANNED` means only
@@ -45,6 +46,14 @@ The additive-noise reversible-Heun path candidate now has a versioned engineerin
 implementation and is `PLANNED` for affine and synthetic nonlinear inputs,
 including chunk recovery. Its auxiliary mode/stability limitations still need
 formal qualification; the compiler does not label it scientifically eligible.
+
+The bounded mixture candidate requires an explicit immutable `MixtureSettings`
+and chunk recovery. Its full per-cell policy binds request/model/current source,
+component cap, merge/prune thresholds and state scales, discarded-mass/work/job
+caps. Its operation proxy and candidate/live workspaces are explicitly planned.
+No missing threshold is filled by a scientific default. Configured rows can be
+`PLANNED`, but formal or held-out execution is refused until a dedicated mixture
+qualifier exists. See [the algorithm and error boundary](bounded-mixture.md).
 
 `manifest()` returns detached data. `study_spec(expected_hash=...)` also verifies
 the current runtime source and returns **all** cells, including declared

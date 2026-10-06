@@ -15,6 +15,24 @@ def finite(value):
 
 
 @dataclass(frozen=True)
+class MixtureSettings:
+    """Explicit immutable design settings; binding happens per full request."""
+
+    component_cap: int
+    merge_distance: float
+    prune_weight: float
+    state_scales: tuple[float, ...]
+    maximum_discarded_mass: float
+    maximum_work_units: int
+    maximum_job_seconds: float
+
+    def bind(self, package, request, source_hash):
+        policy = MixturePolicy(request.request_hash, package.package_hash, source_hash, **asdict(self))
+        policy.validate(package, request, source_hash)
+        return policy
+
+
+@dataclass(frozen=True)
 class MixturePolicy:
     request_hash: str
     model_package_hash: str

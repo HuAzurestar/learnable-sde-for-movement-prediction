@@ -41,7 +41,9 @@ def validate_propagation_cell(spec, cell):
     qualification = cell["plugin_id"] == "affine-propagation-qualification"
     mlmc_reference = cell["plugin_id"] == "affine-mlmc-qualification-chunk"
     mlmc_production = cell["plugin_id"] == "affine-mlmc-production-chunk"
-    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk"}:
+    from experiments.pirc27.mixture_plugin import PLUGIN_IDS, mixture_plugin, mixture_policy, mixture_config
+    mixture = cell["plugin_id"] in PLUGIN_IDS
+    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk"}|PLUGIN_IDS:
         raise ResearchError("CONTRACT_MISMATCH", "unknown explicit propagation adapter")
     recovery = cell["plugin_id"].endswith("-chunk")
     synthetic = cell["plugin_id"].startswith("synthetic-")
@@ -55,6 +57,8 @@ def validate_propagation_cell(spec, cell):
     if mlmc_production:
         from experiments.pirc27.mlmc_production_plugin import mlmc_production_plugin
         plugin = mlmc_production_plugin()
+    if mixture:
+        plugin = mixture_plugin(synthetic=synthetic)
     execution_plan(spec, cell, plugin)
     request = request_from_manifest(cell["propagation_request"])
     package_type = FrozenNonlinearPackage if synthetic else FrozenDynamicsPackage
@@ -64,7 +68,11 @@ def validate_propagation_cell(spec, cell):
     except DataValidationError as exc:
         raise ResearchError("CONTRACT_MISMATCH", "frozen propagation package schema/content/code differs") from exc
     config = cell["execution"]["config"]
-    expected = execution_config(request, config["method"], level_samples=tuple(config["level_samples"]), proposal=tuple(config["proposal"]), recovery=recovery, synthetic=synthetic)
+    if mixture:
+        policy = mixture_policy(spec, cell, package, request, config)
+        expected = mixture_config(request, policy, synthetic=synthetic)
+    else:
+        expected = execution_config(request, config["method"], level_samples=tuple(config["level_samples"]), proposal=tuple(config["proposal"]), recovery=recovery, synthetic=synthetic)
     if qualification:
         from experiments.pirc27.qualification_plugin import qualification_policy, qualification_config
         policy = qualification_policy(spec, cell, package, request, config)
@@ -80,7 +88,7 @@ def validate_propagation_cell(spec, cell):
     if config != expected or cell["execution"]["inputs"] != execution_inputs(request) or request.arm_id != cell["arm_id"] or request.seed != cell["seed"]:
         raise ResearchError("CONTRACT_MISMATCH", "registered request, method/resource configuration or arm differs")
     required_capability = {"exact": "exact-transition", "gaussian": "generic-rollout", "euler": "generic-rollout",
-                           "heun": "generic-rollout", "reversible-heun": "generic-rollout", "mlmc": "coupled-level", "mlmc-pilot": "coupled-level", "importance": "rare-event", "cubature": "generic-rollout"}[config["method"]]
+                           "heun": "generic-rollout", "reversible-heun": "generic-rollout", "mlmc": "coupled-level", "mlmc-pilot": "coupled-level", "importance": "rare-event", "cubature": "generic-rollout", "mixture": "generic-rollout"}[config["method"]]
     if cell["capability"] != required_capability:
         raise ResearchError("CONTRACT_MISMATCH", "method differs from the cell's registered capability")
     if config["method"] == "mlmc-pilot":
@@ -105,6 +113,8 @@ def pilot_policy(spec, cell, request, config):
 def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admission=None):
     from inference.propagation_methods import (analytic_estimate, monte_carlo, mlmc_estimate, importance_sampling)
     from inference.nonlinear_propagation import cubature_estimate
+    from inference.mixture_propagation import mixture_estimate
+    from experiments.pirc27.mixture_plugin import mixture_policy
     package, request, config, plugin = validate_propagation_cell(spec, cell)
     from infrastructure.research_admission_selection import select_admission_package
     settings, _ = select_admission_package(spec, cell)
@@ -123,7 +133,9 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
         "mlmc": lambda: mlmc_estimate(package, request, level_samples=tuple(config["level_samples"]), **continuation),
         "mlmc-pilot": lambda: mlmc_estimate(package, request, level_samples=tuple(config["level_samples"]), phase=2, pilot=True, **continuation),
         "importance": lambda: importance_sampling(package, request, proposal=tuple(config["proposal"]), **continuation),
-        "cubature": lambda: cubature_estimate(package, request)}
+        "cubature": lambda: cubature_estimate(package, request),
+        "mixture": lambda: mixture_estimate(package, request,
+            mixture_policy(spec, cell, package, request, config), **continuation)}
     result = methods[config["method"]]()
     synthetic = isinstance(package, FrozenNonlinearPackage)
     mlmc_production = plugin.plugin_id == "affine-mlmc-production-chunk"

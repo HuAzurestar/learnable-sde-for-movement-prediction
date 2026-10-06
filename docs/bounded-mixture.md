@@ -1,8 +1,14 @@
 # Bounded cubature mixture: implementation boundary
 
 This explicit four-state SI kernel is an approximation, not an admitted
-scientific comparison or a replacement for path Monte Carlo. Its shared
-execution adapter and method-specific qualification remain separate work.
+scientific comparison or a replacement for path Monte Carlo. The explicit
+`affine-mixture-chunk` / `synthetic-mixture-chunk` adapters reuse the existing
+shared owner, resource plans, budget ledger and worker-control protocol. They
+create no ledger, grants or scientific qualification. Before reservations the
+owner checks the frozen job cap. Formal execution is refused before protected
+reads, including a generic operator qualification report; fixture/pilot modes
+cannot consume test/final-eval blocks either. A dedicated method qualifier
+remains required.
 
 `MixturePolicy` freezes the full request, model and current source hashes,
 component cap (1–32), scaled merge distance, absolute prune threshold, four
@@ -54,7 +60,9 @@ The state is limited to 64 KiB and binds the full policy/request/model and
 NumPy environment. There is no sampled RNG, and the environment marker says
 so. Progress uses a frozen conservative operation proxy, not measured FLOPs
 or a wall-time guarantee. A kernel callback replay is not a supervisor
-save/ACK/charged linked-resume proof.
+save/ACK/charged linked-resume proof. Only these dedicated adapters accept the
+64 KiB checkpoint limit; existing methods retain their 16 KiB worker limit.
+The watchdog, 80% signal, ACK grace and original-arm settlement are unchanged.
 
 Engineering regressions cover moment-preserving reduction, the affine Euler
 moment limit, distinct nonlinear component centres, pruning accounting and

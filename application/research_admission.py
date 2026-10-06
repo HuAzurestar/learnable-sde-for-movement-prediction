@@ -164,6 +164,13 @@ class AdmissionGate:
             if len(selected) != 1:
                 raise ResearchError("MISSING_INPUT", "cell block absent from frozen protocol")
             block = selected[0]
+            if plugin.plugin_id in {"affine-mixture-chunk", "synthetic-mixture-chunk"}:
+                # A generic operator report is not a method-specific qualifier.
+                # Refuse BEFORE grant/package lookup and protected input reads.
+                if mode == "formal" or block["split_role"] in {"test", "final-eval"}:
+                    raise ResearchError("UNQUALIFIED", "bounded mixture has no dedicated held-out qualification")
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
             if plugin.plugin_id == "affine-propagation-qualification":
                 # Numerical qualification is real pilot computation, never
                 # free preflight work and never exposure to held-out test data.
@@ -325,6 +332,17 @@ class AdmissionGate:
         return validate
 
     def run(self, attempt_id, spec, cell, plugin, command_builder, budget, *, builtin_fixture=False, recovery_builder=None, checkpoint_handler=None):
+        if plugin.plugin_id in {"affine-mixture-chunk", "synthetic-mixture-chunk"}:
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.mixture_plugin import mixture_policy
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                policy = mixture_policy(spec, cell, package, request, config)
+                if budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "mixture exceeds frozen job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
         if plugin.plugin_id == "affine-mlmc-production-chunk":
             from .propagation_execution import validate_propagation_cell
             from experiments.pirc27.mlmc_production_plugin import production_policy

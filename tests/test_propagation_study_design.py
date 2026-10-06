@@ -96,7 +96,7 @@ def test_unsupported_and_affine_only_rows_are_retained_in_the_registered_draft()
     assert doc["expected_cells"] == len(doc["matrix"]) == 24
     assert {r["method"]: r["disposition"] for r in doc["matrix"]} == {
         "euler": "PLANNED", "exact": "INELIGIBLE", "gaussian": "INELIGIBLE",
-        "mixture": "NOT_IMPLEMENTED", "reversible-heun": "PLANNED", "pde": "NOT_IMPLEMENTED"}
+        "mixture": "INELIGIBLE", "reversible-heun": "PLANNED", "pde": "NOT_IMPLEMENTED"}
     spec = frozen.study_spec(expected_hash=frozen.manifest_hash)
     assert len(spec["cells"]) == 24
     for row, cell in zip(doc["matrix"], spec["cells"]):
