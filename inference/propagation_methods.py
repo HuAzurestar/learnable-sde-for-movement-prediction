@@ -10,12 +10,15 @@ import math
 
 import numpy as np
 from domain.errors import DataValidationError, NumericalError
-from domain.frozen_dynamics import content_hash
+from domain.frozen_dynamics import FrozenDynamicsPackage, content_hash
+from domain.nonlinear_dynamics import FrozenNonlinearPackage
 from domain.propagation import ErrorComponent, FunctionalResult, NumericalErrorBudget
 from .affine_oracle import exact_moments, endpoint_halfspace_probability, _covariance
 
 
 def _inputs(package, request):
+    if not isinstance(package, (FrozenDynamicsPackage, FrozenNonlinearPackage)):
+        raise DataValidationError("a supported immutable dynamics package is required")
     request.validate()
     package.validate()
     if package.package_hash != request.model_package_hash:
@@ -61,6 +64,8 @@ def _expectation(mean, covariance, request):
 
 
 def discrete_moments(package, request, *, solver="euler", steps=None):
+    if not isinstance(package, FrozenDynamicsPackage):
+        raise DataValidationError("exact discrete Gaussian moments require affine dynamics")
     A, b, L, mean, _ = _inputs(package, request)
     steps = request.steps if steps is None else steps
     if type(steps) is not int or not 1 <= steps <= 8192:
@@ -76,6 +81,9 @@ def discrete_moments(package, request, *, solver="euler", steps=None):
 
 
 def _error_budget(package, request, solver, steps, standard_error, *, exact=False):
+    if isinstance(package, FrozenNonlinearPackage):
+        from .nonlinear_propagation import nonlinear_error_budget
+        return nonlinear_error_budget(request, standard_error)
     units = "m" if request.functional == "endpoint-x" else "1"
     exact_mean, exact_covariance = exact_moments(package, request.initial_mean, request.initial_covariance, request.horizons[0])
     if exact:
@@ -109,6 +117,18 @@ def endpoint_chunks(package, request, *, solver="euler", level=0, paired=False,
     Proposal drift is L @ proposal, hence remains in the declared noise support.
     """
     A, b, L, initial, root = _inputs(package, request)
+    nonlinear = isinstance(package, FrozenNonlinearPackage)
+    if nonlinear:
+        from .nonlinear_propagation import nonlinear_drift
+        parameters = package.manifest()["parameters"]
+        def advance(state, increments, step_size):
+            drift = nonlinear_drift(A, b+L@u, parameters["amplitude"], parameters["length_scale"], state)
+            noise = np.einsum("bi,ji->bj", increments, L, optimize=False)
+            predictor = state + step_size*drift + noise
+            if solver == "euler":
+                return predictor
+            corrected = nonlinear_drift(A, b+L@u, parameters["amplitude"], parameters["length_scale"], predictor)
+            return state + 0.5*step_size*(drift+corrected) + noise
     if type(level) is not int or not 0 <= level <= 8 or paired and level == 0:
         raise DataValidationError("invalid coupled level")
     steps = request.steps * 2**level
@@ -136,12 +156,14 @@ def endpoint_chunks(package, request, *, solver="euler", level=0, paired=False,
         for step in range(steps):
             increments = np.stack([stream.standard_normal(2) for stream in streams]) * math.sqrt(dt)
             # Fixed reduction order, independent of the BLAS batch-size path.
-            state = np.einsum("bi,ji->bj", state, F, optimize=False) + offset + np.einsum("bi,ji->bj", increments, noise, optimize=False)
+            state = (advance(state, increments, dt) if nonlinear else
+                np.einsum("bi,ji->bj", state, F, optimize=False) + offset + np.einsum("bi,ji->bj", increments, noise, optimize=False))
             log_weight -= np.einsum("bi,i->b", increments, u, optimize=False) + 0.5*float(u@u)*dt
             if paired:
                 pending += increments
                 if step % 2:
-                    coarse = np.einsum("bi,ji->bj", coarse, coarse_F, optimize=False) + coarse_offset + np.einsum("bi,ji->bj", pending, coarse_noise, optimize=False)
+                    coarse = (advance(coarse, pending, 2*dt) if nonlinear else
+                        np.einsum("bi,ji->bj", coarse, coarse_F, optimize=False) + coarse_offset + np.einsum("bi,ji->bj", pending, coarse_noise, optimize=False))
                     pending.fill(0)
             if not np.isfinite(state).all() or not np.isfinite(log_weight).all() or paired and not np.isfinite(coarse).all():
                 raise NumericalError("nonfinite path, coupled path or importance weight")
