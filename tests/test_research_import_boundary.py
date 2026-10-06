@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
     "application.research_comparison", "experiments.pirc25.compare_worker",
     "experiments.pirc25.case_worker", "experiments.pirc25.__main__",
     "application.pirc26_runtime", "infrastructure.pirc26_worker",
+    "application.pirc26_metrics",
     "infrastructure.pirc26_worker_control",
     "infrastructure.pirc26_checkpoint_contract",
     "infrastructure.pirc26_process_resources",

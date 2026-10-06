@@ -39,7 +39,8 @@ def one_thread():
     torch.set_num_threads(previous)
 
 
-def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=False, long_training=False, family="M0", rank_failure=False):
+def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=False, long_training=False, family="M0", rank_failure=False,
+            formal=False, metric_policy=None, pilot=False):
     m = model("M2" if long_training else family)
     doc = document(m)
     doc["block_id"] = "fixture-1"
@@ -77,16 +78,25 @@ def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=Fal
     store = ResearchStore(root, "pirc26-synthetic-runtime", initialize=True)
     value = spec()
     value["cells"][0].update(plugin_id=plugin.plugin_id, capability="generic-rollout", seed=cfg["seed"], visibility="synthetic")
+    if metric_policy is not None or pilot:
+        value["cells"][0]["comparison_dimensions"] = {"horizon": grid[-1] - grid[0]}
     job = {"schema_version": "pirc26-worker-job-v1", "operation": operation, "initial_checkpoint": m.checkpoint(),
         "o1_result": None, "batch_size": 32 if basis_family(family) else (4096 if long_training else 4),
         "origins": [{"segment_id": "synthetic-segment", "origin_index": 2,
             "time_grid": list(grid), "sample_count": 8, "brownian_root_id": "a" * 64, "chunk_size": 8}]}
     if corrupt:
         doc["state_units"] = ["unknown"] * 4  # hash-admitted but semantically invalid, worker must refuse.
-    grant = admit_fixture(store, value, plugin, root, execution_config=cfg,
+    grant = admit_fixture(store, value, plugin, root, formal=formal, execution_config=cfg,
         execution_inputs={**profile, "runtime_root": str(root), "store_id": store.store_id},
-        execution_components=components, input_content=encode(doc), package_payload={"pirc26_job": job},
+        execution_components=components, input_content=encode(doc), package_payload={"pirc26_job": job, "checkpoint": job["initial_checkpoint"]},
         recovery_command_builder=None if basis_family(family) else resume_command, split_role=role)
+    if metric_policy is not None:
+        value.setdefault("comparison_plan", {}).update(adjudication_spec=metric_policy, adjudication_hash=digest(metric_policy))
+    if formal:
+        from tests.research_admission_fixtures import attach_foreign_model
+        attach_foreign_model(store, value)
+    if pilot:
+        value["admission"]["mode"] = "pilot"
     store.register(value, digest(value))
     registry = CapabilityRegistry()
     registry.register(plugin)
@@ -176,6 +186,9 @@ def test_actual_shared_runner_versioned_worker_publishes_or_fails_and_settles(tm
         assert actual["component_plan_hash"] == value["cells"][0]["execution"]["component_plan_hash"]
         assert actual["fit"]["status"] == ("MAX_STEPS" if operation == "fit-and-forecast" else "FROZEN")
         assert actual["source_identity"]["dataset_id"] == "synthetic"
+        from application.pirc26_metrics import FIXTURE_DEFINITION
+        assert actual["metric_definitions"] == {"energy_score": FIXTURE_DEFINITION}
+        assert not actual["forecast"]["metric_binding"]["cross_stratum_weights_applied"]
         from tests.test_pirc26_process_resources import assert_observation
         observation = actual["fit"]["worker_resource_observation"]
         assert_observation(observation, pid=observation["process_id"])

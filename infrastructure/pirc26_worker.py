@@ -19,8 +19,10 @@ def run(output, handoff_hash):
     from application.pirc26_data import decode_block
     from application.pirc26_training_control import ManagedTrainingControl
     from evaluation.phase_space import evaluate_forecast
+    from application.pirc26_metrics import metric_binding, aggregate_metric
     from estimation.phase_space_o2 import HorizonTrainingExample
     spec, cell = receipt["spec"], receipt["cell"]
+    metric = metric_binding(job, receipt)
     parts, plan = construct_components(plugin.registry_entry, cell["execution"]["components"],
         matrix_cells=len(spec["cells"]), seed=cell["seed"], registries=plugin.component_registries,
         initial_checkpoint=job["initial_checkpoint"])
@@ -60,19 +62,19 @@ def run(output, handoff_hash):
         forecasts.append({"request_hash": digest(asdict(req)), "evaluation": evaluation,
                           "sample_ids": prediction["sample_ids"],
                           "samples": prediction["samples"].detach().cpu().tolist()})
-    scores = [row["metrics"]["energy_score"] for item in forecasts for row in item["evaluation"]["rows"][1:]]
     # Hash-covered observation through fitting/forecast/evaluation. Keep
     # telemetry out of exact scientific forecast/history equality comparisons.
     fit["worker_resource_observation"] = {**process_resources("job-payload-before-encoding"),
                                           "attempt_id": ownership.attempt_id}
-    payload = {"metrics": {"energy_score": sum(scores) / len(scores)}, "forecast": {"origins": forecasts},
+    payload = {"metrics": aggregate_metric(forecasts, metric), "forecast": {"origins": forecasts, "metric_binding": metric},
         "fit": fit, "source_schema": "pirc26-observed-phase-space-result-v1"}
     result = {"schema_version": "pirc25-result-v1", "status": "SUCCEEDED", "spec_hash": digest(spec),
         "cell_hash": digest(cell), "protocol_hash": spec["protocol_hash"], "input_hash": spec["data_hash"],
         "output_hash": digest(payload), "state_order": list(plugin.state_order), "units": list(plugin.units),
         "resume_level": plugin.resume_level, "qualification": receipt["qualification"],
         "admission_hash": receipt["admission_hash"], "component_plan_hash": plan["component_plan_hash"],
-        "metric_units": {"energy_score": "m"}, "source_identity": transport["source_identity"], **payload}
+        "metric_units": {"energy_score": "m"}, "metric_definitions": {"energy_score": metric["definition"]},
+        "source_identity": transport["source_identity"], **payload}
     content = encode(result)
     if len(content) > receipt["resource_plan"]["limits"]["result_bytes"]:
         raise ResearchError("RESOURCE_PLAN_REJECTED", "actual numerical result exceeds the declared publication quota")

@@ -31,10 +31,13 @@ def command_binding(builder):
 
 
 def plugin_binding(plugin):
-    return digest({"plugin_id": plugin.plugin_id, "capabilities": sorted(plugin.capabilities),
+    binding = {"plugin_id": plugin.plugin_id, "capabilities": sorted(plugin.capabilities),
                    "state_order": list(plugin.state_order), "units": list(plugin.units),
                    "resume_level": plugin.resume_level, "command_hash": command_binding(plugin.command_builder),
-                   "registry_entry_hash": digest(plugin.registry_entry.manifest())})
+                   "registry_entry_hash": digest(plugin.registry_entry.manifest())}
+    if plugin.pre_read_validator is not None:
+        binding["pre_read_validator_hash"] = command_binding(plugin.pre_read_validator)
+    return digest(binding)
 
 
 class AdmissionGate:
@@ -189,6 +192,16 @@ class AdmissionGate:
             needs_prereg = mode == "formal" or block["split_role"] in {"test", "final-eval"}
             upstream_prereg = (self._document("preregistration", protocol.get("preregistration_hash"))
                                if needs_prereg else None)
+            if plugin.pre_read_validator is not None:
+                # Metadata-only consumer check before upstream/model artifact
+                # reads and the first scientific source verification. This
+                # neither qualifies a package nor replaces subsequent gates.
+                pre_read_documents = {"protocol": protocol, "package": package}
+                if model is not None:
+                    pre_read_documents["frozen_model"] = model
+                if upstream_prereg is not None:
+                    pre_read_documents["preregistration"] = upstream_prereg
+                plugin.pre_read_validator({**receipt, "mode": mode, "documents": pre_read_documents})
             snapshot_evidence = prepare_upstream(self.store, spec, cell, package, upstream_prereg,
                                                 attempt_id=attempt_id, run_id=run["run_id"])
             documents = {"protocol": protocol, "authorization": grant, "package": package,

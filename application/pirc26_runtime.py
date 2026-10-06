@@ -45,13 +45,19 @@ def execution_plugin(objective, family):
                         *[{"name": "bounded_origin_output_" + str(i), "axes": ["paths", "steps", "state_dim"], "item_bytes": 16}
                           for i in range(64)]],
             "limits": {**dict(GLOBAL_LIMITS), "matrix_cells": 10000, "result_bytes": 4 * 1024 * 1024}})
-    return ExecutionPlugin(identity, entry.capabilities, STATE, UNITS, entry.resume_level, command, entry, registries)
+    return ExecutionPlugin(identity, entry.capabilities, STATE, UNITS, entry.resume_level, command, entry, registries,
+                           pre_read_validator=pre_read_validate)
 
 
 def recovery_plugin(objective, family):
     if basis_family(family):
         raise ResearchError("OBJECTIVE_INCOMPATIBLE", "basis QR declares restart-only, not checkpoint continuation")
     return RecoveryPlugin(execution_plugin(objective, family).plugin_id, "exact", resume_command, VERSION)
+
+
+def pre_read_validate(receipt):
+    """Consumer-specific validation before even shared admission verifies data."""
+    validate_job(receipt["documents"]["package"]["payload"].get("pirc26_job"), receipt)
 
 
 def validate_job(job, receipt):
@@ -95,6 +101,8 @@ def validate_job(job, receipt):
         if (job["operation"] != "forecast" or not model or model.get("qualification") != "qualified"
                 or model.get("payload", {}).get("checkpoint") != job["initial_checkpoint"]):
             raise ResearchError("UNQUALIFIED", "test forecasts require the owner's independently qualified frozen checkpoint")
+    from application.pirc26_metrics import metric_binding
+    metric_binding(job, receipt)
     return job
 
 
