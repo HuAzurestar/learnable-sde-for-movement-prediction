@@ -11,7 +11,7 @@ from infrastructure.research_store import ResearchError, atomic_write, digest, e
 from .pipeline import recipe_resources
 
 PLUGIN_ID = 'pirc28-switching'
-VERSION = '1.0.0'
+VERSION = '1.1.0'
 
 
 def command(output, spec, cell):
@@ -43,7 +43,8 @@ def switching_plugin():
         (('paths', 65536), ('steps', 100_000), ('mixtures', 2), ('components', 4096))},
         'dtype': {'type': 'string', 'enum': ['float64']}, 'device': {'type': 'string', 'enum': ['cpu']},
         'noise_dim': {'type': 'integer', 'enum': [2]}})
-    inputs = counts_schema({'observations': integer(1, 10_000_000), 'state_dim': {'type': 'integer', 'enum': [4]}})
+    inputs = counts_schema({'observations': integer(1, 10_000_000),
+        'workspace_vectors': integer(1, 10_000_000), 'state_dim': {'type': 'integer', 'enum': [4]}})
     entry = RegistryEntry(component_id=PLUGIN_ID, component_kind='execution-adapter', version=VERSION,
         code_hash=implementation_hash(command), config_schema=config, input_schema=inputs,
         output_schema={'type': 'object', 'properties': {}, 'additionalProperties': True},
@@ -51,11 +52,14 @@ def switching_plugin():
         capabilities=frozenset({'switching-transition'}), resource_class='cpu', resume_level='numerical-tolerance',
         resource_contract={'schema_version': 'pirc25-resource-contract-v1', 'counts': {
             **{name: {'config': [name]} for name in ('paths', 'steps', 'mixtures', 'components')},
-            'observations': {'input': ['observations']}, 'state_dim': {'constant': 4}},
+            # Shared axis vocabulary is unchanged. This registered dimension is
+            # explicitly storage four-vectors, NOT the actual observation count
+            # (which remains a separate required input and worker-checked field).
+            'observations': {'input': ['workspace_vectors']}, 'state_dim': {'constant': 4}},
             'tensors': [{'name': 'EM-workspace-' + str(index),
                 'axes': ['components', 'steps', 'mixtures', 'mixtures', 'state_dim', 'state_dim'],
                 'item_bytes': 8} for index in range(24)] + [
-                {'name': 'observations', 'axes': ['observations', 'state_dim'], 'item_bytes': 8},
+                {'name': 'source-forecast-and-reference-pool', 'axes': ['observations', 'state_dim'], 'item_bytes': 8},
                 {'name': 'forecast', 'axes': ['paths', 'steps', 'state_dim'], 'item_bytes': 8}],
             'limits': {**dict(GLOBAL_LIMITS), 'matrix_cells': 10000, 'result_bytes': 64*1024*1024}})
     return ExecutionPlugin(PLUGIN_ID, entry.capabilities, entry.state_order, entry.units,

@@ -27,6 +27,7 @@ def v2_recipe():
     # never relax the actual scientific plan's 400-step limit.
     approximation = explicit_spec()
     approximation['step_halving']['maximum_substeps'] = 4000
+    value['inference']['max_substeps'] = 4000
     value.update(schema_version=RECIPE_SCHEMA, approximation_spec=approximation)
     return value
 
@@ -37,6 +38,11 @@ def v2_master():
     value.update(schema_version=SCHEMA_V2, approximation_spec=approximation)
     for item in value['recipes'].values():
         item.update(schema_version=RECIPE_SCHEMA, approximation_spec=copy.deepcopy(approximation))
+        # Two initializers at the legacy allowed rate 100 need explicit coarse
+        # work quota and one training path to keep the ADDITIVE fit+reference
+        # envelope below the existing cap. This is a disposable metadata fixture.
+        item['inference']['max_substeps'] = 4000
+        item['train_paths'] = 1
     return value
 
 

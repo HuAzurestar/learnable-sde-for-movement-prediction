@@ -624,6 +624,41 @@ must be independently bound before scientific qualification is enabled.
 
 ## Observation-prefix numerical core (not an execution authorization)
 
+### Registered additive allocation envelope
+
+Plugin version 1.1.0 retains the 24 EM tensors, original forecast workspace and
+unchanged shared hard limits. `recipe_allocation` adds a conservative live pool
+for generated/retained observations, synthetic states/modes/jump/dwell buffers,
+bounded fit/selection/checkpoint numeric metadata, retained per-path forecasts
+and their jump/mode histories/copies, and the complete K=2 reference core plan.
+No phase reuse or early disposal is assumed to avoid accounting for simultaneous
+allocations. The K=1 arm and legacy recipes reserve source/forecast storage but
+do not invent a reference run or arm. Reference work and coarse/fine quotas are
+preflighted at every allowed fitted rate, not a favorable initializer.
+
+The real observation count remains the required `inputs.observations` field.
+The separate required `inputs.workspace_vectors` rounds the added pool upward
+to four-float64 storage vectors. The unchanged shared axis vocabulary uses
+its `observations` count to index this explicitly named storage pool; this count
+is not claimed to be the real observation count. It does not multiply large
+particle or forecast counts into each EM history, redefine Gaussian modes, add
+resource dimensions, relax quotas or create new original-method budget keys.
+The generic registered planner sums ALL declared tensors and rejects combined
+over-allocation even when each individual tensor/core would fit. The actual
+worker independently derives both input fields/config from the frozen recipe
+before opening its control channel or doing numerical work; recomputing a forged
+generic resource hash does not bypass this comparison.
+
+All 128 K/scenario recipe families in the full reference master fit the additive
+declaration: worst combined allocation is 19,698,300 float64-equivalent numeric
+slots within the unchanged 20,000,000 ceiling. This is a declared tensor/storage
+bound, not observed process RSS, complete Python/interpreter heap accounting or
+an execution admission. Budget/cost/timeouts, source/input/selected-fit/seed
+provenance, independent numerical evidence and actual accuracy still need their
+managed path. V2 source execution remains `NEEDS_IMPLEMENTATION`. New component
+and whole-source identities require refreshed final-source pre-fit registration,
+not a new store, grant, original-arm budget identity or successful-artifact reuse.
+
 `experiments.pirc28.approximation_checks.check_prefix_approximation` now computes
 the checks from observation-only prefixes, a fixed selected-model input, the
 same filtering prior, frozen inference/approximation specifications, an explicit

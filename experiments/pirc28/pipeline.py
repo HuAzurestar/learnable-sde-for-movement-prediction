@@ -19,6 +19,7 @@ from .failures import (NUMERICAL_EXCEPTIONS, NumericalCellFailure, numerical_dia
                        valid_numerical_diagnostic)
 from .qualification import IdentifiabilitySpec, forecast_coverage, jump_diagnostics, mode_diagnostics, parameter_recovery
 from .approximation import ApproximationSpec, RECIPE_SCHEMA
+from .approximation_checks import reference_design_preflight
 
 
 def validate_recipe(recipe, k):
@@ -66,7 +67,15 @@ def validate_recipe(recipe, k):
     return scenario, models, inference, mean, covariance
 
 
-def recipe_resources(recipe, k):
+def recipe_allocation(recipe, k):
+    """Additive live source/forecast/reference envelope, metadata only.
+
+    No phase reuse is assumed: keep the original fit and forecast envelopes and
+    add retained/generated source buffers, numeric metadata and the complete
+    sequential reference envelope. Four-vector padding uses the existing shared
+    count vocabulary, while the actual observation count remains explicit.
+    This declaration does not reserve a budget or admit/execute the reference.
+    """
     scenario, models, inference, _, _ = validate_recipe(recipe, k)
     paths = max(recipe['train_paths'], recipe['selection_paths'], recipe['test_paths'] * recipe['forecast_paths'])
     # The quota is a real algorithm refusal boundary, not an optimistic estimate.
@@ -77,9 +86,43 @@ def recipe_resources(recipe, k):
     # Fit histories and forecast sample paths are separate live allocations.
     # Do not multiply the large forecast sample count into each EM history.
     config['components'] = max(recipe['train_paths'], recipe['selection_paths']) * len(models)
-    inputs = {'observations': sum(recipe[name] for name in ('train_paths', 'selection_paths', 'test_paths')) * len(scenario.times),
-              'state_dim': 4}
-    return config, inputs
+    source_paths = sum(recipe[name] for name in ('train_paths', 'selection_paths', 'test_paths'))
+    n, d = len(scenario.times), len(scenario.H)
+    # Observation/state/mode arrays, two jump histories and dwell, including
+    # generation lists -> arrays -> retained copies. Count integer slots at the
+    # same conservative eight-byte width as float64; no truth enters inference.
+    source_data = 3*source_paths*(n*(d+4+1)+2*(scenario.max_jumps+1)+4)+4*n+d*4+d*d
+    # Model/accepted-state/selection diagnostics and fixed bounded line searches.
+    fit_metadata = 8*len(models)*(k*k+14*k+inference.max_iterations*(1+inference.line_search_steps)+k)
+    # Retained per-path forecasts, actual jump/mode histories and serialization
+    # copies are ADDITIONAL to the original continuous forecast workspace.
+    forecast_retained = 3*recipe['test_paths']*(recipe['forecast_paths']*(
+        5*(len(recipe['horizon_indices'])+1)+2*(scenario.max_jumps+1)+1)
+        +4*k*(len(recipe['horizon_indices'])+1))
+    core = None
+    if recipe['schema_version'] == RECIPE_SCHEMA and k == 2:
+        core = reference_design_preflight(ApproximationSpec.from_dict(recipe['approximation_spec']),
+            inference, scenario.times, recipe['forecast_origin_index'], recipe['test_paths'],
+            max(model.rate_bounds[1] for model in models), d)['core_plan']
+    reference_elements = core['tensor_elements'] if core is not None else 0
+    pool_elements = source_data+fit_metadata+forecast_retained+reference_elements
+    inputs = {'observations': source_paths*n, 'workspace_vectors': (pool_elements+3)//4, 'state_dim': 4}
+    fit_elements = 24*config['components']*steps*k*k*16
+    forecast_elements = paths*steps*4
+    elements = fit_elements+forecast_elements+4*inputs['workspace_vectors']
+    return {'schema_version': 'pirc28-recipe-allocation-v1', 'config': config, 'inputs': inputs,
+        'source_data_elements': source_data, 'fit_metadata_elements': fit_metadata,
+        'retained_forecast_elements': forecast_retained, 'reference_core_plan': core,
+        'reference_elements': reference_elements, 'padded_pool_elements': 4*inputs['workspace_vectors'],
+        'fit_workspace_elements': fit_elements, 'forecast_workspace_elements': forecast_elements,
+        'combined_tensor_elements': elements, 'combined_tensor_bytes': elements*8,
+        'combination_rule': 'additive-concurrent-envelope; no-phase-reuse',
+        'resource_admitted': False, 'managed_executor_implemented': False}
+
+
+def recipe_resources(recipe, k):
+    allocation = recipe_allocation(recipe, k)
+    return allocation['config'], allocation['inputs']
 
 
 def energy_score(samples, target):
