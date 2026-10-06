@@ -63,7 +63,8 @@ def test_successful_computation_reuse_has_no_new_reservation(computed):
     assert [event for event in store.events() if event['event_kind'] == 'RESERVE'] == reserves
 
 
-@pytest.mark.parametrize('damage', ['gate', 'report-hash', 'source-snapshot', 'request', 'real-authorization', 'fixture-promotion'])
+@pytest.mark.parametrize('damage', ['gate', 'report-hash', 'source-snapshot', 'request', 'real-authorization',
+    'fixture-promotion', 'master-hash', 'master-bound', 'master-bound-type', 'missing-master-hash', 'missing-master-bound'])
 def test_result_bindings_refuse_tampered_disposition(computed, damage):
     data, result, _ = computed
     store = data[0]
@@ -83,9 +84,21 @@ def test_result_bindings_refuse_tampered_disposition(computed, damage):
     elif damage == 'real-authorization':
         value['report']['real_data_authorized'] = True
         value['report_hash'] = digest(value['report'])
-    else:
+    elif damage == 'fixture-promotion':
         value['report']['state'] = value['report']['gate']['state'] = 'PASSED'
         value['report']['qualified_identifiability'] = True
+        value['report_hash'] = digest(value['report'])
+    else:
+        if damage == 'master-hash':
+            value['report']['study_definition_hash'] = digest('invented master')
+        elif damage == 'master-bound':
+            value['report']['study_definition_bound'] = True
+        elif damage == 'master-bound-type':
+            value['report']['study_definition_bound'] = 0
+        elif damage == 'missing-master-hash':
+            value['report'].pop('study_definition_hash')
+        else:
+            value['report'].pop('study_definition_bound')
         value['report_hash'] = digest(value['report'])
     with pytest.raises(ResearchError, match='CONTRACT_MISMATCH'):
         validate_computation_result(store, value, request)
@@ -243,6 +256,17 @@ def test_managed_pilot_scope_stays_incomplete_until_registered_fits_exist(tmp_pa
     assert value['report']['gate']['scenario_roles'] == definition.scenario_roles
     assert value['report']['gate']['applicable_ranges'] == []
     assert all(row['state'] == 'NOT_RUN' for row in value['report']['rows'])
+    assert value['report']['study_definition_hash'] is None
+    assert value['report']['study_definition_bound'] is False
+    # Even a self-consistent forged mathematical pass cannot bypass the missing
+    # physical master definition at the independent owner output boundary.
+    request = store.manifest('pirc28-qualification-request-'+result['attempt_id'])
+    forged = copy.deepcopy(value)
+    forged['report']['state'] = forged['report']['gate']['state'] = 'PASSED'
+    forged['report']['qualified_identifiability'] = True
+    forged['report_hash'] = digest(forged['report'])
+    with pytest.raises(ResearchError, match='CONTRACT_MISMATCH'):
+        validate_computation_result(store, forged, request)
 
 
 def test_cli_uses_registered_definition_and_existing_grants(computed, monkeypatch, capsys):

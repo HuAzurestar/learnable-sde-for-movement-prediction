@@ -47,6 +47,33 @@ def source_attempts_hash(store, studies, *, attempts=None):
     return digest({key: value for key, value in states.items() if value['run_id'] in runs})
 
 
+def study_definition_binding(store, studies, definition, *, events=None):
+    """Verify bounded master metadata, never fit or aggregate scientific rows."""
+    references = [study.get('pirc28_study_definition_hash') for study in studies]
+    if references and all(reference is None for reference in references):
+        return None
+    if (not references or not all(hash_reference(reference) for reference in references)
+            or len(set(references)) != 1):
+        raise ResearchError('NEEDS_PREREGISTRATION', 'one complete pre-fit study definition is required')
+    from .study import SyntheticStudyDefinition
+    reference = references[0]
+    frozen = SyntheticStudyDefinition.from_dict(store.manifest('pirc28-study-definition-'+reference))
+    plan, sources = frozen.to_dict(), {study['code_hash'] for study in studies}
+    if (frozen.definition_hash != reference or plan['identifiability_spec'] != definition.to_dict()
+            or sources != {plan['runtime_code_hash']}):
+        raise ResearchError('IDENTITY_CONFLICT', 'complete study definition/evaluator/source identity differs')
+    frozen.matches_studies(studies, {'root': str(store.path.parent), 'store_id': store.store_id})
+    events = store.events() if events is None else events
+    publications = [event for event in events if event['event_kind'] == 'MANIFEST'
+        and event['payload'].get('object_id') == 'pirc28-study-definition-'+reference]
+    source_runs = source_run_ids(studies)
+    admitted = [event for event in events if event['event_kind'] == 'ADMISSION'
+        and event['payload'].get('run_id') in source_runs]
+    if not publications or any(publications[0]['sequence'] >= event['sequence'] for event in admitted):
+        raise ResearchError('NEEDS_PREREGISTRATION', 'complete source matrix was published after fitting began')
+    return reference
+
+
 def _cost_history(store, study, cell, attempts, events_by_attempt):
     """Keep every attempt's charged or outstanding cost, including failed retries."""
     history = []
@@ -292,26 +319,7 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
     if (set(cells) != expected or len(sources) != 1 or families[1][0] == families[2][0]
             or families[1][1] == families[2][1] or (not fixture and len(matrices) != 1)):
         raise ResearchError('UNQUALIFIED', 'full paired matrix, one code source and separate fixed K arms required')
-    study_definition_hash = None
-    references = {study.get('pirc28_study_definition_hash') for study in studies}
-    if references != {None}:
-        if len(references) != 1 or not all(hash_reference(reference) for reference in references):
-            raise ResearchError('NEEDS_PREREGISTRATION', 'one complete pre-fit study definition is required')
-        from .study import SyntheticStudyDefinition
-        study_definition_hash = next(iter(references))
-        frozen = SyntheticStudyDefinition.from_dict(store.manifest('pirc28-study-definition-'+study_definition_hash))
-        plan = frozen.to_dict()
-        if (frozen.definition_hash != study_definition_hash or plan['identifiability_spec'] != definition.to_dict()
-                or plan['runtime_code_hash'] != next(iter(sources))):
-            raise ResearchError('IDENTITY_CONFLICT', 'complete study definition/evaluator/source identity differs')
-        frozen.matches_studies(studies, {'root': str(store.path.parent), 'store_id': store.store_id})
-        publications = [event for event in events if event['event_kind'] == 'MANIFEST'
-            and event['payload'].get('object_id') == 'pirc28-study-definition-'+study_definition_hash]
-        source_runs = source_run_ids(studies)
-        admitted = [event for event in events if event['event_kind'] == 'ADMISSION'
-            and event['payload'].get('run_id') in source_runs]
-        if not publications or any(publications[0]['sequence'] >= event['sequence'] for event in admitted):
-            raise ResearchError('NEEDS_PREREGISTRATION', 'complete source matrix was published after fitting began')
+    study_definition_hash = study_definition_binding(store, studies, definition, events=events)
     snapshot_hash = source_attempts_hash(store, studies, attempts=attempts)
     if expected_attempts_hash is not None and snapshot_hash != expected_attempts_hash:
         raise ResearchError('INDEX_STALE', 'frozen source attempts changed before qualification')

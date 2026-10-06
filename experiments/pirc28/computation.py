@@ -15,7 +15,8 @@ from application.research_supervisor import ResearchSupervisor
 from experiments.pirc25.affine import code_hash
 from infrastructure.research_store import ResearchError, atomic_write, digest, encode
 from infrastructure.research_visibility import combine_visibility, study_visibility
-from .evidence import MAXIMUM_RESULT_BYTES, _cost_history, source_attempts_hash, source_run_ids
+from .evidence import (MAXIMUM_RESULT_BYTES, _cost_history, source_attempts_hash,
+                       source_run_ids, study_definition_binding)
 from .qualification import IdentifiabilitySpec, METRICS
 
 MAXIMUM_REQUEST_BYTES = 4*1024*1024
@@ -103,7 +104,14 @@ def validate_computation_result(store, value, request):
             or report['qualified_identifiability'] != (report['state'] == 'PASSED' and not definition.missing_fields)
             or (report['state'] == 'FIXTURE_ONLY' and not frozen['allow_fixture'])):
         raise ResearchError('CONTRACT_MISMATCH', 'qualification gate/fixture disposition differs')
-    _sources(store, frozen)
+    studies, _ = _sources(store, frozen)
+    reference = study_definition_binding(store, studies, definition)
+    if ('study_definition_hash' not in report
+            or report['study_definition_hash'] != reference
+            or type(report.get('study_definition_bound')) is not bool
+            or report['study_definition_bound'] != (reference is not None)
+            or (report['qualified_identifiability'] and reference is None)):
+        raise ResearchError('CONTRACT_MISMATCH', 'qualification master-definition binding differs')
     _final_clock(store, frozen)
 
 

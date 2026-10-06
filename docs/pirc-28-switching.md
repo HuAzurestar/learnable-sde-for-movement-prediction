@@ -304,6 +304,15 @@ becomes NEEDS_PREREGISTRATION with missing pirc28_study_definition_hash, not
 scientific qualification. Incomplete legacy diagnostic/pilot reports remain
 observable without being upgraded. No report grants real-data access.
 
+The independent supervisor output validator repeats the bounded master-metadata
+checks against its frozen, currently authorized source studies: the report's
+`study_definition_hash` and strictly boolean `study_definition_bound` must match
+the actual complete definition, source projections and publication order. A
+self-consistent worker report/hash cannot claim scientific qualification without
+an actual master binding. This check also runs on successful-result reuse before
+publication; it neither fits models nor reruns numerical aggregation outside the
+managed budget. The final disclosure-expiry check remains the last valid-path I/O.
+
 ```console
 python -m experiments.pirc28 --root SHARED_ROOT --store-id ORIGINAL_STORE_ID stage-definition definition.json
 python -m pytest tests/test_pirc28_study.py -q

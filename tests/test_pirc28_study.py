@@ -10,6 +10,7 @@ import pytest
 from application.research_budget import BudgetSpec
 from experiments.pirc25.affine import code_hash
 from experiments.pirc25.runner import SharedRunner
+from experiments.pirc28.computation import QualificationRunner, validate_computation_result
 from experiments.pirc28.evidence import collect_qualification
 from experiments.pirc28.pipeline import recipe_resources
 from experiments.pirc28.qualification import IdentifiabilitySpec, phase_manifest
@@ -192,6 +193,41 @@ def test_existing_operator_inputs_register_complete_matrix_without_budget(tmp_pa
     assert result['state'] == 'INCOMPLETE'
     assert result['qualified_identifiability'] is result['real_data_authorized'] is False
     assert len(result['rows']) == 8 and all(row['state'] == 'NOT_RUN' for row in result['rows'])
+
+
+def test_managed_master_bound_computation_and_owner_tampering_refusals(tmp_path, monkeypatch):
+    store, definition, grants, _, _ = prepared(tmp_path/'managed-master')
+    qualification = IdentifiabilitySpec.from_dict(definition.to_dict()['identifiability_spec'])
+    result = QualificationRunner(store).run(qualification, definition.study_ids, grants,
+        budget=BudgetSpec(90, category='pilot'))
+    if result['state'] != 'SUCCEEDED':
+        path = store.path/'artifacts'/('.attempt-'+result['attempt_id'])/'worker.log'
+        pytest.fail(str(result)+'\n'+path.read_text(errors='replace'))
+    with store.lock():
+        value = json.loads(store._verified_artifact_content(store._manifest('artifact-'+result['artifact_id'])))
+    request = store.manifest('pirc28-qualification-request-'+result['attempt_id'])
+    assert value['report']['state'] == 'INCOMPLETE'
+    assert value['report']['study_definition_hash'] == definition.definition_hash
+    assert value['report']['study_definition_bound'] is True
+    assert value['report']['qualified_identifiability'] is value['report']['real_data_authorized'] is False
+    # Owner validation remains metadata-only; no second unbudgeted aggregation.
+    monkeypatch.setattr('experiments.pirc28.evidence.qualify',
+        lambda *args, **kwargs: pytest.fail('owner repeated numerical aggregation'))
+    validate_computation_result(store, value, request)
+    for field, replacement in [('study_definition_hash', None),
+            ('study_definition_hash', digest('different master')), ('study_definition_bound', False)]:
+        forged = copy.deepcopy(value)
+        forged['report'][field] = replacement
+        forged['report_hash'] = digest(forged['report'])
+        with pytest.raises(ResearchError, match='CONTRACT_MISMATCH'):
+            validate_computation_result(store, forged, request)
+    manifest = store.manifest
+    changed = definition.to_dict()
+    changed['replicate_seeds'][next(iter(changed['recipes']))]['rep-0'] = 9999
+    monkeypatch.setattr(store, 'manifest', lambda name: changed
+        if name == 'pirc28-study-definition-'+definition.definition_hash else manifest(name))
+    with pytest.raises(ResearchError, match='IDENTITY_CONFLICT'):
+        validate_computation_result(store, value, request)
 
 
 @pytest.fixture(scope='module')
