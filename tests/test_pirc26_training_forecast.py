@@ -68,7 +68,7 @@ def test_train_only_fit_recovers_affine_with_frozen_diffusion_and_stops():
     assert torch.allclose(m.acceleration_model.A, expected, atol=.03)
     assert result["best_train_objective"] < before - 1
     assert result["objective"] == "O1" and result["gradient_route"] == "G0"
-    assert 0 < result["steps"] <= 200 and result["resume_level"] == "restart-only"
+    assert 0 < result["steps"] <= 200 and result["resume_level"] == "exact"
     interrupted = fit_o1(m, [b], O1Plan(), cancellation=lambda: True)
     assert interrupted["status"] == "INTERRUPTED" and interrupted["steps"] == 0
     assert interrupted["best_train_objective"] is None

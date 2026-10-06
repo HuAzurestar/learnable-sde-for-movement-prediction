@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-import time
 
 import torch
 from torch import nn
@@ -99,7 +98,8 @@ class O1Plan:
             raise ModelContractError("MODEL_CONTRACT_ERROR: unregistered O1 plan")
 
 
-def fit_o1(model: PhaseSpaceSDE, batches, plan: O1Plan, *, cancellation=None, progress=None):
+def fit_o1(model: PhaseSpaceSDE, batches, plan: O1Plan, *, cancellation=None, progress=None,
+           resume_state=None, checkpoint_requested=None, checkpoint_handler=None):
     """Finite local-gradient fitting component, called within a managed worker.
 
     This component is also used by numerical fixtures. It grants no permission
@@ -108,7 +108,7 @@ def fit_o1(model: PhaseSpaceSDE, batches, plan: O1Plan, *, cancellation=None, pr
     """
     plan.validate()
     if model.velocity_factor.device.type != "cpu":
-        raise ModelContractError("OBJECTIVE_INCOMPATIBLE: this O1 adapter declares CPU restart-only checkpoints")
+        raise ModelContractError("OBJECTIVE_INCOMPATIBLE: exact O1 continuation declares CPU only")
     if not isinstance(batches, (tuple, list)) or not 1 <= len(batches) <= 256:
         raise ModelContractError("MODEL_CONTRACT_ERROR: bounded train batches required")
     for batch in batches:
@@ -117,54 +117,28 @@ def fit_o1(model: PhaseSpaceSDE, batches, plan: O1Plan, *, cancellation=None, pr
         batch.validate(model)
     diffusion = VelocityCholesky(model.velocity_factor, plan.diffusion_diagonal_floor) if plan.fit_diffusion else None
     parameters = list(model.acceleration_model.parameters()) + ([] if diffusion is None else list(diffusion.parameters()))
-    optimizer = torch.optim.Adam(parameters, lr=plan.learning_rate)
-    history, best, stale = [], float("inf"), 0
-    best_checkpoint, best_factor = None, None
-    started, status = time.perf_counter(), "MAX_STEPS"
-    for step in range(plan.max_steps):
-        if cancellation is not None and cancellation():
-            status = "INTERRUPTED"
-            break
+    from estimation.phase_space_checkpoint import tensor_identity, training_scope, train_loop
+    identities = [{"time": tensor_identity(b.time), "state": tensor_identity(b.state),
+                   "next_state": tensor_identity(b.next_state), "dt": tensor_identity(b.dt),
+                   "context": tensor_identity(b.context.condition), "split_role": b.split_role,
+                   "train_binding_hash": b.train_binding_hash} for b in batches]
+    scope = training_scope(model, plan, identities, "O1")
+
+    def objective(step):
         batch = batches[step % len(batches)]
-        optimizer.zero_grad()
         factor = model.velocity_factor if diffusion is None else diffusion.factor()
-        loss = local_velocity_nll(model, batch, factor)
-        loss.backward()
-        if any(parameter.grad is not None and not torch.isfinite(parameter.grad).all() for parameter in parameters):
-            raise ModelContractError("NONFINITE: O1 gradient")
-        gradient = torch.nn.utils.clip_grad_norm_(parameters, plan.gradient_norm_limit)
-        optimizer.step()
-        # Compare complete train objectives, not different minibatch losses.
-        with torch.no_grad():
-            factor = model.velocity_factor if diffusion is None else diffusion.factor()
-            count = sum(len(part.time) for part in batches)
-            objective = sum(local_velocity_nll(model, part, factor).item() * len(part.time) for part in batches) / count
-            if objective < best - plan.tolerance:
-                best, stale = objective, 0
-                if diffusion is not None:
-                    model.velocity_factor.copy_(factor)
-                best_checkpoint = model.checkpoint()
-                best_factor = factor.detach().clone()
-            else:
-                stale += 1
-        row = {"step": step + 1, "objective": objective, "gradient_norm": float(gradient),
-               "elapsed_seconds": time.perf_counter() - started}
-        history.append(row)
-        if progress is not None:
-            progress(row)
-        if stale >= plan.patience:
-            status = "CONVERGED"
-            break
-    # Early interruption without a completed batch has no invented score.
-    if best_checkpoint is not None:
-        restored = PhaseSpaceSDE.from_checkpoint(best_checkpoint)
-        model.load_state_dict({key: value.to(model.velocity_factor.device) for key, value in restored.state_dict().items()})
-        if best_factor is not None:
-            model.velocity_factor.copy_(best_factor)
-    return {"schema_version": "pirc26-fit-result-v1", "objective": "O1", "gradient_route": "G0",
-            "status": status, "steps": len(history), "best_train_objective": None if best_checkpoint is None else best,
-            "history": history, "checkpoint": model.checkpoint(), "resume_level": "restart-only",
-            "wall_seconds": time.perf_counter() - started, "peak_memory_bytes": None}
+        return local_velocity_nll(model, batch, factor), {"batch_index": step % len(batches)}
+
+    def monitor():
+        # Always synchronize the current factor before serializing optimizer/model.
+        if diffusion is not None:
+            model.velocity_factor.copy_(diffusion.factor())
+        count = sum(len(part.time) for part in batches)
+        return sum(local_velocity_nll(model, part).item() * len(part.time) for part in batches) / count
+
+    return train_loop(model, parameters, plan, scope, objective, monitor, auxiliary=diffusion,
+                      resume_state=resume_state, cancellation=cancellation, progress=progress,
+                      checkpoint_requested=checkpoint_requested, checkpoint_handler=checkpoint_handler)
 
 
 def fit_residual_basis(model, batches, *, ridge, condition_number_max, cancellation=None):
