@@ -45,12 +45,32 @@ def _keys(value, keys, label):
 
 
 def _number(value):
-    _require(type(value) in (int, float) and math.isfinite(value), 'finite nonboolean diagnostic number required')
+    try:
+        finite = type(value) in (int, float) and math.isfinite(value)
+    except OverflowError:
+        finite = False
+    _require(finite, 'finite nonboolean diagnostic number required')
     return value
 
 
 def _integer(value, low, high):
     _require(type(value) is int and low <= value <= high, 'bounded nonboolean diagnostic integer required')
+
+
+def _same_declaration(value, expected, poll):
+    """Bound shape/types against owner metadata BEFORE untrusted serialization."""
+    poll()
+    _require(type(value) is type(expected), 'resource declaration type differs')
+    if type(expected) is dict:
+        _keys(value, expected, 'resource declaration')
+        for name in expected:
+            _same_declaration(value[name], expected[name], poll)
+    elif type(expected) is list:
+        _require(len(value) == len(expected), 'resource declaration length differs')
+        for actual, wanted in zip(value, expected):
+            _same_declaration(actual, wanted, poll)
+    else:
+        _require(value == expected, 'expected numerical resource declaration differs')
 
 
 def _array(value, shape, poll):
@@ -129,7 +149,7 @@ def _batches(values, ref, n, k, path, seed, initial, poll):
         _require(np.allclose(p[0], initial['probabilities'][0], rtol=1e-10, atol=1e-10)
             and np.allclose(m[0], initial['means'][0], rtol=1e-10, atol=1e-10), 'analytic initial mixture summary differs')
         # The full initial evidence is the only contribution at time zero.
-        _close(trace[0], initial['initial_log_likelihood'])
+        _close(value['log_likelihood_trace'][0], initial['initial_log_likelihood'])
         minimum = _number(value['minimum_ess_fraction'])
         _require(1/ref['particles']-1e-12 <= minimum <= 1+1e-10, 'impossible batch ESS fraction')
         _integer(value['jump_count'], 0, ref['particles']*(n-1)*ref['maximum_jumps_per_particle_interval'])
@@ -210,8 +230,7 @@ def validate_prefix_numbers(report, observations, model, probability, means, cov
     _require(all(type(report[name]) is str and report[name] == value for name, value in identity.items()),
              'expected prefix/model/prior/spec/inference identity differs')
     _integer(report['origin_index'], origin_index, origin_index); _integer(report['reference_seed'], seed, seed)
-    _require(type(report['resource_plan']) is dict and set(report['resource_plan']) == set(plan)
-        and encode(report['resource_plan']) == encode(plan), 'expected numerical resource declaration differs')
+    _same_declaration(report['resource_plan'], plan, check_budget)
     rows = report['paths']
     _require(type(rows) is list and len(rows) == len(prefix.values), 'every expected prefix path required')
     n, k, settings, states = len(prefix.times), model.n_modes, spec.to_dict(), []
@@ -290,11 +309,18 @@ def reference_seed(recipe, cell_seed):
 def replay_test_prefix(recipe, cell_seed, *, check_budget):
     """Observation-only deterministic replay; no future generation/fit/store."""
     from .pipeline import recipe_allocation, validate_recipe
+    from .runtime import switching_plugin
+    from application.research_registry import plan_resources
     _require(callable(check_budget), 'explicit input replay budget poll required')
     _integer(cell_seed, 0, 2**64-1)
     _require(type(recipe) is dict and recipe.get('schema_version') == RECIPE_SCHEMA, 'frozen V2 recipe required')
+    check_budget()
     scenario, _, _, _, _ = validate_recipe(recipe, 2)
-    recipe_allocation(recipe, 2)  # Whole allowed-rate core/work preflight, not admission.
+    allocation = recipe_allocation(recipe, 2)
+    # A small reference alone does not authorize its concurrent source/fit/
+    # forecast envelope. Enforce the registered SUM before generating anything.
+    plan_resources(switching_plugin().registry_entry, allocation['config'], allocation['inputs'], matrix_cells=1)
+    check_budget()
     seeds = np.random.default_rng(cell_seed).integers(0, 2**63, size=3, dtype=np.int64)
     full = replace(scenario, scenario_id=scenario.scenario_id+'-test', seed=int(seeds[2]), sample_count=recipe['test_paths'])
     short = replace(full, times=full.times[:recipe['forecast_origin_index']+1])

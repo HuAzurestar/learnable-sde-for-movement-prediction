@@ -738,3 +738,48 @@ pre-fit master/preregistration binding without resetting the original arm costs.
 ```console
 python -m pytest tests/test_pirc28_approximation_checks.py -q
 ```
+
+## Independent prefix consistency and deterministic input replay
+
+`experiments.pirc28.approximation_evidence.validate_prefix_numbers` binds a
+complete compact report to caller-owned observations, model, prior, inference,
+approximation specification, origin and explicit seed. It replays coarse/fine
+prefix filtering, independently computes fixed-mode conditional Kalman
+boundaries, rederives batch means/Student-t widths/positive-likelihood averaging,
+checks complete ordered path/batch/seed rosters and recomputes every failure
+disposition. It does not call the producer's sampler, summary, error or boundary
+helpers. External diagnostic arrays require bounded shapes and finite nonboolean
+JSON numbers before allocation; resource declarations require the owner's exact
+typed structure before serialization. Missing paths/batches, modified numbers,
+rehashed incorrect summaries, invented authority and deleted failures refuse.
+Nonpositive likelihood intervals stay unavailable, not zero-width success.
+Every computation requires the caller's budget poll; timeout/budget exceptions
+propagate without retries or partial successful receipts.
+
+`replay_test_prefix` validates a frozen V2 recipe and its complete registered
+additive source/fit/forecast/reference allocation before generation. It derives
+the original three role seeds from the cell seed, generates only the test prefix
+through the fixed origin using the generator's indexed per-path/role streams,
+discards evaluator truth and retains the original full test-scenario identity.
+The result equals the prefix of full generation without generating future
+observations. Its reference seed is domain-separated from the immutable
+recipe/K=2/cell-seed identity, never from the selected model, errors, retry count
+or observed outcomes. It opens no store, initializes no ledger, creates no
+grants/arms and admits no resources. Metadata checks are not budget authority.
+
+These receipts establish only input/diagnostic consistency. A coherent invented
+batch body could still be arithmetically consistent: the reference sampler is
+not independently rerun here. Accordingly `reference_sampling_verified` and
+`selected_fit_selection_verified` remain false, as do `managed_evidence_bound`,
+`qualified_identifiability` and `real_data_authorized`. Prefix replay does not
+verify full generated input hashes, source authority or settlement. The original
+K=2 supervisor must still bind actual reference execution, all initializer and
+selected-fit evidence, immutable recipe/source identities, authorized artifacts,
+deadline/checkpoint/native-containment and all costs before V2 execution or
+scientific promotion can be enabled. The worker's `NEEDS_IMPLEMENTATION` stop
+and qualification withholding remain unchanged. No scientific group is passed
+by these disposable software controls.
+
+```console
+python -m pytest tests/test_pirc28_approximation_evidence.py -q
+```
