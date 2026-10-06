@@ -1,0 +1,175 @@
+"""Local shared research CLI. Explicit store identity prevents silent resets."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+
+from application.research_budget import BudgetLedger, BudgetSpec
+from infrastructure.research_index import ResearchIndex
+from infrastructure.research_store import ResearchStore, ResearchError, digest, identifier
+from .affine import fixture_spec
+from .runner import SharedRunner
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", default=os.environ.get("SDE_RUNTIME_ROOT"))
+    parser.add_argument("--store-id", required=True)
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("init")
+    fixture = commands.add_parser("fixture")
+    fixture.add_argument("--study", default="affine-fixture")
+    fixture.add_argument("--dimensions", type=int, choices=[1, 4], default=4)
+    fixture.add_argument("--seeds", type=int, nargs="+", default=[19])
+    register = commands.add_parser("register")
+    register.add_argument("spec", type=Path)
+    register.add_argument("--expected-hash", required=True)
+    listing = commands.add_parser("list")
+    listing.add_argument("--kind", default="study", choices=["study", "run", "artifact"])
+    listing.add_argument("--limit", type=int, default=50)
+    commands.add_parser("rebuild-index")
+    exposures = commands.add_parser('audit-exposures', help='paged local exposure metadata, never a permission decision')
+    exposures.add_argument('--block', required=True)
+    exposures.add_argument('--limit', type=int, default=50)
+    exposures.add_argument('--after', type=int, default=0)
+    exposures.add_argument('--before', type=int)
+    exposures.add_argument('--watermark', type=int)
+    exposures.add_argument('--include-checks', action='store_true')
+    show = commands.add_parser("show", help="registration metadata only; use authorized export/serve for results")
+    show.add_argument("object_id")
+    run = commands.add_parser("run")
+    run.add_argument("study")
+    run.add_argument("--seconds", type=float, default=60)
+    run.add_argument("--cell")
+    run.add_argument("--parent-attempt")
+    run.add_argument("--reason")
+    budget = commands.add_parser("budget")
+    budget.add_argument("arm")
+    recovery = commands.add_parser("recover-unknown")
+    recovery.add_argument("reservation_id")
+    recovery.add_argument("--stop-evidence-hash", help="hash of verified whole-tree stop evidence for launched work")
+    quarantine = commands.add_parser("quarantine-tail")
+    quarantine.add_argument("--reason", required=True)
+    authorization = commands.add_parser("authorize")
+    authorization.add_argument("grant", type=Path)
+    export = commands.add_parser("export")
+    export.add_argument("study")
+    export.add_argument("--authorization-id", required=True)
+    export.add_argument("--output", type=Path, required=True)
+    evidence = commands.add_parser("import-evidence")
+    evidence.add_argument("directory", type=Path)
+    evidence.add_argument("--expected-hash", required=True)
+    comparison = commands.add_parser("compare", help="supervised statistical comparison of a frozen aggregate")
+    comparison.add_argument("study")
+    comparison.add_argument("aggregate_hash")
+    comparison.add_argument("--paper-root", type=Path, required=True)
+    comparison.add_argument("--authorization-id", required=True)
+    comparison.add_argument("--seconds", type=float, default=7200)
+    comparison.add_argument("--max-operations", type=int, default=20_000_000)
+    comparison.add_argument("--formal", action="store_true", default=None)
+    comparison.add_argument("--parent-attempt")
+    comparison.add_argument("--reason")
+    comparison.add_argument("--output", type=Path)
+    case = commands.add_parser('render-case', help='offline supervised graphics from saved authorized paths')
+    case.add_argument('artifact_id')
+    case.add_argument('--authorization-id', required=True)
+    case.add_argument('--seconds', type=float, default=7200)
+    case.add_argument('--max-operations', type=int, default=20_000_000)
+    case.add_argument('--parent-attempt')
+    case.add_argument('--reason')
+    server = commands.add_parser("serve")
+    server.add_argument("--authorization-id", required=True)
+    server.add_argument("--port", type=int, default=0)
+    for authorized_command in (export, comparison, case, server):
+        authorized_command.add_argument("--authorization-version", help="exact immutable version; omit only for a legacy unversioned grant")
+    args = parser.parse_args(argv)
+    if not args.root:
+        parser.error("--root or SDE_RUNTIME_ROOT is required; no implicit store")
+    try:
+        store = ResearchStore(Path(args.root), args.store_id, initialize=args.command == "init",
+                              allow_corrupt=args.command == "quarantine-tail")
+        if args.command == "init":
+            result = {"store_id": store.store_id, "schema_version": store.SCHEMA}
+        elif args.command == "fixture":
+            spec = fixture_spec(args.study, args.dimensions, tuple(args.seeds))
+            result = store.register(spec, digest(spec))
+        elif args.command == "register":
+            result = store.register(json.loads(args.spec.read_text(encoding="utf-8")), args.expected_hash)
+        elif args.command == "rebuild-index":
+            result = {"watermark": ResearchIndex(store).rebuild()}
+        elif args.command == "list":
+            result = ResearchIndex(store).list(kind=args.kind, limit=args.limit)
+        elif args.command == 'audit-exposures':
+            result = ResearchIndex(store).exposures(block_id=args.block, limit=args.limit, after=args.after,
+                before=args.before, watermark=args.watermark, include_checks=args.include_checks)
+        elif args.command == "show":
+            # Fail closed for bundles and any future result-bearing manifest
+            # kind. A past export grant is not a grant for this invocation.
+            kind = identifier(args.object_id).split("-", 1)[0]
+            if kind not in {"study", "run", "artifact"}:
+                raise ResearchError("UNAUTHORIZED_DATA", "show is limited to registration metadata; use authorized export or serve for results")
+            result = store.manifest(args.object_id)
+        elif args.command == "budget":
+            result = BudgetLedger(store).balance(args.arm)
+        elif args.command == "recover-unknown":
+            result = BudgetLedger(store).recover_unknown(args.reservation_id, stop_evidence_hash=args.stop_evidence_hash)
+        elif args.command == "quarantine-tail":
+            result = store.quarantine_tail(args.reason)
+        elif args.command == "authorize":
+            grant = json.loads(args.grant.read_text(encoding="utf-8"))
+            store.authorize(grant)
+            result = {"authorization_id": grant["authorization_id"], "authorization_version": grant.get("version")}
+        elif args.command == "export":
+            from application.research_evidence import export_evidence, authorize_evidence_publication
+            from infrastructure.research_store import atomic_write, encode
+            from infrastructure.research_publication import prepare_directory, opened_directory
+            grant = store.authorization(args.authorization_id, version=args.authorization_version)
+            bundle = export_evidence(store, args.study, grant)
+            output = Path(os.path.abspath(args.output))
+            if any((parent / ".git").exists() for parent in (output.parent, *output.parents)):
+                raise ResearchError("UNAUTHORIZED_DATA", "export must stay outside Git")
+            content = encode(bundle)
+            with opened_directory(prepare_directory(output.parent)) as binding:
+                atomic_write(output, content, immutable=True, _directory=binding,
+                    before_replace=lambda: authorize_evidence_publication(store, bundle, grant))
+            result = {"bundle_hash": bundle["bundle_hash"]}
+        elif args.command == "import-evidence":
+            from application.research_evidence import accept_evidence_package
+            result = accept_evidence_package(store, args.directory, args.expected_hash)
+        elif args.command == "compare":
+            from application.research_comparison import ComparisonRunner
+            result = ComparisonRunner(store, args.paper_root).run(args.study, args.aggregate_hash,
+                authorization_id=args.authorization_id, authorization_version=args.authorization_version, budget=BudgetSpec(args.seconds),
+                max_operations=args.max_operations, formal=args.formal,
+                parent_attempt_id=args.parent_attempt, reason=args.reason, output=args.output)
+        elif args.command == 'render-case':
+            from application.research_cases import CaseGraphRunner
+            result = CaseGraphRunner(store).run(args.artifact_id, authorization_id=args.authorization_id,
+                authorization_version=args.authorization_version,
+                budget=BudgetSpec(args.seconds), max_operations=args.max_operations,
+                parent_attempt_id=args.parent_attempt, reason=args.reason)
+        elif args.command == "serve":
+            from .web import serve
+            serve(store, args.authorization_id, args.port, authorization_version=args.authorization_version)
+            return 0
+        else:
+            spec = store.manifest("study-" + args.study)["spec"]
+            cells = [c for c in spec["cells"] if args.cell is None or digest(c) == args.cell]
+            if not cells:
+                raise ResearchError("MISSING_INPUT", "requested cell is not registered")
+            result = [SharedRunner(store).run_cell(args.study, digest(cell),
+                      budget=BudgetSpec(args.seconds, category="smoke"),
+                      parent_attempt_id=args.parent_attempt, reason=args.reason) for cell in cells]
+        print(json.dumps(result, ensure_ascii=False, allow_nan=False))
+        failed = (any(r.get("exit_code") for r in result) if isinstance(result, list)
+                  else bool(result.get("exit_code")) if isinstance(result, dict) else False)
+        return 1 if failed else 0
+    except (ResearchError, OSError, ValueError) as error:
+        payload = error.envelope() if isinstance(error, ResearchError) else {"code": "RUNTIME_ERROR", "retryable": False}
+        print(json.dumps({"error": payload}))
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

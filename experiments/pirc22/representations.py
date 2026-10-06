@@ -401,6 +401,13 @@ def load_representation_matrix(
     source = Path(path).resolve()
     payload = _read_object(source)
     lock = _read_object(source.with_suffix(".lock.json"))
+    return validate_representation_matrix(payload, lock)
+
+
+def validate_representation_matrix(payload: object, lock: object) -> RepresentationMatrix:
+    """Apply the same frozen matrix/lock contract without reopening inputs."""
+    if not isinstance(payload, dict) or not isinstance(lock, dict):
+        raise RepresentationMatrixError("matrix and lock JSON roots must be objects")
     if payload.get("schema_version") != MATRIX_SCHEMA_VERSION:
         raise RepresentationMatrixError("unsupported representation matrix schema")
     if lock.get("schema_version") != LOCK_SCHEMA_VERSION:
@@ -463,4 +470,5 @@ __all__ = [
     "SOURCE_FEATURE_SPEC_ID",
     "SOURCE_FEATURE_SPEC_SHA256",
     "load_representation_matrix",
+    "validate_representation_matrix",
 ]

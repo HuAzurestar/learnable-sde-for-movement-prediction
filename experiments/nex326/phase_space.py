@@ -480,6 +480,7 @@ def fit_affine_velocity_model(
     condition_resolver: ConditionFieldResolver | None = None,
     feature_basis: str = "direct",
     ridge: float = 1e-6,
+    model_factory=None,
 ) -> AffineVelocityModel:
     """Fit ``dV=f(V,C)dt+GdW`` without learning the kinematic position row."""
     if ridge <= 0.0:
@@ -517,7 +518,8 @@ def fit_affine_velocity_model(
     diffusion = 0.5 * (diffusion + diffusion.T) + 1e-10 * np.eye(2)
     if float(np.linalg.eigvalsh(diffusion).min()) <= 0.0:
         raise PhaseSpaceError("velocity diffusion fit is not positive definite")
-    return AffineVelocityModel(
+    constructor = AffineVelocityModel if model_factory is None else model_factory
+    return constructor(
         condition_names=names,
         feature_basis=feature_basis,
         feature_names=feature_names,
@@ -734,14 +736,37 @@ def rollout_phase_space(
     ):
         raise PhaseSpaceError("rollout requires the registered spatial condition field")
     initial = phase_space_state(segment)[cutoff]
-    step_count = len(segment.time) - cutoff - 1
+    return rollout_phase_space_from_state(model, initial_state=initial, time_grid=segment.time[cutoff:],
+        n_samples=n_samples, rng=rng, condition_field=condition_field)
+
+
+def rollout_phase_space_from_state(
+    model: AffineVelocityModel | TerrainAlignedVelocityModel | TerrainAlignedResidualModel,
+    *,
+    initial_state: np.ndarray,
+    time_grid: np.ndarray,
+    n_samples: int,
+    rng: np.random.Generator,
+    condition_field: ConditionField | None = None,
+) -> np.ndarray:
+    """The same rollout kernel with only known origin state and future times."""
+    initial = np.asarray(initial_state, dtype=float)
+    times = np.asarray(time_grid, dtype=float)
+    if (initial.shape != (4,) or not np.isfinite(initial).all() or times.ndim != 1
+            or len(times) < 2 or not np.isfinite(times).all() or np.any(np.diff(times) <= 0)):
+        raise PhaseSpaceError("phase-space origin/time grid is invalid")
+    if type(n_samples) is not int or n_samples < 2:
+        raise PhaseSpaceError("phase-space rollout requires at least two samples")
+    if model.condition_names and (condition_field is None or condition_field.names != model.condition_names):
+        raise PhaseSpaceError("rollout requires the registered spatial condition field")
+    step_count = len(times) - 1
     paths = np.empty((n_samples, step_count + 1, 4), dtype=float)
     paths[:, 0, :] = initial
-    for offset, index in enumerate(range(cutoff, len(segment.time) - 1), start=1):
-        elapsed = float(segment.time[index + 1] - segment.time[index])
+    for offset, index in enumerate(range(len(times) - 1), start=1):
+        elapsed = float(times[index + 1] - times[index])
         current = paths[:, offset - 1, :]
         conditions = (
-            condition_field.evaluate(current[:, :2], float(segment.time[index]))
+            condition_field.evaluate(current[:, :2], float(times[index]))
             if condition_field is not None
             else None
         )
@@ -848,6 +873,7 @@ def run_phase_space_benchmark(
     n_samples: int,
     seed: int,
     condition_resolver: ConditionFieldResolver | None = None,
+    composition=None,
 ) -> dict[str, object]:
     """Run a supplemental four-dimensional benchmark with optional spatial fields."""
     velocity_config = spec["velocity_model"]
@@ -859,6 +885,9 @@ def run_phase_space_benchmark(
         raise PhaseSpaceError("condition resolver names do not match the specification")
     fit_segments = cohort.splits["train"] + cohort.splits["adapt"]
     model_kind = str(velocity_config["kind"])
+    if composition is not None and (type(composition) is not dict or set(composition) != {"model", "trainer", "predictor"}
+            or any(not callable(factory) for factory in composition.values()) or model_kind != "coupled_affine_velocity_ou"):
+        raise PhaseSpaceError("registered composition does not support this benchmark model")
     if model_kind == "terrain_aligned_projection_drift":
         model = fit_terrain_aligned_velocity_model(
             fit_segments,
@@ -874,12 +903,14 @@ def run_phase_space_benchmark(
             ridge=float(velocity_config["ridge"]),
         )
     elif model_kind == "coupled_affine_velocity_ou":
-        model = fit_affine_velocity_model(
+        fit = fit_affine_velocity_model if composition is None else composition["trainer"]
+        model = fit(
             fit_segments,
             condition_names=condition_names,
             condition_resolver=condition_resolver,
             feature_basis=str(velocity_config.get("feature_basis", "direct")),
             ridge=float(velocity_config["ridge"]),
+            **({"model_factory": composition["model"]} if composition is not None else {}),
         )
     else:
         raise PhaseSpaceError(f"unsupported velocity model kind: {model_kind}")
@@ -892,14 +923,17 @@ def run_phase_space_benchmark(
             if condition_resolver is not None
             else None
         )
-        paths = rollout_phase_space(
-            model,
-            segment,
-            cutoff=cutoff,
-            n_samples=n_samples,
-            rng=rng,
-            condition_field=condition_field,
-        )
+        if composition is None:
+            paths = rollout_phase_space(model, segment, cutoff=cutoff, n_samples=n_samples,
+                rng=rng, condition_field=condition_field)
+        else:
+            # Evaluation owns future observations. The registered predictor
+            # receives only the causal origin and known future time grid.
+            initial = np.concatenate((segment.state[cutoff],
+                (segment.state[cutoff] - segment.state[cutoff - 1]) /
+                (segment.time[cutoff] - segment.time[cutoff - 1])))
+            paths = composition["predictor"](model, initial_state=initial, time_grid=segment.time[cutoff:],
+                n_samples=n_samples, rng=rng, condition_field=condition_field)
         predictions.append(
             PhaseSpacePrediction(
                 segment_id=segment.segment_id,

@@ -13,6 +13,11 @@ Use `feature`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, or
 repository-bootstrap exception is `chore: repository bootstrap ...`; it must
 explain why no Issue exists.
 
+Existing PR #22 retains `feature/pirc-38-shared-engineering` to preserve its
+review object. This single legacy branch is bound to GitHub issue #23 and must
+use a `#23 feat(...)` title. Other branches retain the normal naming rule;
+required checks and review are unchanged.
+
 ## Daily and recovery workflow
 
 ```bash
