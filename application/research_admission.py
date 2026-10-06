@@ -253,6 +253,10 @@ class AdmissionGate:
                     from .propagation_qualification_admission import prepare_managed_qualification
                     documents["propagation_qualification"] = prepare_managed_qualification(
                         self.store, spec, cell, package, prereg)
+                elif plugin.plugin_id == "affine-mlmc-production-chunk":
+                    from .mlmc_qualification_admission import prepare_managed_mlmc
+                    documents["propagation_qualification"] = prepare_managed_mlmc(
+                        self.store, spec, cell, package, prereg)
             purpose = settings.get("purpose")
             root = grant.get("data_root")
             if not isinstance(root, str) or not Path(root).is_absolute():
@@ -309,14 +313,29 @@ class AdmissionGate:
             if result.get("qualification") != receipt["qualification"]:
                 raise ResearchError("UNQUALIFIED", "worker cannot change admitted qualification")
             if "propagation_qualification" in receipt.get("documents", {}):
-                from .propagation_qualification_admission import validate_formal_analytic_result
-                validate_formal_analytic_result(receipt, spec, cell, result)
+                if plugin.plugin_id == "affine-mlmc-production-chunk":
+                    from .mlmc_qualification_admission import validate_formal_mlmc_result
+                    validate_formal_mlmc_result(receipt, spec, cell, result)
+                else:
+                    from .propagation_qualification_admission import validate_formal_analytic_result
+                    validate_formal_analytic_result(receipt, spec, cell, result)
             if result.get("admission_hash", receipt["admission_hash"]) != receipt["admission_hash"]:
                 raise ResearchError("CONTRACT_MISMATCH", "worker substituted another admission")
             result["admission_hash"] = receipt["admission_hash"]
         return validate
 
     def run(self, attempt_id, spec, cell, plugin, command_builder, budget, *, builtin_fixture=False, recovery_builder=None, checkpoint_handler=None):
+        if plugin.plugin_id == "affine-mlmc-production-chunk":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.mlmc_production_plugin import production_policy
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                policy = production_policy(spec, cell, package, request, config)
+                if budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "MLMC production exceeds frozen job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
         if plugin.plugin_id == "affine-propagation-qualification":
             from .propagation_execution import validate_propagation_cell
             from experiments.pirc27.qualification_plugin import qualification_policy

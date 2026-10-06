@@ -41,7 +41,7 @@ def main():
             control.save(state, {"completed_steps": completed, "total_steps": total,
                 "throughput_per_second": rate, "eta_seconds": (total-completed)/max(rate, 1e-12)})
             raise SystemExit(85)
-    recoverable = cells[0]["plugin_id"] in {"affine-propagation-chunk", "synthetic-propagation-chunk", "affine-mlmc-qualification-chunk"}
+    recoverable = cells[0]["plugin_id"] in {"affine-propagation-chunk", "synthetic-propagation-chunk", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk"}
     atomic_write(Path(output), encode(execute_propagation(spec, cells[0], resume_state=restored,
         checkpoint=checkpoint if recoverable else None, admission=admission)))
 

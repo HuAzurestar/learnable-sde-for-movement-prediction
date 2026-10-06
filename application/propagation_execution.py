@@ -40,7 +40,8 @@ def validate_propagation_cell(spec, cell):
         raise ResearchError("CONTRACT_MISMATCH", "only the frozen synthetic source is supported by this adapter")
     qualification = cell["plugin_id"] == "affine-propagation-qualification"
     mlmc_reference = cell["plugin_id"] == "affine-mlmc-qualification-chunk"
-    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification", "affine-mlmc-qualification-chunk"}:
+    mlmc_production = cell["plugin_id"] == "affine-mlmc-production-chunk"
+    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk"}:
         raise ResearchError("CONTRACT_MISMATCH", "unknown explicit propagation adapter")
     recovery = cell["plugin_id"].endswith("-chunk")
     synthetic = cell["plugin_id"].startswith("synthetic-")
@@ -51,6 +52,9 @@ def validate_propagation_cell(spec, cell):
     if mlmc_reference:
         from experiments.pirc27.mlmc_qualification_plugin import mlmc_qualification_plugin
         plugin = mlmc_qualification_plugin()
+    if mlmc_production:
+        from experiments.pirc27.mlmc_production_plugin import mlmc_production_plugin
+        plugin = mlmc_production_plugin()
     execution_plan(spec, cell, plugin)
     request = request_from_manifest(cell["propagation_request"])
     package_type = FrozenNonlinearPackage if synthetic else FrozenDynamicsPackage
@@ -69,6 +73,10 @@ def validate_propagation_cell(spec, cell):
         from experiments.pirc27.mlmc_qualification_plugin import mlmc_reference_policy, mlmc_qualification_config
         reference = mlmc_reference_policy(spec, cell, package, request, config)
         expected = mlmc_qualification_config(request, reference)
+    if mlmc_production:
+        from experiments.pirc27.mlmc_production_plugin import production_policy, mlmc_production_config
+        policy = production_policy(spec, cell, package, request, config)
+        expected = mlmc_production_config(request, policy)
     if config != expected or cell["execution"]["inputs"] != execution_inputs(request) or request.arm_id != cell["arm_id"] or request.seed != cell["seed"]:
         raise ResearchError("CONTRACT_MISMATCH", "registered request, method/resource configuration or arm differs")
     required_capability = {"exact": "exact-transition", "gaussian": "generic-rollout", "euler": "generic-rollout",
@@ -118,13 +126,18 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
         "cubature": lambda: cubature_estimate(package, request)}
     result = methods[config["method"]]()
     synthetic = isinstance(package, FrozenNonlinearPackage)
+    mlmc_production = plugin.plugin_id == "affine-mlmc-production-chunk"
     metrics = ({"functional_estimate": result.estimate} if synthetic else
                {"absolute_error_vs_float64_reference": abs(result.estimate-analytic_estimate(package, request).estimate)})
     qualified_components = None
     if formal:
-        from .propagation_qualification_admission import qualified_analytic_forecast, METRIC
-        error, qualified_components = qualified_analytic_forecast(spec, cell, package, request,
-            config["method"], result, admission)
+        if mlmc_production:
+            from .mlmc_qualification_admission import qualified_mlmc_forecast, METRIC
+            error, qualified_components = qualified_mlmc_forecast(spec, cell, package, request, result, admission)
+        else:
+            from .propagation_qualification_admission import qualified_analytic_forecast, METRIC
+            error, qualified_components = qualified_analytic_forecast(spec, cell, package, request,
+                config["method"], result, admission)
         metrics = {METRIC: error}
     unit = "m" if request.functional == "endpoint-x" else "1"
     output = {"metrics": metrics,
