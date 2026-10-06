@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 
 from application.pirc26_components import (VERSION, STATE, UNITS, config_schema, profile_schema,
-    component_registries, composition_contract)
+    component_registries, composition_contract, basis_family, resume_level)
 from application.pirc26_data import read_block
 from application.research_contracts import ExecutionPlugin
 from application.research_execution import execution_plan
@@ -37,7 +37,7 @@ def execution_plugin(objective, family):
         code_hash=implementation_hash(command), config_schema=config_schema(objective, family),
         input_schema=runtime_profile_schema(), output_schema={"type": "object", "additionalProperties": True},
         state_order=STATE, units=UNITS, capabilities=frozenset({"generic-rollout"}), resource_class="cpu",
-        resume_level="exact", composition=composition_contract(objective),
+        resume_level=resume_level(family), composition=composition_contract(objective, family),
         resource_contract={"schema_version": "pirc25-resource-contract-v1", "counts": {
             **{key: {"input": [key]} for key in ("paths", "steps", "components", "observations")},
             "state_dim": {"constant": 4}, "mixtures": {"constant": 1}},
@@ -45,10 +45,12 @@ def execution_plugin(objective, family):
                         *[{"name": "bounded_origin_output_" + str(i), "axes": ["paths", "steps", "state_dim"], "item_bytes": 16}
                           for i in range(64)]],
             "limits": {**dict(GLOBAL_LIMITS), "matrix_cells": 10000, "result_bytes": 4 * 1024 * 1024}})
-    return ExecutionPlugin(identity, entry.capabilities, STATE, UNITS, "exact", command, entry, registries)
+    return ExecutionPlugin(identity, entry.capabilities, STATE, UNITS, entry.resume_level, command, entry, registries)
 
 
 def recovery_plugin(objective, family):
+    if basis_family(family):
+        raise ResearchError("OBJECTIVE_INCOMPATIBLE", "basis QR declares restart-only, not checkpoint continuation")
     return RecoveryPlugin(execution_plugin(objective, family).plugin_id, "exact", resume_command, VERSION)
 
 
@@ -83,8 +85,10 @@ def validate_job(job, receipt):
     block = next(b for b in protocol["blocks"] if b["block_id"] == receipt["cell"]["block_id"])
     if job["operation"] == "fit-and-forecast" and (block["split_role"] != "train" or receipt["spec"]["admission"]["purpose"] != "fit"):
         raise ResearchError("UNAUTHORIZED_DATA", "fitting is restricted to admitted train/fit blocks")
-    if job["operation"] == "fit-and-forecast" and config["family"] in ("M1-S", "M1-R"):
-        raise ResearchError("OBJECTIVE_INCOMPATIBLE", "basis training needs the registered streaming-QR worker route; Adam is not a substitute")
+    if basis_family(config["family"]):
+        validate_value(config_schema("O1", config["family"]), config)
+        if job["batch_size"] > config["plan"]["max_batch_rows"]:
+            raise ResearchError("RESOURCE_PLAN_REJECTED", "job batch size exceeds its registered QR plan")
     if receipt["mode"] == "formal" or block["split_role"] in ("test", "final-eval"):
         model = receipt["documents"].get("frozen_model")
         if (job["operation"] != "forecast" or not model or model.get("qualification") != "qualified"
@@ -97,6 +101,8 @@ def admitted_context(output, spec, cell, *, running=False, recovery=False):
     """Resolve only the store and attempt already owned by this output path."""
     binding = cell["execution"]
     config, inputs = binding["config"], binding["inputs"]
+    if recovery and basis_family(config["family"]):
+        raise ResearchError("CHECKPOINT_INCOMPATIBLE", "restart-only basis jobs cannot resume old factorization state")
     plugin = execution_plugin(config["objective"], config["family"])
     plan = execution_plan(spec, cell, plugin)
     child_inputs = {k: v for k, v in inputs.items() if k not in ("runtime_root", "store_id")}
@@ -161,7 +167,10 @@ def resume_command(output, spec, cell, state):
 def load_handoff(output, expected_hash, control):
     """Worker-only read of the owner's regular bounded transport frame."""
     output = Path(output).absolute()
-    if control is None or output.parent != control.directory or output.parent.name != ".attempt-" + control.descriptor["attempt_id"]:
+    from infrastructure.pirc26_worker_control import require_owned_worker
+    ownership = require_owned_worker(output)
+    if control is not None and (output.parent != control.directory or output.parent.name != ".attempt-" + control.descriptor["attempt_id"]
+            or control.descriptor["deadline"] != ownership.deadline):
         raise ResearchError("UNAUTHORIZED_DATA", "worker requires the matching owner control directory")
     handoff = read_frame(output.parent / "pirc26-handoff.json", HANDOFF_LIMIT)
     if (type(handoff) is not dict or set(handoff) != {"schema_version", "spec", "cell", "admission_hash", "transport", "recovery", "restored_hash"}
@@ -170,6 +179,8 @@ def load_handoff(output, expected_hash, control):
         raise ResearchError("CONTRACT_MISMATCH", "owner handoff identity differs")
     store, receipt, plugin, job = admitted_context(output, handoff["spec"], handoff["cell"],
                                                    running=True, recovery=handoff["recovery"])
+    if control is None and plugin.resume_level != "restart-only":
+        raise ResearchError("UNAUTHORIZED_DATA", "optimizer workers require the actual owner checkpoint channel")
     if handoff["admission_hash"] != receipt["admission_hash"]:
         raise ResearchError("CONTRACT_MISMATCH", "worker handoff refers to another admission")
     from experiments.pirc25.affine import code_hash
@@ -190,4 +201,4 @@ def load_handoff(output, expected_hash, control):
     state = read_frame(output.parent / "pirc26-restored.json", HANDOFF_LIMIT) if handoff["recovery"] else None
     if (digest(state) if handoff["recovery"] else None) != handoff["restored_hash"]:
         raise ResearchError("CHECKPOINT_INCOMPATIBLE", "owner restored state identity differs")
-    return receipt, plugin, job, transport, state
+    return receipt, plugin, job, transport, state, ownership

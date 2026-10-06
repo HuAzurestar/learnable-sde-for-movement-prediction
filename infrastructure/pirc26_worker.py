@@ -11,7 +11,7 @@ def run(output, handoff_hash):
     # Reject absent ownership before importing torch or allocating any model.
     from application.pirc26_runtime import load_handoff
     control = WorkerControl.from_environment()
-    receipt, plugin, job, transport, restored = load_handoff(output, handoff_hash, control)
+    receipt, plugin, job, transport, restored, ownership = load_handoff(output, handoff_hash, control)
     import torch
     torch.set_num_threads(1)
     from application.pirc26_components import construct_components
@@ -38,15 +38,21 @@ def run(output, handoff_hash):
         data = block.transitions(batch_size=job["batch_size"]) if trainer.document["objective"] == "O1" else [
             HorizonTrainingExample(req, block.truth(recipe["segment_id"], req), model.spec.train_binding_hash)
             for recipe, req in zip(job["origins"], requests)]
-        managed = ManagedTrainingControl(trainer.plan.max_steps)
-        fit = trainer.fit(model, data, o1_result=job["o1_result"], **managed.arguments(restored))
+        if plugin.resume_level == "restart-only":
+            if restored is not None:
+                raise ResearchError("CHECKPOINT_INCOMPATIBLE", "basis QR cannot resume an optimizer state")
+            fit = trainer.fit(model, data, o1_result=job["o1_result"], cancellation=ownership.requested)
+        else:
+            managed = ManagedTrainingControl(trainer.plan.max_steps)
+            fit = trainer.fit(model, data, o1_result=job["o1_result"], **managed.arguments(restored))
         if fit["status"] == "CHECKPOINTED":
             return 85  # save() has received the actual owner ACK.
     elif restored is not None:
         raise ResearchError("CHECKPOINT_INCOMPATIBLE", "training recovery cannot substitute a frozen forecast job")
     forecasts = []
     for recipe, req in zip(job["origins"], requests):
-        prediction = parts["predictor"].predict(model, req, cancellation=lambda: control.poll() is not None)
+        prediction = parts["predictor"].predict(model, req,
+            cancellation=lambda: ownership.requested() if control is None else control.poll() is not None)
         evaluation = evaluate_forecast(prediction, block.truth(recipe["segment_id"], req))
         if evaluation["status"] != "SUCCEEDED":
             raise ResearchError("NONFINITE", "incomplete paths cannot become a successful comparison result")
@@ -72,20 +78,25 @@ def run(output, handoff_hash):
 def main():
     if len(sys.argv) != 3:
         raise ResearchError("MISSING_INPUT", "internal worker requires owner output and handoff identity")
-    if WorkerControl.from_environment() is None:
-        raise ResearchError("UNAUTHORIZED_DATA", "internal worker requires the actual owner control channel")
+    from infrastructure.pirc26_worker_control import require_owned_worker
+    ownership = require_owned_worker(sys.argv[1])
     # No data or exception message in logs; stable codes only. The owner keeps
     # its existing FAILED/WORKER_FAILED semantics for a nonzero worker exit.
     try:
         code = run(sys.argv[1], sys.argv[2])
     except Exception as exc:
         code = 1
-        diagnostic = {"schema_version": "pirc26-worker-failure-v1", "error_code": getattr(exc, "code", "WORKER_FAILED")}
-        control = WorkerControl.from_environment()
-        if control is not None:
-            atomic_write(control.directory / "pirc26-failure.json", encode(diagnostic))
+        error_code = getattr(exc, "code", None)
+        if error_code is None:
+            # Numerical components have a closed typed-prefix vocabulary;
+            # retain only that code, never a raw exception message/data value.
+            prefix = str(exc).partition(":")[0]
+            error_code = prefix if prefix in {"MODEL_CONTRACT_ERROR", "OBJECTIVE_INCOMPATIBLE", "RESOURCE_PLAN_REJECTED",
+                "CHECKPOINT_INCOMPATIBLE", "UNAUTHORIZED_DATA", "NONFINITE", "ILL_CONDITIONED", "INTERRUPTED"} else "WORKER_FAILED"
+        diagnostic = {"schema_version": "pirc26-worker-failure-v1", "error_code": error_code}
+        atomic_write(ownership.directory / "pirc26-failure.json", encode(diagnostic))
     from application.pirc26_training_control import exit_managed_worker
-    exit_managed_worker(code)
+    exit_managed_worker(code, output=sys.argv[1])
 
 
 if __name__ == "__main__":

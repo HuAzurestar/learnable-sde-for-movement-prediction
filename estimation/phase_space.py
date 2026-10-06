@@ -141,59 +141,10 @@ def fit_o1(model: PhaseSpaceSDE, batches, plan: O1Plan, *, cancellation=None, pr
                       checkpoint_requested=checkpoint_requested, checkpoint_handler=checkpoint_handler)
 
 
-def fit_residual_basis(model, batches, *, ridge, condition_number_max, cancellation=None):
-    """Stream weighted QR with a frozen affine base and explicit regularization.
-
-    Workspace is O(Bq + q²); the implementation never forms N by N kernels or
-    inverts normal equations. Ridge corresponds to a registered covariance-
-    scaled coefficient penalty under the common velocity quasi-likelihood.
-    """
-    drift = model.acceleration_model
-    if (not isinstance(drift, (RBFResidualDrift, SplineResidualDrift))
-            or type(ridge) not in (float, int) or not math.isfinite(ridge) or ridge < 0
-            or type(condition_number_max) not in (float, int) or not math.isfinite(condition_number_max)
-            or condition_number_max < 1 or not isinstance(batches, (tuple, list)) or not 1 <= len(batches) <= 256):
-        raise ModelContractError("OBJECTIVE_INCOMPATIBLE: registered bounded basis fit required")
-    q = len(drift.coefficients)
-    r = model.velocity_factor.new_empty((0, q))
-    projected = model.velocity_factor.new_empty((0, 2))
-    count = 0
-    with torch.no_grad():
-        for batch in batches:
-            if cancellation is not None and cancellation():
-                raise ModelContractError("INTERRUPTED: residual basis fit cancelled")
-            batch.validate(model)
-            if not 0 < len(batch.time) <= 4096:
-                raise ModelContractError("RESOURCE_PLAN_REJECTED: basis batch quota")
-            context = model._inputs(batch.time, batch.state, batch.context)
-            basis = drift.basis(drift.selected_features(batch.state, context))
-            target = (batch.next_state[:, 2:] - batch.state[:, 2:]) / batch.dt[:, None]
-            target -= drift.affine(batch.time, batch.state, context)
-            weight = batch.dt.sqrt()[:, None]
-            combined = torch.cat((r, basis * weight), dim=0)
-            responses = torch.cat((projected, target * weight), dim=0)
-            orthogonal, r = torch.linalg.qr(combined, mode="reduced")
-            projected = orthogonal.T @ responses
-            count += len(batch.time)
-        singular = torch.linalg.svdvals(r)
-        if len(singular) != q or singular[-1] <= torch.finfo(r.dtype).eps * max(count, q) * singular[0]:
-            raise ModelContractError("ILL_CONDITIONED: rank-deficient registered basis")
-        raw_condition = (singular[0] / singular[-1]).item()
-        if ridge:
-            combined = torch.cat((r, math.sqrt(ridge) * torch.eye(q, dtype=r.dtype, device=r.device)))
-            responses = torch.cat((projected, projected.new_zeros((q, 2))))
-            orthogonal, r = torch.linalg.qr(combined, mode="reduced")
-            projected = orthogonal.T @ responses
-        regularized_singular = torch.linalg.svdvals(r)
-        condition = (regularized_singular[0] / regularized_singular[-1]).item()
-        if condition > condition_number_max:
-            raise ModelContractError("ILL_CONDITIONED: registered condition threshold exceeded")
-        coefficients = torch.linalg.solve_triangular(r, projected, upper=True)
-        if not torch.isfinite(coefficients).all():
-            raise ModelContractError("NONFINITE: residual basis coefficients")
-        drift.coefficients.copy_(coefficients)
-        degrees = (singular.square() / (singular.square() + ridge)).sum().item()
-    return {"schema_version": "pirc26-basis-fit-v1", "status": "SUCCEEDED", "observations": count,
-            "basis_count": q, "ridge": ridge, "condition_number": condition,
-            "raw_condition_number": raw_condition, "effective_degrees_of_freedom": degrees,
-            "resume_level": "restart-only", "checkpoint": model.checkpoint()}
+def fit_residual_basis(model, batches, *, ridge, condition_number_max, curvature_penalty=0., cancellation=None, progress=None):
+    """Compatibility entry for the versioned identifiable streaming QR engine."""
+    from estimation.phase_space_basis import BasisPlan, fit_basis
+    identifiability = "full-rbf-v1" if isinstance(model.acceleration_model, RBFResidualDrift) else "reference-coded-additive-v1"
+    plan = BasisPlan(ridge=ridge, curvature_penalty=curvature_penalty,
+                     condition_number_max=condition_number_max, identifiability=identifiability)
+    return fit_basis(model, batches, plan, cancellation=cancellation, progress=progress)

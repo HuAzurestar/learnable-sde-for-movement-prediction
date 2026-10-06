@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from application.pirc26_components import component_bindings
+from application.pirc26_components import component_bindings, basis_family
 from application.pirc26_data import decode_block
 from application.pirc26_runtime import execution_plugin, command, resume_command, validate_job
 from application.research_admission import AdmissionGate
@@ -32,16 +32,28 @@ def one_thread():
     torch.set_num_threads(previous)
 
 
-def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=False, long_training=False):
-    m = model("M2" if long_training else "M0")
+def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=False, long_training=False, family="M0", rank_failure=False):
+    m = model("M2" if long_training else family)
     doc = document(m)
     doc["block_id"] = "fixture-1"
     if long_training:
         segment = doc["segments"][0]
         segment.update(time=[i / 100 for i in range(4098)], position=[[i / 100, i / 200] for i in range(4098)],
                        condition=[[] for _ in range(4098)], condition_available_at=[i / 100 for i in range(4098)])
+    if basis_family(family):
+        import math
+        times = [i / 10 for i in range(101)]
+        velocity = [[-1.8 + .036*i, .4*math.cos(i / 8)] for i in range(101)]
+        position = [[0., 0.]]
+        for first, last in zip(velocity, velocity[1:]):
+            position.append([p + .05 * (a + b) for p, a, b in zip(position[-1], first, last)])
+        doc["velocity_source"] = "measured"
+        doc["segments"][0].update(time=times, position=position, velocity=velocity,
+                                  condition=[[] for _ in times], condition_available_at=times)
+        if rank_failure:
+            doc["segments"][0]["velocity"] = [[0., 0.] for _ in times]
     dto = decode_block(admitted(doc), m)
-    grid = (.02, .03, .04) if long_training else (2., 3., 4.)
+    grid = tuple(doc["segments"][0]["time"][2:5])
     req = dto.forecast_request("synthetic-segment", 2, grid, sample_count=8, brownian_root_id="a" * 64, chunk_size=8)
     cfg, profile, _, _, _, _ = declarations(m)
     cfg["forecast_request_hashes"] = [digest(asdict(req))]
@@ -49,6 +61,9 @@ def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=Fal
     if long_training:
         cfg["plan"].update(max_steps=600, patience=600, tolerance=0.)
         profile.update(steps=600, observations=4098)
+    if basis_family(family):
+        cfg["plan"].update(max_batch_rows=32, ridge=.001, curvature_penalty=.03 if family == "M1-S" else 0.)
+        profile.update(steps=128, observations=101, batches=8)
     plugin = execution_plugin("O1", cfg["family"])
     components = component_bindings(cfg, profile, matrix_cells=1, registries=plugin.component_registries)
     root = tmp_path.absolute()
@@ -56,7 +71,7 @@ def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=Fal
     value = spec()
     value["cells"][0].update(plugin_id=plugin.plugin_id, capability="generic-rollout", seed=cfg["seed"], visibility="synthetic")
     job = {"schema_version": "pirc26-worker-job-v1", "operation": operation, "initial_checkpoint": m.checkpoint(),
-        "o1_result": None, "batch_size": 4096 if long_training else 4,
+        "o1_result": None, "batch_size": 32 if basis_family(family) else (4096 if long_training else 4),
         "origins": [{"segment_id": "synthetic-segment", "origin_index": 2,
             "time_grid": list(grid), "sample_count": 8, "brownian_root_id": "a" * 64, "chunk_size": 8}]}
     if corrupt:
@@ -64,13 +79,14 @@ def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=Fal
     grant = admit_fixture(store, value, plugin, root, execution_config=cfg,
         execution_inputs={**profile, "runtime_root": str(root), "store_id": store.store_id},
         execution_components=components, input_content=encode(doc), package_payload={"pirc26_job": job},
-        recovery_command_builder=resume_command, split_role=role)
+        recovery_command_builder=None if basis_family(family) else resume_command, split_role=role)
     store.register(value, digest(value))
     registry = CapabilityRegistry()
     registry.register(plugin)
     recovery = RecoveryRegistry()
     from application.pirc26_runtime import recovery_plugin
-    recovery.register(recovery_plugin("O1", cfg["family"]))
+    if not basis_family(family):
+        recovery.register(recovery_plugin("O1", cfg["family"]))
     return store, value, plugin, job, registry, recovery, grant
 
 
@@ -182,3 +198,35 @@ def test_actual_versioned_worker_reopens_exact_training_and_forecasts_under_new_
         assert actual["fit"][key] == target["fit"][key]
     assert reopened.attempts()[result["attempt_id"]]["parent_attempt_id"] == stopped["attempt_id"]
     assert BudgetLedger(reopened).balance("affine")["committed_ms"] > prior_cost > 0
+
+
+@pytest.mark.parametrize("family,rank_failure", [("M1-S", False), ("M1-R", False), ("M1-S", True)])
+def test_actual_restart_only_qr_worker_fits_or_retains_typed_failure_and_charges(tmp_path, family, rank_failure):
+    store, value, plugin, job, registry, recovery, _ = prepare(tmp_path, family=family, rank_failure=rank_failure)
+    assert plugin.resume_level == "restart-only"
+    from application.pirc26_runtime import recovery_plugin
+    with pytest.raises(ResearchError, match="restart-only"):
+        recovery_plugin("O1", family)
+    result = SharedRunner(store, registry, recovery_registry=recovery).run_cell(
+        value["study_id"], digest(value["cells"][0]), budget=BudgetSpec(70))
+    directory = store.path / "artifacts" / (".attempt-" + result["attempt_id"])
+    if rank_failure:
+        assert result["state"] == "FAILED", (result, (directory / "worker.log").read_text())
+        diagnostic = json.loads((directory / "pirc26-failure.json").read_bytes())
+        assert diagnostic["error_code"] == "ILL_CONDITIONED"
+        assert not result["artifact_id"]
+    else:
+        assert result["state"] == "SUCCEEDED", (result, (directory / "worker.log").read_text())
+        output = json.loads((store.path / "artifacts" / result["artifact_id"]).read_bytes())
+        assert output["resume_level"] == output["fit"]["resume_level"] == "restart-only"
+        assert output["fit"]["solver_id"] == "streaming-qr-v1" and output["fit"]["steps"] == 4
+        from models.phase_space import PhaseSpaceSDE
+        fitted = PhaseSpaceSDE.from_checkpoint(output["fit"]["checkpoint"])
+        initial = PhaseSpaceSDE.from_checkpoint(job["initial_checkpoint"])
+        assert torch.equal(fitted.velocity_factor, initial.velocity_factor)
+        for name, tensor in initial.acceleration_model.affine.state_dict().items():
+            assert torch.equal(tensor, fitted.acceleration_model.affine.state_dict()[name])
+        assert not torch.equal(fitted.acceleration_model.coefficients, initial.acceleration_model.coefficients)
+        assert output["qualification"] == "fixture"
+    assert BudgetLedger(store).balance("affine")["committed_ms"] > 0
+    assert not any(e["event_kind"] == "CHECKPOINT_SAVED" for e in store.events())

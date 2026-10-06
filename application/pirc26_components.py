@@ -16,7 +16,7 @@ from application.research_registry import GLOBAL_LIMITS, RegistryEntry, implemen
 from infrastructure.research_store import ResearchError, digest, encode
 
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 STATE = ("x", "y", "vx", "vy")
 UNITS = ("m", "m", "m/s", "m/s")
 FAMILIES = ("M0", "M1-S", "M1-R", "M2")
@@ -31,7 +31,21 @@ def integer(low, high):
     return {"type": "integer", "minimum": low, "maximum": high}
 
 
-def plan_schema(objective):
+def basis_family(family):
+    return family in ("M1-S", "M1-R")
+
+
+def resume_level(family):
+    return "restart-only" if basis_family(family) else "exact"
+
+
+def plan_schema(objective, family=None):
+    if objective == "O1" and basis_family(family):
+        return object_schema({"solver_id": {"type": "string", "enum": ["streaming-qr-v1"]},
+            "ridge": {"type": "number", "minimum": 0},
+            "curvature_penalty": {"type": "number", "minimum": 0, **({"maximum": 0} if family == "M1-R" else {})},
+            "condition_number_max": {"type": "number", "minimum": 1}, "max_batch_rows": integer(1, 4096),
+            "identifiability": {"type": "string", "enum": ["full-rbf-v1" if family == "M1-R" else "reference-coded-additive-v1"]}})
     fields = {"max_steps": integer(1, 10000), "patience": integer(1, 10000),
               "learning_rate": {"type": "number", "minimum": 1e-12, "maximum": 1},
               "tolerance": {"type": "number", "minimum": 0},
@@ -48,7 +62,7 @@ def plan_schema(objective):
 
 def config_schema(objective, family):
     fields = {"seed": integer(0, 2**63 - 1), "family": {"type": "string", "enum": [family]},
-              "objective": {"type": "string", "enum": [objective]}, "plan": plan_schema(objective),
+              "objective": {"type": "string", "enum": [objective]}, "plan": plan_schema(objective, family),
               "initial_model_hash": HASH, "dynamics_spec_hash": HASH, "configuration_hash": HASH,
               "forecast_request_hashes": {"type": "array", "items": HASH, "minItems": 1, "maxItems": 32}}
     if objective == "O2":
@@ -76,9 +90,11 @@ def _settings(document, inputs):
         raise ResearchError("OBJECTIVE_INCOMPATIBLE", "O2 requires the same observed-state M2")
     from estimation.phase_space import O1Plan
     from estimation.phase_space_o2 import O2Plan
-    plan = (O1Plan if document["objective"] == "O1" else O2Plan)(**document["plan"])
+    from estimation.phase_space_basis import BasisPlan
+    constructor = BasisPlan if basis_family(document["family"]) else (O1Plan if document["objective"] == "O1" else O2Plan)
+    plan = constructor(**document["plan"])
     plan.validate()
-    if plan.max_steps > inputs["steps"]:
+    if (inputs["batches"] if isinstance(plan, BasisPlan) else plan.max_steps) > inputs["steps"]:
         raise ResearchError("RESOURCE_PLAN_REJECTED", "actual training steps exceed frozen resource plan")
     hashes = document["forecast_request_hashes"]
     if len(set(hashes)) != len(hashes):
@@ -140,7 +156,13 @@ class BoundTrainer:
                 raise ResearchError("RESOURCE_PLAN_REJECTED", "actual O1 train data exceeds frozen plan")
             if o1_result is not None:
                 raise ResearchError("CONTRACT_MISMATCH", "O1 cannot substitute an O2 lineage")
-            result = fit_o1(model, data, self.plan, **control)
+            if basis_family(self.document["family"]):
+                if set(control) - {"cancellation", "progress"}:
+                    raise ResearchError("CHECKPOINT_INCOMPATIBLE", "streaming QR is restart-only, not an optimizer continuation")
+                from estimation.phase_space_basis import fit_basis
+                result = fit_basis(model, data, self.plan, **control)
+            else:
+                result = fit_o1(model, data, self.plan, **control)
         else:
             from estimation.phase_space_o2 import HorizonTrainingExample, fit_o2
             if any(not isinstance(part, HorizonTrainingExample) for part in data):
@@ -183,11 +205,11 @@ def predictor_factory(document, inputs, context):
     return BoundPredictor(document, inputs)
 
 
-def composition_contract(objective):
+def composition_contract(objective, family=None):
     return {"schema_version": "pirc25-composition-contract-v1", "shared_configuration": True,
         "roles": {"model": {"required_capabilities": ["phase-space-dynamics", "velocity-noise"],
                              "required_model_capabilities": [], "seed_path": ["seed"]},
-                  "trainer": {"required_capabilities": ["observed-" + objective.lower()],
+                  "trainer": {"required_capabilities": ["observed-" + objective.lower()] + (["streaming-qr"] if basis_family(family) else []),
                       "required_model_capabilities": ["velocity-noise"] + (["direct-rollout-gradient"] if objective == "O2" else []),
                       "seed_path": ["seed"]},
                   "predictor": {"required_capabilities": ["generic-rollout"],
@@ -215,11 +237,20 @@ def entry(role, objective, family):
     if role == "trainer" and objective == "O2":
         tensors.extend({"name": "path_activation_" + str(i), "axes": ["paths", "steps", "components"], "item_bytes": 8}
                        for i in range(4))
+    if role == "trainer" and basis_family(family):
+        # B is bounded by the already admitted observation count. Include
+        # streamed basis/QR Q, triangular state and spline penalty workspace.
+        tensors = [{"name": "train_states", "axes": ["observations", "state_dim"], "item_bytes": 16},
+            *[{"name": "stream_workspace_" + str(i), "axes": ["observations", "components"], "item_bytes": 8}
+              for i in range(32)],
+            *[{"name": "basis_workspace_" + str(i), "axes": ["components", "components"], "item_bytes": 8}
+              for i in range(16)]]
+        capabilities.add("streaming-qr")
     return RegistryEntry(component_id="pirc26-" + family.lower() + "-" + objective.lower() + "-" + role,
         component_kind=role, version=VERSION, code_hash=implementation_hash(builder),
         config_schema=config_schema(objective, family), input_schema=profile_schema(),
         output_schema={"type": "object", "additionalProperties": True}, state_order=STATE, units=UNITS,
-        capabilities=frozenset(capabilities), resource_class="cpu", resume_level="exact" if role == "trainer" else "restart-only",
+        capabilities=frozenset(capabilities), resource_class="cpu", resume_level=resume_level(family) if role == "trainer" else "restart-only",
         resource_contract={"schema_version": "pirc25-resource-contract-v1", "counts": {
             **{name: {"input": [name]} for name in ("observations", "paths", "steps", "components")},
             "mixtures": {"constant": 1}, "state_dim": {"constant": 4}}, "tensors": tensors,

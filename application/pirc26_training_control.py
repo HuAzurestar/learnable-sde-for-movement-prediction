@@ -82,7 +82,7 @@ def managed_fit_o2(model, examples, plan, o1_result, *, restored_state=None):
     return result
 
 
-def exit_managed_worker(code):
+def exit_managed_worker(code, *, output=None):
     """Worker-only terminal exit, after closed output or acknowledged save.
 
     Windows ExitProcess/CRT _exit may deadlock in numerical DLL detach. Native
@@ -90,8 +90,13 @@ def exit_managed_worker(code):
     or receiving the checkpoint ACK. The owner retains its process-tree check.
     https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-exitprocess
     """
-    if type(code) is not int or code not in (0, 1, 85) or WorkerControl.from_environment() is None:
+    if type(code) is not int or code not in (0, 1, 85):
         raise ResearchError("CONTRACT_MISMATCH", "terminal exit requires the managed worker channel and supported code")
+    if WorkerControl.from_environment() is None:
+        if output is None or code == 85:
+            raise ResearchError("CONTRACT_MISMATCH", "restart-only native exit requires actual owner process evidence")
+        from infrastructure.pirc26_worker_control import require_owned_worker
+        require_owned_worker(output)
     if os.name == "nt":
         import ctypes
         from ctypes import wintypes

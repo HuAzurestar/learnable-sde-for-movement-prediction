@@ -17,6 +17,7 @@ from application.research_data import EvaluationExposureLedger
 from application.research_execution import execution_binding
 from application.research_registry import implementation_hash
 from estimation.phase_space import fit_o1, O1Plan
+from estimation.phase_space_basis import BasisPlan, fit_basis
 from estimation.phase_space_o2 import O2Plan
 from inference.phase_space import forecast
 from infrastructure.research_store import ResearchStore, ResearchError, digest, encode
@@ -42,6 +43,8 @@ def adapter_command(output, spec, cell):
 def declarations(m, objective="O1", o1=None):
     plan = O1Plan(max_steps=3, patience=3, fit_diffusion=False) if objective == "O1" else O2Plan(
         max_steps=3, patience=3, curriculum_steps=1)
+    if m.model_card()["family"] in ("M1-S", "M1-R"):
+        plan = BasisPlan(identifiability="full-rbf-v1" if m.model_card()["family"] == "M1-R" else "reference-coded-additive-v1")
     req = request(8, 8) if objective == "O1" else examples(m)[0].request
     config = {"seed": 12, "family": m.model_card()["family"], "objective": objective,
               "plan": json.loads(json.dumps(asdict(plan))), "initial_model_hash": m.checkpoint()["sha256"],
@@ -71,8 +74,10 @@ def test_registered_factories_fit_actual_dynamics_and_use_common_predictor(famil
     parts, plan = construct_components(adapter, bindings, matrix_cells=1, seed=12, registries=registries,
                                        initial_checkpoint=initial.checkpoint())
     result = parts["trainer"].fit(parts["model"], [batch(initial, 32)])
-    direct = fit_o1(initial, [batch(initial, 32)], O1Plan(**config["plan"]))
-    assert result["checkpoint"] == direct["checkpoint"] and result["history"] == direct["history"]
+    direct = (fit_basis(initial, [batch(initial, 32)], BasisPlan(**config["plan"])) if family in ("M1-S", "M1-R")
+              else fit_o1(initial, [batch(initial, 32)], O1Plan(**config["plan"])))
+    assert result["checkpoint"] == direct["checkpoint"]
+    assert result.get("history") == direct.get("history")
     actual = parts["predictor"].predict(parts["model"], req)
     assert torch.equal(actual["samples"], forecast(initial, req)["samples"])
     assert plan["profile"]["noise_dim"] == 2

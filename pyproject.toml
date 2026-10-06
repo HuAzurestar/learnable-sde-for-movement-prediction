@@ -23,7 +23,7 @@ Repository = "https://github.com/HuAzurestar/learnable-sde-for-movement-predicti
 Issues = "https://github.com/HuAzurestar/learnable-sde-for-movement-prediction/issues"
 
 [project.optional-dependencies]
-test = ["pytest>=7.4"]
+test = ["pytest>=7.4", "scipy>=1.10"]
 
 [project.scripts]
 learnable-sde = "cli.__main__:main"
