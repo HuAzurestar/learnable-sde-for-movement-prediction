@@ -838,9 +838,13 @@ batch reuse or outcome-conditioned reseeding. Worker checkpoint metadata names
 this recovery rule and the current reference phase. ETA remains unknown (`null`)
 for engineering V2 work; the EM throughput is not a reference-completion estimate.
 Shared checkpoint validation accepts unknown ETA but still refuses boolean,
-negative or nonfinite numeric ETA. Real reference-phase 80%-checkpoint/resume
-delivery remains a distinct verification obligation; completed-fit library replay
-and the generic native unknown-ETA checkpoint do not prove that obligation.
+negative or nonfinite numeric ETA. The separate native reference-phase test now
+verifies real shared 80%-checkpoint delivery while the reference is running,
+reopens the original fixture store, and resumes through SharedRecovery using the
+actual registered worker. A forged resume-purpose grant is refused before a new
+attempt; valid recovery reproduces continuous-worker metrics, fit, forecast and
+complete fixed batch report. Both stopped attempt costs remain on pirc28-k2.
+This is engineering recovery evidence, not scientific inference qualification.
 
 The additive resource plan now reserves the retained numerical report plus two
 owner report copies in addition to the existing source/fit/forecast/particle
@@ -861,10 +865,11 @@ use disposable explicitly admitted fixtures, not a production shared store.
 Reports and receipts keep `managed_evidence_bound`, `qualified_identifiability`
 and `real_data_authorized` false. The execution-scope string explicitly disclaims
 managed authority proof. Authorized scientific collector/owner integration,
-independent selected-fit binding, complete execution/cost authority and reference
-phase checkpoint verification are still required before lifting scientific V2
+independent selected-fit binding and complete scientific execution/cost authority
+are still required before lifting scientific V2
 withholding. Zero scientific qualification groups have been executed.
 
 ```console
 python -m pytest tests/test_pirc28_managed_approximation.py -q
+python -m pytest tests/test_pirc28_reference_checkpoint.py -q
 ```
