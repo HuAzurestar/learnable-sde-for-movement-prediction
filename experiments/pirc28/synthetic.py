@@ -42,7 +42,8 @@ class SyntheticTruth:
     def to_dict(self):
         return {"schema_version": "pirc28-synthetic-truth-v1", "scenario_hash": self.scenario_hash,
             "states": self.states.tolist(), "modes": self.modes.tolist(),
-            "jump_times": self.jump_times, "jump_modes": self.jump_modes,
+            "jump_times": [list(value) for value in self.jump_times],
+            "jump_modes": [list(value) for value in self.jump_modes],
             "dwell_by_mode": self.dwell_by_mode.tolist(), "visibility": "synthetic-evaluator-only"}
 
 
@@ -110,6 +111,18 @@ class ScenarioSpec:
     @property
     def scenario_hash(self):
         return digest(self.to_dict())
+
+    @classmethod
+    def from_dict(cls, value):
+        if type(value) is not dict or value.get('schema_version') != 'pirc28-scenario-v1':
+            raise SwitchingError('CONTRACT_MISMATCH', 'scenario schema differs')
+        try:
+            spec = cls(**{name: value[name] for name in cls.__dataclass_fields__})
+        except (KeyError, TypeError) as error:
+            raise SwitchingError('CONTRACT_MISMATCH', 'scenario fields are incomplete') from error
+        if digest(spec.to_dict()) != digest(value):
+            raise SwitchingError('IDENTITY_CONFLICT', 'scenario declarations are not canonical')
+        return spec
 
 
 def simulate_path(model, times, initial_mode, initial_state, rng_modes, rng_state,
