@@ -227,11 +227,11 @@ def test_actual_owner_forecast_ack_reopen_and_fresh_cost_preserve_complete_sampl
     from infrastructure.research_store import ResearchStore
     from tests.test_pirc26_runtime import prepare
     role = "validation" if operation == "forecast" else "train"
-    # New float32's complete native workload reached the90s reservation's real
-    # soft stop at full solver work, so it cannot serve as an uninterrupted
-    # baseline. Preserve256x64/model and use a finite150s engineering baseline
-    # and fresh resume; original float64/train and production budgets stay fixed.
-    full_seconds = 150 if dtype == torch.float32 else 90
+    # Both float32 and post-fit float64 reached the90s reservation's genuine
+    # soft stop near/full solver work, so neither is an uninterrupted comparator.
+    # Preserve all populations/grids/model and use finite150s baselines/resumes
+    # only here; the1,200-step100/40/100 and production budgets stay fixed.
+    full_seconds = 150
     baseline,value,_,_,registry,recovery,_ = prepare(tmp_path/"baseline",operation=operation,role=role,long_forecast=True,two_origins=two_origins,dtype=dtype)
     expected = SharedRunner(baseline,registry,recovery_registry=recovery).run_cell(value["study_id"],digest(value["cells"][0]),budget=BudgetSpec(full_seconds))
     assert expected["state"] == "SUCCEEDED",expected
