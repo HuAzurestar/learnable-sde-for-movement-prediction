@@ -1,7 +1,8 @@
 """Actual pilot -> owner pre-read gate -> independent production controls.
 
 Disposable synthetic grants/stores only; not an official research or model
-approval. Paper stochastic validation is a separate, still-required consumer.
+approval. The paper admission reader checks the saved evidence independently;
+statistical adjudication and actual research remain separate, still required.
 """
 
 from copy import deepcopy
@@ -34,10 +35,8 @@ from tests.research_admission_fixtures import admit_fixture
 from tests.test_affine_mlmc_qualification import managed
 
 
-@pytest.fixture(scope="module")
-def source(tmp_path_factory):
-    root = tmp_path_factory.mktemp("managed-mlmc-production")
-    store, pilot_spec, registry, recovery = managed(root)
+def prepared_source(root, **pilot_options):
+    store, pilot_spec, registry, recovery = managed(root, **pilot_options)
     store.register(pilot_spec, digest(pilot_spec))
     outcome = SharedRunner(store, registry, recovery_registry=recovery).run_cell(
         pilot_spec["study_id"], digest(pilot_spec["cells"][0]), budget=BudgetSpec(60, category="pilot"))
@@ -83,6 +82,93 @@ def source(tmp_path_factory):
     package = store.manifest("package-"+spec["admission"]["package_hash"])
     prereg = store.manifest("preregistration-"+package["preregistration_hash"])
     return store, spec, registry, recovery, target_grant, package, prereg
+
+
+@pytest.fixture(scope="module")
+def source(tmp_path_factory):
+    return prepared_source(tmp_path_factory.mktemp("managed-mlmc-production"))
+
+
+def test_actual_formal_mlmc_save_ack_reopened_resume_retains_stream_receipt_and_all_costs(tmp_path):
+    import time
+    from application.research_recovery import SharedRecovery
+    from inference.propagation_methods import mlmc_estimate
+    from infrastructure.research_store import ResearchStore
+    from tests.test_propagation_shared_adapter import _checkpoint_job_seconds, _worker_startup_seconds
+
+    # Fixed engineering-only pilot policy before any reservation. The actual
+    # pilot's measured allocation, not an inflated or hand-written allocation,
+    # supplies the independently registered production workload.
+    startup_seconds = _worker_startup_seconds()
+    store, spec, registry, recovery, grant, _, _ = prepared_source(tmp_path,
+        sampling_tolerance=.001, counts=(1024, 1024, 1024), request_changes={"chunk_size": 1})
+    cell = spec["cells"][0]
+    model, request, config, _ = validate_propagation_cell(spec, cell)
+    counts = tuple(cell["mlmc_production_policy"]["level_samples"])
+    # Direct pure-kernel unit control, not a formal output or protected read.
+    # Size this disposable test's first job before its target reservation;
+    # neither its frozen60s cap nor a running deadline can change afterward.
+    started = time.monotonic()
+    expected = mlmc_estimate(model, request, level_samples=counts)
+    job_seconds = _checkpoint_job_seconds(time.monotonic()-started, startup_seconds)
+    assert expected.standard_error <= .001
+    arm = cell["arm_id"]
+    pilot_cost = BudgetLedger(store).balance(arm)["committed_ms"]
+    interrupted = SharedRunner(store, registry, recovery_registry=recovery).run_cell(
+        spec["study_id"], digest(cell), budget=BudgetSpec(job_seconds))
+    assert interrupted["state"] == "FAILED", interrupted
+    parent = store.attempts()[interrupted["attempt_id"]]
+    assert parent["error_code"] == "CHECKPOINT_SAVED"
+    saved = interrupted["checkpoint"]
+    assert saved["resume_level"] == "chunk"
+    assert 0 < saved["progress"]["completed_steps"] < saved["progress"]["total_steps"] == config["work_steps"]
+    events = [e for e in store.events() if e["payload"].get("attempt_id") == parent["attempt_id"]]
+    kinds = [e["event_kind"] for e in events]
+    assert kinds.index("CHECKPOINT_REQUESTED") < kinds.index("CHECKPOINT") < kinds.index("CHECKPOINT_SAVED")
+    assert kinds.index("CHECKPOINT_SAVED") < kinds.index("WORKER_TREE_STOPPED") < kinds.index("SETTLE")
+    requested = next(e["payload"] for e in events if e["event_kind"] == "CHECKPOINT_REQUESTED")
+    assert 0 < requested["remaining_seconds"] <= job_seconds*.2
+    assert saved["elapsed_ms"] < job_seconds*1000
+    value = json.loads((store.path/"artifacts"/saved["artifact_id"]).read_bytes())
+    state = value["state"]
+    assert state["rng_state"]["phase"] == 1 and state["rng_state"]["seed"] == request.seed
+    assert state["rng_state"]["coupling_id"] == request.coupling_id
+    assert state["method_state"]["request_hash"] == request.request_hash and state["chunk_complete"] is True
+    assert "budget" not in state and "remaining_seconds" not in state
+    before = BudgetLedger(store).balance(arm)
+    assert before["committed_ms"] == pilot_cost+interrupted["elapsed_ms"] and not before["closed"]
+
+    reopened = ResearchStore(tmp_path, store.store_id)
+    restored = SharedRecovery(reopened, registry, recovery)
+    # A supplied evaluate permission cannot borrow the separate resume grant.
+    # This refused read does not revoke/replace the genuine operator test grant.
+    denied = {**grant, "purposes": ["evaluate"]}
+    with pytest.raises(ResearchError):
+        restored.prepare(parent["attempt_id"], saved["artifact_id"], authorization=denied)
+    assert BudgetLedger(reopened).balance(arm) == before
+    resumed = restored.resume(parent["attempt_id"], saved["artifact_id"], authorization=grant, budget=BudgetSpec(60))
+    assert resumed["state"] == "SUCCEEDED", resumed
+    current = reopened.attempts()[resumed["attempt_id"]]
+    assert current["parent_attempt_id"] == parent["attempt_id"]
+    actual = json.loads((reopened.path/"artifacts"/resumed["artifact_id"]).read_bytes())
+    receipt = reopened.manifest("admission-"+actual["admission_hash"])
+    assert receipt["attempt_id"] == resumed["attempt_id"] and actual["admission_hash"] != value["admission_hash"]
+    assert receipt["documents"]["propagation_qualification"]["production_policy"] == cell["mlmc_production_policy"]
+    # Only owner-qualified error components replace the pure-kernel unknown
+    # reference/time values. All actual signed-level statistics must be exact.
+    unmodified = {k: v for k, v in actual["forecast"]["functional"].items() if k != "error_budget"}
+    assert unmodified == json.loads(encode({k: v for k, v in expected.manifest().items() if k != "error_budget"}))
+    validate_formal_mlmc_result(receipt, spec, cell, actual)
+    after = BudgetLedger(reopened).balance(arm)
+    assert after["committed_ms"] == before["committed_ms"]+resumed["elapsed_ms"] and not after["closed"]
+    bundle = export_evidence(reopened, spec["study_id"], grant)
+    row = bundle["cells"][0]
+    assert {a["attempt_id"] for a in row["history"]} == {parent["attempt_id"], resumed["attempt_id"]}
+    assert row["cost"]["charged_ms"] == interrupted["elapsed_ms"]+resumed["elapsed_ms"]
+    assert {e["payload"]["attempt_id"] for e in row["cost"]["sources"]} == {parent["attempt_id"], resumed["attempt_id"]}
+    checked = paper_validate(tmp_path, bundle)
+    assert checked.returncode == 0, checked.stderr
+    assert json.loads(checked.stdout)["verified_mlmc_cells"] == 1
 
 
 def test_actual_formal_mlmc_worker_requires_settled_pilot_then_independent_stream(source):

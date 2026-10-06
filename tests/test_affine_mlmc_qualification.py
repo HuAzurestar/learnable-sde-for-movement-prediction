@@ -146,13 +146,15 @@ def test_zero_observed_rare_corrections_remain_unresolved_even_with_certified_re
     assert analysis["empirical_pilot_analysis"]["sampling_only_proposal"] is None
 
 
-def managed(tmp_path, *, reference_changes=None, bias_tolerance=1., counts=(64, 64, 64), request_changes=None, formal=False):
+def managed(tmp_path, *, reference_changes=None, bias_tolerance=1., sampling_tolerance=1.,
+            counts=(64, 64, 64), request_changes=None, formal=False):
     store, spec, _ = prepare(tmp_path, "mlmc-pilot", recovery=True,
         changes={"samples": sum(counts), **(request_changes or {})}, level_samples=counts, formal=formal)
     cell = spec["cells"][0]
     request = request_from_manifest(cell["propagation_request"])
     package = FrozenDynamicsPackage.from_manifest(cell["frozen_dynamics"], expected_hash=request.model_package_hash)
-    pilot = replace(MLMCPilotPolicy(**cell["mlmc_pilot_policy"]), bias_tolerance=bias_tolerance)
+    pilot = replace(MLMCPilotPolicy(**cell["mlmc_pilot_policy"]), bias_tolerance=bias_tolerance,
+        sampling_tolerance=sampling_tolerance)
     reference = reference_for(package, request, pilot, counts, **(reference_changes or {}))
     plugin = mlmc_qualification_plugin()
     config, parameters = mlmc_qualification_config(request, reference), execution_inputs(request)
