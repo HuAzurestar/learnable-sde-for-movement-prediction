@@ -44,11 +44,20 @@ requirements, adjudicate statistics, qualify a fitted model, prove authenticity
 of an arbitrary self-rehashed journal or establish an MLMC complexity theorem.
 
 Chunk recovery uses existing owner save/ACK, hash-bound completed statistics,
-independent phase1 stream and same-arm charge. Actual formal-production-specific
-interrupted/reopened-resume validation remains required; existing unqualified
-MLMC restore checks are not claimed as that proof. Coverage/stability research,
-other methods, all axes, actual oracle/synthetic-or-qualified-model studies,
-manuscript, verification/review/acceptance and merged delivery remain required.
+independent phase1 stream and same-arm charge. The formal-production-specific
+engineering control exercises a real80% request, partial completed-chunk save,
+ACK-backed exit, reopened store and linked resume with a fresh current owner
+receipt. Its signed-level statistics equal uninterrupted pure-kernel output;
+the original arm retains pilot, failed prefix and resumed charges. Authorized
+export keeps failed/resumed history and passes the independent paper reader.
+An evaluate permission cannot replace resume permission; missing or zeroed
+failed-attempt charges are refused. No clock, deadline or workload completion
+is simulated to obtain a save.
+
+This is an integration control, not a production research run or a convergence/
+coverage result. Coverage/stability research, other methods, all axes, actual
+oracle/synthetic-or-qualified-model studies, manuscript, verification/review/
+acceptance and merged delivery remain required.
 
 Engineering controls use disposable synthetic stores and explicit test grants,
 not official research evidence or authority. Actual study execution still needs

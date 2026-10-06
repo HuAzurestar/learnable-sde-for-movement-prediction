@@ -122,6 +122,10 @@ def test_actual_formal_mlmc_save_ack_reopened_resume_retains_stream_receipt_and_
     saved = interrupted["checkpoint"]
     assert saved["resume_level"] == "chunk"
     assert 0 < saved["progress"]["completed_steps"] < saved["progress"]["total_steps"] == config["work_steps"]
+    progress = saved["progress"]
+    assert progress["throughput_per_second"] > 0 and progress["eta_seconds"] > 0
+    assert progress["eta_seconds"] == pytest.approx(
+        (progress["total_steps"]-progress["completed_steps"])/progress["throughput_per_second"])
     events = [e for e in store.events() if e["payload"].get("attempt_id") == parent["attempt_id"]]
     kinds = [e["event_kind"] for e in events]
     assert kinds.index("CHECKPOINT_REQUESTED") < kinds.index("CHECKPOINT") < kinds.index("CHECKPOINT_SAVED")
@@ -169,6 +173,18 @@ def test_actual_formal_mlmc_save_ack_reopened_resume_retains_stream_receipt_and_
     checked = paper_validate(tmp_path, bundle)
     assert checked.returncode == 0, checked.stderr
     assert json.loads(checked.stdout)["verified_mlmc_cells"] == 1
+    for fault in ("missing-parent-charge", "zero-parent-charge"):
+        altered = deepcopy(bundle)
+        entries = altered["cells"][0]["cost"]["sources"]
+        if fault == "missing-parent-charge":
+            entries[:] = [e for e in entries if e["payload"]["attempt_id"] != parent["attempt_id"]]
+        else:
+            entry = next(e for e in entries if e["payload"]["attempt_id"] == parent["attempt_id"])
+            entry["payload"]["charged_ms"] = 0
+            entry["hash"] = digest({k: v for k, v in entry.items() if k != "hash"})
+        altered["bundle_hash"] = digest({k: v for k, v in altered.items() if k != "bundle_hash"})
+        refused = paper_validate(tmp_path, altered)
+        assert refused.returncode != 0, fault
 
 
 def test_actual_formal_mlmc_worker_requires_settled_pilot_then_independent_stream(source):
