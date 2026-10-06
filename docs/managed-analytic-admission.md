@@ -103,12 +103,22 @@ package lineage and in the admitted result lineage. Synthetic labels on the
 consumer cannot declassify a restricted qualification source. Export separately
 checks the source grant's export purpose, consumer scope, visibility, expiry and
 canonical source bytes; execution/evaluation permission is not export permission.
-Final export grant checks include the source authorization too.
+Final export grant checks include the source authorization too. Numeric exports
+include the canonical target result and its artifact metadata, not just copied
+metrics. Source evidence includes original admission and successful completion
+events in addition to worker reservation/start/native-stop/settlement events.
 
-The independent paper reader still needs an equivalent managed-analytic proof
-validator and counterexamples. Existing generic admission validation is not
-claimed to verify this new numerical chain. Reproduction claims must retain the
-source attempt/cost/policy/certificate bindings and clear declared-law limits.
+The paired independent paper reader validates this additional managed-analytic
+chain without importing the runtime or replaying matrix/CDF computations. It
+checks actual source/target artifact bytes, same-ledger arm/resource/permission
+bindings and original event order before held-out exposure; bounded dyadic
+arithmetic independently checks saved enclosure values and current errors.
+Missing proof cannot fall back to generic operator qualification. The trusted
+authorized bundle hash is essential, not authentication of self-rehashed records.
+Its admission-only CLI accepts single analytic cells without fabricating a
+comparison plan; formal comparison/statistical computation gates are unchanged.
+Reproduction claims retain source attempt/cost/policy/certificate bindings and
+clear declared-law limits.
 No official research, manuscript, review/acceptance or merged delivery is claimed
 by adding this runtime capability.
 

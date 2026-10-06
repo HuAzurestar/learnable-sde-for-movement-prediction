@@ -81,8 +81,8 @@ The [managed analytic owner gate](managed-analytic-admission.md) now accepts onl
 an actual successful, settled, source-bound qualification attempt and its exact
 frozen policy/thresholds before protected input exposure, additionally checking
 cost/resource and preregistration bindings. Imported generic report hashes or a
-worker mode/flag are insufficient. The independent paper reader still needs its
-corresponding new-chain validator; no descriptive result is promoted by this
+worker mode/flag are insufficient. The paired independent paper reader checks the
+corresponding source/cost/current-result evidence; no descriptive result is promoted by this
 qualification adapter. Other methods require their own actual qualification.
 
 Tests cover the positive numerical checks, each failed threshold, strict policy

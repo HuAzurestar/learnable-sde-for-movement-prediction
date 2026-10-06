@@ -267,6 +267,10 @@ def _assemble_evidence(store, study_id, authorization):
                             raise ResearchError("CORRUPT_ARTIFACT", "model qualification export binding changed")
                 if documents.get("propagation_qualification"):
                     evidence = documents["propagation_qualification"]
+                    # The independent reader needs the actual target bytes,
+                    # not a row of copied metric/pass fields. Both attachments
+                    # are already covered by the target artifact export grant.
+                    row.update(result=result, result_artifact=store.manifest("artifact-"+latest["artifact_id"]))
                     source_grant = evidence["authorization"]
                     if source_grant["study_id"] != study_id and study_id not in source_grant.get("consumer_study_ids", []):
                         raise ResearchError("UNAUTHORIZED_DATA", "analytic qualification export consumer differs")

@@ -146,6 +146,11 @@ def prepare_managed_qualification(store, spec, cell, execution_package, prereg):
             _require(len(matches) == 1, "source lacks unique "+kind)
             return matches[0]
         reservation, worker, stop, settlement = (one(k) for k in ("RESERVE", "WORKER_STARTED", "WORKER_TREE_STOPPED", "SETTLE"))
+        admission_event = one("ADMISSION")
+        completions = [e for e in events if e["event_kind"] == "ATTEMPT" and e["payload"] == attempt]
+        _require(len(completions) == 1 and admission_event["payload"]["admission_hash"] == receipt["admission_hash"]
+            and admission_event["sequence"] < worker["sequence"]
+            and settlement["sequence"] < completions[0]["sequence"], "source admission/completion order differs")
         cost = settlement["payload"]
         _require(type(cost["charged_ms"]) is int and 0 < cost["charged_ms"] <= cost["reserved_ms"]
             <= Fraction(policy.maximum_job_seconds)*1000
@@ -157,6 +162,7 @@ def prepare_managed_qualification(store, spec, cell, execution_package, prereg):
             "source_artifact": metadata, "source_result": result, "source_admission": receipt,
             "authorization": grant, "reservation_event": reservation, "worker_event": worker,
             "stop_event": stop, "settlement_event": settlement,
+            "admission_event": admission_event, "completion_event": completions[0],
             "target_request_hash": request.request_hash, "target_cell_hash": digest(cell),
             "target_spec_hash": digest(spec), "preregistration_hash": digest(prereg)}
         evidence["evidence_hash"] = digest(evidence)
