@@ -63,7 +63,8 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
                   execution_config=None, execution_inputs=None, recovery_command_builder=None,
                   upstream_ids=(), upstream_inputs=None, accepted_versions=None,
                   upstream_dependencies=None, pirc22_cutover=None, upstream_visibility="synthetic", legacy_upstream=True,
-                  pilot=False, source_content=None, dataset_id="synthetic", preregistration_extra=None):
+                  pilot=False, source_content=None, dataset_id="synthetic", preregistration_extra=None,
+                  protocol_id="inputs", authorization_id="execution-fixture"):
     bind_fixture_execution(value, plugin, execution_config, execution_inputs)
     # Explicit engineering-only frozen metadata. These synthetic attestations
     # never claim acceptance of real PIRC-19--22 inputs or grant data access.
@@ -105,7 +106,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
                "source_block_id": block, "sha256": hashlib.sha256(content).hexdigest(),
                "path": "plugin-input.bin", "split_role": "final-eval" if formal else "train",
                "fit_scope": not formal} for block in sorted({cell["block_id"] for cell in value["cells"]})]
-    protocol = {"schema_version": "pirc25-data-protocol-v1", "protocol_id": "inputs",
+    protocol = {"schema_version": "pirc25-data-protocol-v1", "protocol_id": protocol_id,
                 "study_id": value["study_id"], "blocks": blocks}
     if formal or pilot:
         gate = PreregistrationGate(store)
@@ -127,7 +128,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
             "preregistration_hash": digest(plan), "failure_policy": "retain-and-exclude-incomplete-blocks"}
     EvaluationExposureLedger(store).register_protocol(protocol, digest(protocol))
     value.update(code_hash=code_hash(), protocol_hash=digest(protocol), data_hash=data_binding(protocol))
-    grant = {"authorization_id": "execution-fixture", "study_id": value["study_id"],
+    grant = {"authorization_id": authorization_id, "study_id": value["study_id"],
         "expires_at": "2099-01-01T00:00:00+00:00", "evidence_hash": digest("explicit synthetic operator grant"),
         "protocol_hash": digest(protocol), "data_root": str(root), "test_authorization": formal,
         "purposes": ["fit", "execute", "evaluate", "preview", "export", "resume"],
@@ -159,7 +160,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
             "checks": [{"check_id": "contract", "artifact_id": artifact["artifact_id"]}]}
         package["qualification_hash"] = store.publish("qualification-" + digest(qualification), qualification)
     reference = store.publish("package-" + digest(package), package)
-    value["admission"] = {"mode": "formal" if formal else "pilot" if pilot else "fixture", "protocol_id": "inputs",
+    value["admission"] = {"mode": "formal" if formal else "pilot" if pilot else "fixture", "protocol_id": protocol_id,
         "authorization_id": grant["authorization_id"], "package_hash": reference,
         "upstream_snapshot_hash": snapshot_hash, "upstream_acceptance_hash": catalog_hash, "upstream_root": str(root),
         "upstream_ids": list(upstream_ids), "upstream_hash": upstream["manifest_hash"], "purpose": "evaluate" if formal else "fit"}

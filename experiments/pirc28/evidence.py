@@ -134,6 +134,8 @@ def _preregistration(store, study, definition, cell, events):
             or prereg.get('result_selection_rule') != SELECTION_RULE or study['study_id'] not in prereg['study_ids']
             or protocol_binding(protocol) not in prereg['protocol_bindings']):
         raise ResearchError('NEEDS_PREREGISTRATION', 'qualification definition/selection/source was not frozen')
+    if study.get('pirc28_study_definition_hash') is not None and prereg.get('pirc28_study_definition_hash') != study['pirc28_study_definition_hash']:
+        raise ResearchError('NEEDS_PREREGISTRATION', 'complete recipe/initialization/replicate seed matrix was not frozen')
     k1 = {candidate['arm_id'] for candidate in study['cells'] if candidate.get('fit_K') == 1}
     k2 = {candidate['arm_id'] for candidate in study['cells'] if candidate.get('fit_K') == 2}
     if ('position_energy_score_d2' not in prereg['primary_metrics'] or len(k1) != 1 or len(k2) != 1
@@ -290,6 +292,26 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
     if (set(cells) != expected or len(sources) != 1 or families[1][0] == families[2][0]
             or families[1][1] == families[2][1] or (not fixture and len(matrices) != 1)):
         raise ResearchError('UNQUALIFIED', 'full paired matrix, one code source and separate fixed K arms required')
+    study_definition_hash = None
+    references = {study.get('pirc28_study_definition_hash') for study in studies}
+    if references != {None}:
+        if len(references) != 1 or not all(hash_reference(reference) for reference in references):
+            raise ResearchError('NEEDS_PREREGISTRATION', 'one complete pre-fit study definition is required')
+        from .study import SyntheticStudyDefinition
+        study_definition_hash = next(iter(references))
+        frozen = SyntheticStudyDefinition.from_dict(store.manifest('pirc28-study-definition-'+study_definition_hash))
+        plan = frozen.to_dict()
+        if (frozen.definition_hash != study_definition_hash or plan['identifiability_spec'] != definition.to_dict()
+                or plan['runtime_code_hash'] != next(iter(sources))):
+            raise ResearchError('IDENTITY_CONFLICT', 'complete study definition/evaluator/source identity differs')
+        frozen.matches_studies(studies, {'root': str(store.path.parent), 'store_id': store.store_id})
+        publications = [event for event in events if event['event_kind'] == 'MANIFEST'
+            and event['payload'].get('object_id') == 'pirc28-study-definition-'+study_definition_hash]
+        source_runs = source_run_ids(studies)
+        admitted = [event for event in events if event['event_kind'] == 'ADMISSION'
+            and event['payload'].get('run_id') in source_runs]
+        if not publications or any(publications[0]['sequence'] >= event['sequence'] for event in admitted):
+            raise ResearchError('NEEDS_PREREGISTRATION', 'complete source matrix was published after fitting began')
     snapshot_hash = source_attempts_hash(store, studies, attempts=attempts)
     if expected_attempts_hash is not None and snapshot_hash != expected_attempts_hash:
         raise ResearchError('INDEX_STALE', 'frozen source attempts changed before qualification')
@@ -356,6 +378,11 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
             rows.append({'scenario_id': key[0], 'replicate_id': key[1], 'K': key[2], 'state': state,
                 'input_hash': None, 'artifact_hash': None, 'metrics': None, 'posterior_occupancy': None, 'collapsed': None})
     report = qualify(definition, rows, digest(rows), check_budget=check_budget)
+    if not fixture and report['state'] == 'PASSED' and study_definition_hash is None:
+        report['state'] = 'NEEDS_PREREGISTRATION'
+        report['missing_fields'].append('pirc28_study_definition_hash')
+        if 'applicable_ranges' in report:
+            report['applicable_scenarios'], report['applicable_ranges'] = [], []
     if len(encode({'rows': rows, 'lineage': lineage, 'gate': report})) > MAXIMUM_RESULT_BYTES:
         raise ResearchError('RESOURCE_LIMIT', 'qualification aggregate exceeds its bounded byte quota')
     # Integrity reuse and interval computation occur after the actual read;
@@ -375,6 +402,7 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
         'lineage': lineage, 'gate': report, 'state': 'FIXTURE_ONLY' if fixture else report['state'],
         'qualified_identifiability': scientific, 'real_data_authorized': False,
         'preregistration_hashes': sorted(preregistrations), 'code_hash': next(iter(sources)),
+        'study_definition_hash': study_definition_hash, 'study_definition_bound': study_definition_hash is not None,
         'arm_balances': balances, 'read_bytes': consumed, 'selection_rule': SELECTION_RULE,
         'source_snapshot_event_hash': None if not events else events[-1]['hash'],
         'source_attempts_hash': snapshot_hash,

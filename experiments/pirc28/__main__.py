@@ -32,6 +32,8 @@ def main(argv=None):
     qualify.add_argument('--allow-fixture', action='store_true')
     qualify.add_argument('--parent-attempt-id')
     qualify.add_argument('--reason')
+    stage = commands.add_parser('stage-definition', help='publish immutable pre-fit metadata; never creates grants or studies')
+    stage.add_argument('path', type=Path)
     args = parser.parse_args(argv)
     if args.root is None:
         parser.error('explicit shared --root or SDE_RUNTIME_ROOT is required; no implicit new ledger')
@@ -50,7 +52,7 @@ def main(argv=None):
             grant = store.authorization(args.authorization_id, version=args.authorization_version)
             output = SharedRecovery(store, registry, recovery).resume(args.attempt_id, args.checkpoint_id,
                 authorization=grant, budget=budget)
-        else:
+        elif args.command == 'qualify':
             from .computation import QualificationRunner
             from .qualification import IdentifiabilitySpec
             value = store.manifest('pirc28-identifiability-spec-'+args.definition_hash)
@@ -65,6 +67,13 @@ def main(argv=None):
                 grants[study_id] = store.authorization(authorization_id)
             output = QualificationRunner(store).run(definition, sorted(grants), grants, budget=budget,
                 allow_fixture=args.allow_fixture, parent_attempt_id=args.parent_attempt_id, reason=args.reason)
+        else:
+            from infrastructure.research_files import opened_regular_file
+            from .study import MAXIMUM_DEFINITION_BYTES, SyntheticStudyDefinition, stage_definition
+            path = args.path.absolute()
+            with opened_regular_file(path.parent, path, maximum_bytes=MAXIMUM_DEFINITION_BYTES) as (stream, _, _):
+                definition = SyntheticStudyDefinition(stream.read(MAXIMUM_DEFINITION_BYTES+1))
+            output = stage_definition(store, definition)
         print(json.dumps(output, sort_keys=True))
         return 0
     except ResearchError as error:

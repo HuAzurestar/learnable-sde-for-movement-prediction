@@ -259,6 +259,61 @@ including a managed pilot-mode control. They are software integration checks,
 not the production phase diagram, a crash-at-any-instruction proof or a claimed
 accepted scientific result.
 
+## Immutable scientific study definitions
+
+`experiments.pirc28.study.SyntheticStudyDefinition` owns canonical immutable
+bytes, not externally mutable nested dictionaries. It freezes the reconstructible
+physical phase matrix, numeric v2 qualification/roles, one recipe per scenario,
+globally independent replicate seeds, distinct K=2 initializations, actual EM
+iterations, common physical forecast origin/horizons and runtime code identity.
+K=1/K=2 share the same source seed for a replicate. Recipe indices must implement
+the declared physical horizons across observation intervals. Every cell/recipe
+gets the existing bounded execution declaration before registration.
+
+Identical-mode controls are checked against actual A, B, a and L L^T; zero drift
+separation alone is insufficient when mode diffusion covariances differ. A
+required-qualified point cannot have identical observation laws. At least one
+true identical-mode control is required. Missing numeric thresholds, duplicated
+source seeds/initializations, changed physical recipes/horizons and new method
+family aliases are refused. Arm IDs are explicit original bindings, while
+algorithm/objective/model families and the 24-hour arm cap remain fixed across
+all scenarios, studies, initializations and retries.
+
+`stage_definition(store, definition)` publishes only phase/spec/definition
+metadata into an existing shared store before any source attempt. The CLI has
+an equivalent `stage-definition PATH` command. Neither path initializes a store,
+registers studies, creates grants or reserves budget. `proposals(binding)` returns
+detached, unregistered source metadata; it deliberately lacks a pirc25 schema,
+protocol/data binding and admission, so it is not an executable study.
+
+An operator supplies actual source protocols, packages, authorizations and
+external-history/upstream attestations through the existing shared workflow.
+`preregistration_fields(protocols)` binds the entire definition hash, all source
+study IDs, canonical synthetic recipe bytes, replicate blocks and paired primary
+score comparison; operator evidence is not fabricated by this helper.
+`register_definition_studies(store, definition, admissions)` then validates the
+complete original pilot/fit input matrix and registered preregistrations before
+registering source studies. It creates no attempts, grants or new arm families.
+Ordinary SharedRunner admission still validates actual package/source/access and
+budget authority before any numerical execution.
+
+The shared collector verifies the complete definition against every frozen
+source recipe, seed, initialization, arm and resource binding, and verifies its
+publication precedes source admissions. An unbound mathematical PASSED report
+becomes NEEDS_PREREGISTRATION with missing pirc28_study_definition_hash, not
+scientific qualification. Incomplete legacy diagnostic/pilot reports remain
+observable without being upgraded. No report grants real-data access.
+
+```console
+python -m experiments.pirc28 --root SHARED_ROOT --store-id ORIGINAL_STORE_ID stage-definition definition.json
+python -m pytest tests/test_pirc28_study.py -q
+```
+
+Temporary tests contain explicit synthetic operator attestations, including one
+actual managed source fit. They are not scientific independent replicates or
+the canonical production matrix. No numeric scientific defaults are inferred
+from those fixtures.
+
 ## Supervisor-budgeted qualification computation
 
 `experiments.pirc28.computation.QualificationRunner` runs collection and bounded
