@@ -259,6 +259,29 @@ including a managed pilot-mode control. They are software integration checks,
 not the production phase diagram, a crash-at-any-instruction proof or a claimed
 accepted scientific result.
 
+## Numerical initialization failures
+
+Registered initializers are attempted in their frozen order. Numerical fit and
+selection failures (`INFERENCE_INAPPLICABLE`, `NONFINITE`, or bounded numerical
+library errors) remain explicit diagnostics; failed candidates have null, never
+zero, selection scores. Only finite successful selection objectives can win,
+with the same stable tie rule. Contract, identity, authorization, supervisor
+budget/deadline and unknown errors are not downgraded into numerical failures.
+Successful cell artifacts retain every declared fit/selection candidate, and
+the shared collector verifies this roster and winner before exposing concise
+initializer diagnostics in cost lineage. Initializers are not new replicates.
+
+Pipeline checkpoint v2 retains failed initializers and their last accepted EM
+state. Recovery validates model, recipe/seed, observation, prior, inference and
+accepted-progress identities before skipping a retained failed initializer; it
+does not reset its initialization or iteration budget. Legacy v1 checkpoint
+shape remains readable, subject to the existing shared source/receipt binding.
+All-initializer failures raise a typed observation-only NumericalCellFailure
+with the complete history, not fabricated successful metrics. A managed
+whole-cell failure publication/consumption path is still required before
+production scientific execution; this library exception alone does not replace
+shared FAILED-attempt/cost/artifact provenance.
+
 ## Immutable scientific study definitions
 
 `experiments.pirc28.study.SyntheticStudyDefinition` owns canonical immutable

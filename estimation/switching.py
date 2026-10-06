@@ -16,6 +16,7 @@ import numpy as np
 import torch
 
 from experiments.pirc28.synthetic import ObservationBatch
+from experiments.pirc28.failures import NUMERICAL_EXCEPTIONS, NumericalCellFailure, numerical_diagnostic
 from inference.switching import InferenceSpec, filter_switching, smooth_switching
 from infrastructure.research_store import digest
 from models.switching import SwitchingError, SwitchingSDEModel
@@ -262,14 +263,27 @@ def select_initialization(fits, selection: ObservationBatch, initial_probability
         raise SwitchingError("CONTRACT_MISMATCH", "initialization count exceeds preregistered quota")
     if len({fit.initialization_id for fit in fits}) != len(fits):
         raise SwitchingError("IDENTITY_CONFLICT", "initialization IDs must be unique")
-    scores = []
+    candidates, eligible = [], []
     for fit in fits:
-        results = _filters(selection, fit.model, initial_probability, initial_means, initial_covariances, spec, check_budget)
-        scores.append(sum(result.log_likelihood for result in results))
-    winner = max(range(len(fits)), key=lambda index: (scores[index], -index))
-    return fits[winner], {"schema_version": "pirc28-initialization-selection-v1", "split_role": split_role,
+        check_budget()
+        candidate = {'initialization_id': fit.initialization_id, 'collapsed': fit.collapsed,
+                     'stopping_reason': fit.stopping_reason}
+        try:
+            results = _filters(selection, fit.model, initial_probability, initial_means, initial_covariances, spec, check_budget)
+            score = float(sum(result.log_likelihood for result in results))
+            if not math.isfinite(score):
+                raise SwitchingError('NONFINITE', 'selection objective is nonfinite')
+        except NUMERICAL_EXCEPTIONS as error:
+            candidate.update(numerical_diagnostic(error, 'selection', fit.initialization_id), score=None)
+        else:
+            candidate.update(state='SUCCEEDED', score=score)
+            eligible.append((score, -len(candidates), fit))
+        candidates.append(candidate)
+    receipt = {"schema_version": "pirc28-initialization-selection-v1", "split_role": split_role,
         "selection_hash": digest(selection.to_dict()), "rule": "largest-approximate-selection-objective-stable-tie",
-        "selected_initialization": fits[winner].initialization_id,
-        "candidates": [{"initialization_id": fit.initialization_id, "score": score,
-                        "collapsed": fit.collapsed, "stopping_reason": fit.stopping_reason}
-                       for fit, score in zip(fits, scores)]}
+        "selected_initialization": None, "candidates": candidates}
+    if not eligible:
+        raise NumericalCellFailure('selection', [fit.to_dict(include_posteriors=False) for fit in fits], receipt)
+    winner = max(eligible, key=lambda value: value[:2])[2]
+    receipt['selected_initialization'] = winner.initialization_id
+    return winner, receipt

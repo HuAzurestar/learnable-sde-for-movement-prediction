@@ -8,6 +8,7 @@ interpretation. Even scientific qualification never grants real-data access.
 from dataclasses import replace
 import hashlib
 import json
+import math
 
 import numpy as np
 
@@ -16,7 +17,9 @@ from application.research_evidence import authorize_study, require_unexpired_dis
 from application.research_preregistration import hash_reference, validate_preregistration
 from application.research_reuse import verified_reuse
 from infrastructure.research_store import ResearchError, digest, encode
-from .pipeline import validate_recipe
+from .pipeline import validate_recipe, validate_failed_fit
+from .failures import valid_numerical_diagnostic
+from models.switching import SwitchingError
 from .qualification import METRICS, IdentifiabilitySpec, phase_manifest, qualify
 from .runtime import PLUGIN_ID, switching_plugin
 from .synthetic import ScenarioSpec
@@ -181,7 +184,7 @@ def _preregistration(store, study, definition, cell, events):
 
 
 def _success_row(definition, study, cell, result, artifact_hash):
-    scenario, _, _, _, _ = validate_recipe(study['switching_recipe'], cell['fit_K'])
+    scenario, initial_models, inference, prior_mean, prior_covariance = validate_recipe(study['switching_recipe'], cell['fit_K'])
     fit, diagnostic = result.get('fit', {}), result.get('fit', {}).get('recovery_diagnostics', {})
     if (result.get('source_schema') != 'pirc28-synthetic-result-v1'
             or fit.get('model', {}).get('K') != cell['fit_K']
@@ -220,6 +223,50 @@ def _success_row(definition, study, cell, result, artifact_hash):
             or [candidate.get('initialization_id') for candidate in candidates] != expected_ids
             or [candidate.get('initialization_id') for candidate in selection.get('candidates', [])] != expected_ids):
         raise ResearchError('UNQUALIFIED', 'initialization selection source or complete diagnostic history differs')
+    eligible = []
+    probability = np.ones(cell['fit_K'])/cell['fit_K']
+    means = np.tile(prior_mean, (cell['fit_K'], 1))
+    covariance = np.tile(prior_covariance, (cell['fit_K'], 1, 1))
+    for index, (candidate, selection_row, model) in enumerate(zip(candidates, selection['candidates'], initial_models)):
+        identifier = expected_ids[index]
+        if candidate.get('state') == 'FAILED':
+            try:
+                validate_failed_fit(candidate, model, index, generated[0]['observations_hash'],
+                                    probability, means, covariance, inference)
+            except SwitchingError as error:
+                raise ResearchError('UNQUALIFIED', 'failed initialization disclosure differs') from error
+            if selection_row != {**candidate, 'score': None}:
+                raise ResearchError('UNQUALIFIED', 'failed fit cannot be eligible for selection')
+            continue
+        if (candidate.get('state') != 'SUCCEEDED' or candidate.get('schema_version') != 'pirc28-fit-v1'
+                or candidate.get('initial_model_hash') != digest(model.to_dict())
+                or type(candidate.get('model')) is not dict or candidate['model'].get('K') != cell['fit_K']
+                or candidate.get('configured_K') != cell['fit_K']
+                or candidate.get('model_hash') != digest(candidate.get('model'))
+                or candidate.get('inference_spec') != inference.to_dict()
+                or type(candidate.get('collapsed')) is not bool
+                or selection_row.get('collapsed') != candidate['collapsed']
+                or selection_row.get('stopping_reason') != candidate.get('stopping_reason')):
+            raise ResearchError('UNQUALIFIED', 'fitted initialization/model/selection history differs')
+        trace, rejected = candidate.get('objective_trace'), candidate.get('rejected_objectives')
+        if (type(trace) is not list or not 1 <= len(trace) <= inference.max_iterations+1
+                or type(rejected) is not list or len(rejected) > inference.max_iterations*inference.line_search_steps
+                or any(type(value) not in (int, float) or not math.isfinite(value) for value in trace+rejected)
+                or np.any(np.diff(trace) < 0)
+                or candidate.get('stopping_reason') not in {'MAX_ITERATIONS', 'REJECTED_STEP', 'CONVERGED_APPROXIMATE_OBJECTIVE'}):
+            raise ResearchError('UNQUALIFIED', 'successful initialization accepted/rejected progress differs')
+        if selection_row.get('state') == 'FAILED':
+            if (not valid_numerical_diagnostic(selection_row, 'selection', identifier)
+                    or selection_row.get('score') is not None):
+                raise ResearchError('UNQUALIFIED', 'failed selection must retain typed failure without a score')
+        elif (selection_row.get('state') == 'SUCCEEDED'
+                and type(selection_row.get('score')) in (int, float) and math.isfinite(selection_row['score'])
+                and selection_row.get('error_code') is None):
+            eligible.append((selection_row['score'], -index, identifier))
+        else:
+            raise ResearchError('UNQUALIFIED', 'selection candidate is neither applicable nor a typed failure')
+    if not eligible or selected != max(eligible, key=lambda value: value[:2])[2]:
+        raise ResearchError('UNQUALIFIED', 'selected initializer is not the preregistered applicable-score winner')
     # This diagnostic remains separate from test posterior mode alignment.
     chosen = next((candidate for candidate in candidates if candidate.get('initialization_id') == selected), None)
     if chosen is None or chosen.get('model') != fit.get('model') or chosen.get('model_hash') != digest(fit.get('model')):
@@ -370,6 +417,14 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
                 raise ResearchError('CORRUPT_ARTIFACT', 'qualification source is not canonical result JSON')
             verified_reuse(store, selected, study, cell, plugin)
             row = _success_row(definition, study, cell, result, artifact_id)
+            lineage[-1]['initialization_diagnostics'] = [
+                {'initialization_id': fit['initialization_id'], 'fit_state': fit['state'],
+                 'selection_state': selection['state'], 'fit_error_code': fit.get('error_code'),
+                 'selection_error_code': selection.get('error_code'), 'selection_score': selection['score'],
+                 'collapsed': fit.get('collapsed'), 'stopping_reason': fit.get('stopping_reason'),
+                 'last_accepted_state_hash': None if fit.get('last_accepted_state') is None
+                     else digest(fit['last_accepted_state'])}
+                for fit, selection in zip(result['fit']['initializations'], result['fit']['selection']['candidates'])]
             rows.append(row)
             disclosed.append((artifact_id, grant))
         else:

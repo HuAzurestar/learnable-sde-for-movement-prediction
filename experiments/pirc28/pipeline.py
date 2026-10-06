@@ -5,6 +5,7 @@ the admitted recipe, shared poll, progress sink and accepted-iteration checkpoin
 """
 
 from dataclasses import replace
+import copy
 import math
 
 import numpy as np
@@ -14,6 +15,8 @@ from inference.switching import InferenceSpec, filter_switching, forecast_switch
 from infrastructure.research_store import digest
 from models.switching import SwitchingError, SwitchingSDEModel, finite_array, psd_array
 from .synthetic import ScenarioSpec, generate_scenario
+from .failures import (NUMERICAL_EXCEPTIONS, NumericalCellFailure, numerical_diagnostic,
+                       valid_numerical_diagnostic)
 from .qualification import IdentifiabilitySpec, forecast_coverage, jump_diagnostics, mode_diagnostics, parameter_recovery
 
 
@@ -81,6 +84,36 @@ def energy_score(samples, target):
     return float(first - 0.5 * total / len(samples)**2)
 
 
+def validate_failed_fit(value, initial_model, index, observations_hash, probability, means, covariance, inference):
+    """Bind retained failure/accepted progress before skipping it on recovery."""
+    identifier = 'init-'+str(index)
+    if (not valid_numerical_diagnostic(value, 'fit', identifier)
+            or set(value) != {'schema_version', 'state', 'initialization_id', 'stage', 'error_code',
+                             'exception_type', 'initial_model_hash', 'last_accepted_state'}
+            or value['initial_model_hash'] != digest(initial_model.to_dict())):
+        raise SwitchingError('IDENTITY_CONFLICT', 'failed initialization checkpoint identity differs')
+    state = value['last_accepted_state']
+    if state is None:
+        return
+    identity = {'data_hash': observations_hash, 'spec_hash': digest(inference.to_dict()),
+        'initial_distribution_hash': digest([np.asarray(item).tolist() for item in (probability, means, covariance)]),
+        'initialization_id': identifier, 'initial_model_hash': digest(initial_model.to_dict())}
+    if (type(state) is not dict or set(state) != {'schema_version', 'identity', 'model', 'objective_trace',
+            'rejected_objectives', 'completed_iterations', 'complete_reason'}
+            or state['schema_version'] != 'pirc28-em-checkpoint-v1' or state['identity'] != identity):
+        raise SwitchingError('IDENTITY_CONFLICT', 'failed initialization accepted-state identity differs')
+    completed, trace, rejected = state['completed_iterations'], state['objective_trace'], state['rejected_objectives']
+    if (type(completed) is not int or not 0 <= completed <= inference.max_iterations
+            or type(trace) is not list or type(rejected) is not list or len(trace) != completed+1
+            or any(type(item) not in (int, float) or not math.isfinite(item) for item in trace+rejected)
+            or np.any(np.diff(trace) < 0)
+            or state['complete_reason'] not in {None, 'MAX_ITERATIONS', 'REJECTED_STEP', 'CONVERGED_APPROXIMATE_OBJECTIVE'}):
+        raise SwitchingError('CONTRACT_MISMATCH', 'failed initialization accepted progress differs')
+    model = SwitchingSDEModel.from_dict(state['model'])
+    if model.n_modes != initial_model.n_modes or model.rate_bounds != initial_model.rate_bounds:
+        raise SwitchingError('IDENTITY_CONFLICT', 'failed initialization model family differs')
+
+
 def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, resume_state=None):
     scenario, initial_models, inference, prior_mean, prior_covariance = validate_recipe(recipe, k)
     if type(seed) is not int or not 0 <= seed < 2**64:
@@ -91,19 +124,26 @@ def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, res
     rng_state = {'base_pcg64': rng.bit_generator.state, 'split_seeds': split_seeds,
         'child_stream_rule': 'PCG64-per-path-role-v1', 'resume_strategy': 'recompute-role-streams'}
     fit_states = [None] * len(initial_models)
+    fit_failures = [None] * len(initial_models)
     if resume_state is not None:
         required = {'schema_version', 'recipe_hash', 'fit_states', 'rng_state'}
-        if (type(resume_state) is not dict or set(resume_state) != required
-                or resume_state['schema_version'] != 'pirc28-pipeline-checkpoint-v1'
+        legacy = type(resume_state) is dict and resume_state.get('schema_version') == 'pirc28-pipeline-checkpoint-v1'
+        if (type(resume_state) is not dict or set(resume_state) != (required if legacy else required | {'fit_failures'})
+                or resume_state['schema_version'] not in {'pirc28-pipeline-checkpoint-v1', 'pirc28-pipeline-checkpoint-v2'}
                 or resume_state['recipe_hash'] != identity or resume_state['rng_state'] != rng_state
+                or type(resume_state['fit_states']) is not list
                 or len(resume_state['fit_states']) != len(fit_states)):
             raise SwitchingError('IDENTITY_CONFLICT', 'pipeline checkpoint recipe, cell or random streams differ')
-        fit_states = list(resume_state['fit_states'])
+        fit_states = copy.deepcopy(resume_state['fit_states'])
+        if not legacy:
+            if type(resume_state['fit_failures']) is not list or len(resume_state['fit_failures']) != len(fit_states):
+                raise SwitchingError('IDENTITY_CONFLICT', 'failed initialization checkpoint count differs')
+            fit_failures = copy.deepcopy(resume_state['fit_failures'])
 
     def progress():
         if progress_callback is not None:
-            progress_callback({'schema_version': 'pirc28-pipeline-checkpoint-v1', 'recipe_hash': identity,
-                               'fit_states': list(fit_states), 'rng_state': rng_state})
+            progress_callback(copy.deepcopy({'schema_version': 'pirc28-pipeline-checkpoint-v2', 'recipe_hash': identity,
+                'fit_states': fit_states, 'fit_failures': fit_failures, 'rng_state': rng_state}))
 
     progress()
     batches, truths, generated = [], [], []
@@ -117,20 +157,53 @@ def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, res
         generated.append({'role': role, 'scenario_hash': manifest['scenario_hash'],
                           'observations_hash': manifest['observations_hash'], 'truth_hash': manifest['truth_hash']})
     probability, means, covariance = np.ones(k)/k, np.tile(prior_mean, (k, 1)), np.tile(prior_covariance, (k, 1, 1))
-    fits = []
+    fits, histories = [], []
     for index, initial_model in enumerate(initial_models):
+        check_budget()
+        failure = fit_failures[index]
+        if failure is not None:
+            validate_failed_fit(failure, initial_model, index, digest(batches[0].to_dict()),
+                                probability, means, covariance, inference)
+            if failure['last_accepted_state'] != fit_states[index]:
+                raise SwitchingError('IDENTITY_CONFLICT', 'failed initialization checkpoint progress differs')
+            histories.append(failure)
+            continue
         def fit_progress(state):
             fit_states[index] = state
             progress()
-        fit = fit_switching(batches[0], initial_model, probability, means, covariance, inference,
-            initialization_id='init-' + str(index), check_budget=check_budget, progress_callback=fit_progress,
-            resume_state=fit_states[index])
+        try:
+            fit = fit_switching(batches[0], initial_model, probability, means, covariance, inference,
+                initialization_id='init-' + str(index), check_budget=check_budget, progress_callback=fit_progress,
+                resume_state=fit_states[index])
+        except NUMERICAL_EXCEPTIONS as error:
+            failure = numerical_diagnostic(error, 'fit', 'init-'+str(index))
+            failure.update(initial_model_hash=digest(initial_model.to_dict()),
+                           last_accepted_state=copy.deepcopy(fit_states[index]))
+            fit_failures[index] = failure
+            histories.append(failure)
+            progress()
+            continue
         # The registered output preserves parameter/iteration diagnostics and
         # test posteriors; completed training histories can be recomputed.
         fit.filtered = ()
         fits.append(fit)
-    selected, selection = select_initialization(fits, batches[1], probability, means, covariance,
-        inference, split_role='selection', check_budget=check_budget)
+        histories.append({**fit.to_dict(include_posteriors=False), 'state': 'SUCCEEDED',
+                          'initial_model_hash': digest(initial_model.to_dict())})
+    def complete_selection(selection):
+        candidates = {value['initialization_id']: value for value in selection['candidates']}
+        selection['candidates'] = [candidates.get(value['initialization_id'], {**value, 'score': None}) for value in histories]
+        return selection
+    try:
+        if not fits:
+            raise NumericalCellFailure('fit', histories)
+        selected, selection = select_initialization(fits, batches[1], probability, means, covariance,
+            inference, split_role='selection', check_budget=check_budget)
+    except NumericalCellFailure as error:
+        error.diagnostic.update(initializations=histories, recipe_hash=identity, generated_inputs=generated)
+        if error.diagnostic['selection'] is not None:
+            complete_selection(error.diagnostic['selection'])
+        raise
+    selection = complete_selection(selection)
     forecasts, scores, test_objectives, posterior_probabilities, coverage = [], [], [], [], []
     origin_index, horizon_indices = recipe['forecast_origin_index'], recipe['horizon_indices']
     offsets = [float(batches[2].times[index] - batches[2].times[origin_index]) for index in horizon_indices]
@@ -196,7 +269,7 @@ def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, res
         else:
             recovery_diagnostics['unavailable'] = 'parameter/mode recovery is unavailable when truth/fit K differ or K=1'
     fit_payload = {'model': selected.model.to_dict(), 'selection': selection,
-        'initializations': [fit.to_dict(include_posteriors=False) for fit in fits],
+        'initializations': histories,
         'generated_inputs': generated, 'recipe_hash': identity, 'unavailable_metrics': unavailable,
         'mode_diagnostics': legacy_mode_diagnostics,
         'interpretation_level': 'synthetic-statistical-only', 'qualified_identifiability': False}
