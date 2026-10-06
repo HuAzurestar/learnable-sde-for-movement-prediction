@@ -227,8 +227,13 @@ def test_actual_owner_forecast_ack_reopen_and_fresh_cost_preserve_complete_sampl
     from infrastructure.research_store import ResearchStore
     from tests.test_pirc26_runtime import prepare
     role = "validation" if operation == "forecast" else "train"
+    # New float32's complete native workload reached the90s reservation's real
+    # soft stop at full solver work, so it cannot serve as an uninterrupted
+    # baseline. Preserve256x64/model and use a finite150s engineering baseline
+    # and fresh resume; original float64/train and production budgets stay fixed.
+    full_seconds = 150 if dtype == torch.float32 else 90
     baseline,value,_,_,registry,recovery,_ = prepare(tmp_path/"baseline",operation=operation,role=role,long_forecast=True,two_origins=two_origins,dtype=dtype)
-    expected = SharedRunner(baseline,registry,recovery_registry=recovery).run_cell(value["study_id"],digest(value["cells"][0]),budget=BudgetSpec(90))
+    expected = SharedRunner(baseline,registry,recovery_registry=recovery).run_cell(value["study_id"],digest(value["cells"][0]),budget=BudgetSpec(full_seconds))
     assert expected["state"] == "SUCCEEDED",expected
     target = json.loads((baseline.path/"artifacts"/expected["artifact_id"]).read_bytes())
     # Calibrate a separate finite engineering reservation from observed native
@@ -251,7 +256,7 @@ def test_actual_owner_forecast_ack_reopen_and_fresh_cost_preserve_complete_sampl
     before = BudgetLedger(store).balance("affine")["committed_ms"]
     assert before > 0
     reopened = ResearchStore(tmp_path/"resumed",store.store_id)
-    resumed = SharedRecovery(reopened,registry,recovery).resume(stopped["attempt_id"],saves[0]["artifact_id"],authorization=grant,budget=BudgetSpec(90))
+    resumed = SharedRecovery(reopened,registry,recovery).resume(stopped["attempt_id"],saves[0]["artifact_id"],authorization=grant,budget=BudgetSpec(full_seconds))
     assert resumed["state"] == "SUCCEEDED",resumed
     actual = json.loads((reopened.path/"artifacts"/resumed["artifact_id"]).read_bytes())
     assert actual["forecast"] == target["forecast"] and actual["metrics"] == target["metrics"]
