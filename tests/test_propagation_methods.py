@@ -34,6 +34,22 @@ def test_chunk_size_and_resumed_sample_ranges_replay_the_same_paths():
     np.testing.assert_array_equal(expected, resumed)
 
 
+def test_coupling_identity_and_pilot_phase_define_distinct_explicit_streams():
+    package, request = inputs(samples=8)
+    original = endpoints(package, request)
+    assert not np.array_equal(original, endpoints(package, replace(request, coupling_id="other-root")))
+    assert not np.array_equal(original, endpoints(package, request, phase=1))
+    np.testing.assert_array_equal(original, endpoints(package, replace(request, functional="endpoint-halfspace")))
+
+
+def test_path_generation_preserves_numpy_global_random_state():
+    package, request = inputs(samples=8)
+    before = np.random.get_state()
+    endpoints(package, request)
+    after = np.random.get_state()
+    assert before[0] == after[0] and np.array_equal(before[1], after[1]) and before[2:] == after[2:]
+
+
 def test_coupled_coarse_is_the_sum_of_adjacent_fine_brownian_increments():
     package, request = inputs(samples=6, steps=2)
     fine, coarse = next(endpoint_chunks(package, request, level=1, paired=True))[2:4]

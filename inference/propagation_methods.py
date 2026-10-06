@@ -40,7 +40,9 @@ def _scheme(A, b, L, dt, solver):
 
 def _rng(request, sample_id, level, phase):
     # Per-sample independent streams make chunk size and resume position neutral.
-    return np.random.default_rng(np.random.SeedSequence([request.seed, sample_id, level, phase]))
+    root_hash = content_hash({"coupling_id": request.coupling_id, "scheme": "per-sample-seedsequence-v1"})
+    root_words = [int(root_hash[start:start+8], 16) for start in range(0, 32, 8)]
+    return np.random.default_rng(np.random.SeedSequence([request.seed, sample_id, level, phase, *root_words]))
 
 
 def _functional(endpoint, request):
