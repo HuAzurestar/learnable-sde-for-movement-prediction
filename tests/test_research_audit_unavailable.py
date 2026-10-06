@@ -1,5 +1,6 @@
 """Typed audit failures on actual staging I/O, with original exposure retained."""
 import json
+import errno
 import os
 import subprocess
 import sys
@@ -12,6 +13,33 @@ from tests.research_audit_fixtures import audit_fault, payload_opens
 from tests.test_research_data_access_view import access_service
 from tests.test_research_web import request
 from tests.test_research_export_authorization import source, bundles
+
+
+@pytest.mark.skipif(not getattr(os, "O_PATH", 0), reason="requires Linux O_PATH query descriptors")
+def test_audit_payload_observer_excludes_queries_and_counts_real_reads(tmp_path):
+    target = tmp_path / "query-control.bin"
+    content = b"synthetic payload observer control"
+    target.write_bytes(content)
+    with payload_opens([target]) as opened:
+        fd = os.open(target, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            assert os.fstat(fd).st_size == len(content)
+            with pytest.raises(OSError) as failure:
+                os.read(fd, 1)
+            assert failure.value.errno == errno.EBADF
+        finally:
+            os.close(fd)
+        assert opened == [], "query-only descriptors cannot count as payload opens"
+        fd = os.open(target, os.O_RDONLY)
+        try:
+            assert os.read(fd, len(content) + 1) == content
+        finally:
+            os.close(fd)
+        assert opened == [str(target)]
+        assert target.read_bytes() == content
+        assert opened == [str(target), str(target)]
+    assert target.read_bytes() == content
+    assert opened == [str(target), str(target)], "closed observers must remain inactive"
 
 
 @pytest.mark.parametrize("kind", ["EXPOSURE_ALLOWED", "EXPOSURE_DENIED", "READ_STARTED", "READ_COMPLETED", "READ_FAILED"])

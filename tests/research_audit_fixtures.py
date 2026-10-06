@@ -65,6 +65,8 @@ def payload_opens(paths):
     active, opened = [True], []
     def audit(event, params):
         if (active[0] and event == "open" and isinstance(params[0], (str, bytes))
+                # O_PATH queries the name/identity but cannot read payload.
+                and not (params[2] & getattr(os, "O_PATH", 0))
                 and os.path.normcase(os.path.abspath(os.fsdecode(params[0]))) in targets):
             opened.append(os.fsdecode(params[0]))
     sys.addaudithook(audit)

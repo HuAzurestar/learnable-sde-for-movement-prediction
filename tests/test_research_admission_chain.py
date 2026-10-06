@@ -357,7 +357,10 @@ def test_formal_chain_roundtrip_and_resealed_tampering_rejected_by_tsde(tmp_path
     accepted = invoke(bundle, "accepted")
     assert accepted.returncode == 0, accepted.stdout + accepted.stderr
     result = json.loads((tmp_path / "accepted/aggregate.json").read_bytes())
-    assert result["qualification"] == "formal" and result["successful_cell_count"] == len(value["cells"])
+    # --formal validates the source admission; standalone aggregation has no
+    # managed computation proof and must remain descriptive.
+    assert result["qualification"] == "descriptive"
+    assert result["successful_cell_count"] == len(value["cells"])
     assert len(result["comparisons"]) == (len(horizons) if horizons else 1)
     if horizons:
         assert {arm["comparison_dimensions"]["horizon"] for arm in result["arms"]} == set(horizons)
