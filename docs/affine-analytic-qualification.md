@@ -77,12 +77,13 @@ cost from its arithmetic count or its configured job maximum.
 
 The analysis and result deliberately remain `scientific_qualification: false`
 and `qualification: fixture`. Positive numerical checks are not a formal grant.
-Next, formal owner admission must accept only an actual successful, settled,
-source-bound qualification attempt and its exact frozen policy/thresholds before
-protected input exposure, additionally proving cost/resource and preregistration
-bindings. Imported generic report hashes or a worker mode/flag are insufficient.
-Future result/paper readers must preserve this chain; no descriptive result is
-promoted by this adapter. Other methods require their own actual qualification.
+The [managed analytic owner gate](managed-analytic-admission.md) now accepts only
+an actual successful, settled, source-bound qualification attempt and its exact
+frozen policy/thresholds before protected input exposure, additionally checking
+cost/resource and preregistration bindings. Imported generic report hashes or a
+worker mode/flag are insufficient. The independent paper reader still needs its
+corresponding new-chain validator; no descriptive result is promoted by this
+qualification adapter. Other methods require their own actual qualification.
 
 Tests cover the positive numerical checks, each failed threshold, strict policy
 binding, explicit non-float resources, real shared workers with positive/negative

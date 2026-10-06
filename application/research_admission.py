@@ -248,6 +248,11 @@ class AdmissionGate:
                         raise ResearchError("UNQUALIFIED", "adjudication policy differs from pre-read frozen preregistration")
                 report, evidence = self._qualification(package, prereg, grant)
                 documents.update(qualification=report, qualification_evidence=evidence)
+                if plugin.plugin_id in {"affine-propagation", "affine-propagation-chunk",
+                        "synthetic-propagation", "synthetic-propagation-chunk"}:
+                    from .propagation_qualification_admission import prepare_managed_qualification
+                    documents["propagation_qualification"] = prepare_managed_qualification(
+                        self.store, spec, cell, package, prereg)
             purpose = settings.get("purpose")
             root = grant.get("data_root")
             if not isinstance(root, str) or not Path(root).is_absolute():
@@ -269,6 +274,10 @@ class AdmissionGate:
             for permission in (documents["authorization"], documents.get("model_authorization", documents["authorization"])):
                 if datetime.fromisoformat(permission["expires_at"]) <= datetime.fromisoformat(receipt["admitted_at"]):
                     raise ResearchError("UNAUTHORIZED_DATA", "execution permission expired during input admission")
+            if "propagation_qualification" in documents:
+                qualified = documents["propagation_qualification"]
+                self.store.verify_artifact_read(qualified["source_artifact"]["artifact_id"],
+                    purpose="evaluate", authorization=qualified["authorization"])
         receipt["admission_hash"] = digest(receipt)
         self.store.publish("admission-" + receipt["admission_hash"], receipt)
         self.store.append("ADMISSION", {"attempt_id": attempt_id, "run_id": run["run_id"],
@@ -299,6 +308,9 @@ class AdmissionGate:
                     raise ResearchError("UNQUALIFIED", "result metric definition/unit differs from frozen adjudication policy")
             if result.get("qualification") != receipt["qualification"]:
                 raise ResearchError("UNQUALIFIED", "worker cannot change admitted qualification")
+            if "propagation_qualification" in receipt.get("documents", {}):
+                from .propagation_qualification_admission import validate_formal_analytic_result
+                validate_formal_analytic_result(receipt, spec, cell, result)
             if result.get("admission_hash", receipt["admission_hash"]) != receipt["admission_hash"]:
                 raise ResearchError("CONTRACT_MISMATCH", "worker substituted another admission")
             result["admission_hash"] = receipt["admission_hash"]
@@ -337,7 +349,10 @@ class AdmissionGate:
                 if isinstance(exc, ResearchError):
                     raise
                 raise ResearchError("CONTRACT_MISMATCH", "incomplete execution admission evidence") from exc
-            return command_builder(output)
+            command = command_builder(output)
+            if "propagation_qualification" in admitted.get("documents", {}):
+                command = [*command, "--admission-hash", admitted["admission_hash"]]
+            return command
         def validate(result):
             return self.result_validator(admitted, spec, cell, plugin)(result)
         def checkpoint(state, progress, deadline):

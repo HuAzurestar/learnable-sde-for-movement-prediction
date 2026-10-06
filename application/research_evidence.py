@@ -146,6 +146,11 @@ def _export_grants(bundle, authorization):
                     and bundle["study_id"] not in grant.get("consumer_study_ids", [])):
                 raise ResearchError("UNAUTHORIZED_DATA", "model evidence export consumer differs")
             grants[digest(grant)] = grant
+        if documents.get("propagation_qualification"):
+            grant = documents["propagation_qualification"]["authorization"]
+            if grant["study_id"] != bundle["study_id"] and bundle["study_id"] not in grant.get("consumer_study_ids", []):
+                raise ResearchError("UNAUTHORIZED_DATA", "analytic qualification export consumer differs")
+            grants[digest(grant)] = grant
     return list(grants.values())
 
 
@@ -260,6 +265,15 @@ def _assemble_evidence(store, study_id, authorization):
                         content = store.read_artifact(attachment["artifact"]["artifact_id"], purpose="export", authorization=model_grant)
                         if content != encode(attachment["content"]):
                             raise ResearchError("CORRUPT_ARTIFACT", "model qualification export binding changed")
+                if documents.get("propagation_qualification"):
+                    evidence = documents["propagation_qualification"]
+                    source_grant = evidence["authorization"]
+                    if source_grant["study_id"] != study_id and study_id not in source_grant.get("consumer_study_ids", []):
+                        raise ResearchError("UNAUTHORIZED_DATA", "analytic qualification export consumer differs")
+                    content = store.read_artifact(evidence["source_artifact"]["artifact_id"],
+                        purpose="export", authorization=source_grant)
+                    if content != encode(evidence["source_result"]):
+                        raise ResearchError("CORRUPT_ARTIFACT", "analytic qualification export binding changed")
                 row.update(admission=admission, admission_hash=result["admission_hash"])
             elif result["qualification"] == "qualified" or "cell_packages" in (spec.get("admission") or {}):
                 raise ResearchError("UNQUALIFIED", "qualified or per-cell-bound result lacks execution admission evidence")

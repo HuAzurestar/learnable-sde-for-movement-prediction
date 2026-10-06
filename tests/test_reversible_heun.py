@@ -172,4 +172,4 @@ def test_adapter_reserves_bounded_auxiliary_workspace_and_keeps_four_physical_st
         assert tensors[name] == [expected_rows, 4]
     assert tensors["augmented-gaussian-workspace"] == [4]*5
     assert config["samples"]*config["steps"] <= 1_000_000
-    assert plugin.registry_entry.version == "1.1.0"
+    assert plugin.registry_entry.version == "1.2.0"

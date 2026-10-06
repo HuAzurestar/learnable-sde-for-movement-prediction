@@ -63,7 +63,7 @@ def propagation_plugin(*, recovery=False, synthetic=False):
         capabilities = capabilities - {"exact-transition"}
     identity = ("synthetic-propagation" if synthetic else "affine-propagation") + ("-chunk" if recovery else "")
     resume_level = "chunk" if recovery else "restart-only"
-    entry = RegistryEntry(identity, "execution-adapter", "1.1.0", implementation_hash(propagation_command),
+    entry = RegistryEntry(identity, "execution-adapter", "1.2.0", implementation_hash(propagation_command),
         config, {"type": "object", "properties": inputs, "required": sorted(inputs), "additionalProperties": False},
         {"type": "object", "properties": {"schema_version": {"type": "string", "enum": ["pirc25-result-v1"]},
             "status": {"type": "string", "enum": ["SUCCEEDED"]}}, "required": ["schema_version", "status"], "additionalProperties": True},

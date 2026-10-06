@@ -86,10 +86,15 @@ def pilot_policy(spec, cell, request, config):
         raise ResearchError("UNQUALIFIED", "frozen independent pilot policy/role/shared MLMC arm is required") from exc
 
 
-def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None):
+def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admission=None):
     from inference.propagation_methods import (analytic_estimate, monte_carlo, mlmc_estimate, importance_sampling)
     from inference.nonlinear_propagation import cubature_estimate
     package, request, config, plugin = validate_propagation_cell(spec, cell)
+    from infrastructure.research_admission_selection import select_admission_package
+    settings, _ = select_admission_package(spec, cell)
+    formal = settings.get("mode") == "formal"
+    if formal and admission is None or not formal and admission is not None:
+        raise ResearchError("UNQUALIFIED", "formal propagation needs its owner admission, never a caller qualification flag")
     recovery = plugin.resume_level == "chunk"
     if not recovery and (resume_state is not None or checkpoint is not None):
         raise ResearchError("CONTRACT_MISMATCH", "restart-only methods cannot accept chunk state")
@@ -107,12 +112,25 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None):
     synthetic = isinstance(package, FrozenNonlinearPackage)
     metrics = ({"functional_estimate": result.estimate} if synthetic else
                {"absolute_error_vs_float64_reference": abs(result.estimate-analytic_estimate(package, request).estimate)})
+    qualified_components = None
+    if formal:
+        from .propagation_qualification_admission import qualified_analytic_forecast, METRIC
+        error, qualified_components = qualified_analytic_forecast(spec, cell, package, request,
+            config["method"], result, admission)
+        metrics = {METRIC: error}
     unit = "m" if request.functional == "endpoint-x" else "1"
     output = {"metrics": metrics,
         "forecast": {"kind": result.kind, "horizons": list(request.horizons), "functional": result.manifest(),
                      "model_package_hash": package.package_hash, "request_hash": request.request_hash},
         "fit": {"training": "none; frozen synthetic generator"},
         "source_schema": "synthetic-endpoint-propagation-v1" if synthetic else "endpoint-propagation-v1"}
+    if qualified_components is not None:
+        output["forecast"]["qualified_error_components"] = qualified_components
+        budget = output["forecast"]["functional"]["error_budget"]
+        budget["reference"] = {"value": qualified_components["reference_width_upper"], "units": unit,
+            "estimated_by": "outward declared-affine continuous functional interval width", "status": "BOUNDED"}
+        budget["time_discretization"] = {"value": qualified_components["time_bias_absolute_upper"], "units": unit,
+            "estimated_by": "outward absolute signed grid-minus-continuous expectation bound", "status": "BOUNDED"}
     if config["method"] == "mlmc-pilot":
         from inference.mlmc_pilot import analyze_mlmc_pilot
         output["forecast"]["pilot_analysis"] = analyze_mlmc_pilot(request, result, pilot_policy(spec, cell, request, config))
@@ -124,7 +142,8 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None):
             config["method"], policy, result)
     # Computational completion keeps low-ESS/unresolved estimates as artifacts;
     # estimator status remains visible and cannot be scientific qualification.
-    return {"schema_version": "pirc25-result-v1", "status": "SUCCEEDED", "qualification": "fixture",
+    return {"schema_version": "pirc25-result-v1", "status": "SUCCEEDED", "qualification": "qualified" if formal else "fixture",
+            **({"admission_hash": admission["admission_hash"]} if formal else {}),
             "spec_hash": digest(spec), "cell_hash": digest(cell), "protocol_hash": spec["protocol_hash"],
             "state_order": list(plugin.state_order), "units": list(plugin.units), "time_unit": "s",
             "resume_level": plugin.resume_level, "input_hash": spec["data_hash"], "output_hash": digest(output),

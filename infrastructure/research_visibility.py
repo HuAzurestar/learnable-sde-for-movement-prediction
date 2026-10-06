@@ -45,6 +45,11 @@ def admission_visibility(manifest, receipt):
     if "upstream_snapshot" in documents:
         upstream = documents["upstream_snapshot"]
         labels.append(upstream_metadata_visibility(upstream["snapshot"], upstream["acceptance_catalog"]))
+    if "propagation_qualification" in documents:
+        evidence = documents["propagation_qualification"]
+        metadata = evidence["source_artifact"]
+        labels.append(metadata.get("visibility", "restricted"))
+        labels.append(manifest("artifact-"+metadata["artifact_id"])["visibility"])
     return combine_visibility(labels)
 
 
@@ -83,6 +88,11 @@ def _package_lineage_visibility(manifest, reference, seen, labels):
     if digest(package) != reference:
         raise ResearchError("CONTRACT_MISMATCH", "source package binding differs")
     labels.append(package.get("visibility", "restricted"))
+    pointer = package.get("payload", {}).get("managed_analytic_qualification")
+    if pointer is not None:
+        if type(pointer) is not dict or not isinstance(pointer.get("source_artifact_id"), str):
+            raise ResearchError("CONTRACT_MISMATCH", "analytic qualification lineage pointer malformed")
+        labels.append(manifest("artifact-"+pointer["source_artifact_id"])["visibility"])
     if package.get("qualification_hash"):
         report = manifest("qualification-" + package["qualification_hash"])
         if digest(report) != package["qualification_hash"]:
