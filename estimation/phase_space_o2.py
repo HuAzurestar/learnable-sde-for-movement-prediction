@@ -67,7 +67,8 @@ class O2Plan:
 
 
 def fit_o2(model, examples, plan, o1_result, *, resume_state=None, cancellation=None,
-           progress=None, checkpoint_requested=None, checkpoint_handler=None):
+           progress=None, checkpoint_requested=None, checkpoint_handler=None,
+           checkpoint_byte_limit=4 * 1024 * 1024):
     """G1 through the common solver; no latent model or alternate data authority.
 
     Each update uses one train origin with short-to-long cumulative horizons.
@@ -129,6 +130,7 @@ def fit_o2(model, examples, plan, o1_result, *, resume_state=None, cancellation=
 
     result = train_loop(model, list(model.acceleration_model.parameters()), plan, scope, objective, monitor,
                         resume_state=resume_state, cancellation=cancellation, progress=progress,
-                        checkpoint_requested=checkpoint_requested, checkpoint_handler=checkpoint_handler)
+                        checkpoint_requested=checkpoint_requested, checkpoint_handler=checkpoint_handler,
+                        checkpoint_byte_limit=checkpoint_byte_limit)
     return {**result, "o1_lineage_hash": lineage, "diffusion_policy": "frozen-o1",
             "training_score": "position-energy-u-exact-v1", "monitor_policy": "all-train-origins-horizons-fixed-independent-noise"}

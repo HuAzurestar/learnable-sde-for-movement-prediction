@@ -16,7 +16,7 @@ from application.research_registry import GLOBAL_LIMITS, RegistryEntry, implemen
 from infrastructure.research_store import ResearchError, digest, encode
 
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 STATE = ("x", "y", "vx", "vy")
 UNITS = ("m", "m", "m/s", "m/s")
 FAMILIES = ("M0", "M1-S", "M1-R", "M2")

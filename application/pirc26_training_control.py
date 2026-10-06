@@ -9,7 +9,7 @@ import time
 import os
 
 from estimation.phase_space import fit_o1
-from estimation.phase_space_checkpoint import decode_state, encode_state
+from estimation.phase_space_checkpoint import decode_state, encode_state, managed_envelope, LIMIT
 from estimation.phase_space_o2 import fit_o2
 from infrastructure.research_control import WorkerControl
 from infrastructure.research_store import ResearchError
@@ -57,13 +57,13 @@ class ManagedTrainingControl:
         rate = (completed - self.first_step) / elapsed
         progress = {"completed_steps": completed, "total_steps": self.total_steps,
                     "throughput_per_second": rate, "eta_seconds": (self.total_steps - completed) / max(rate, 1e-9)}
-        envelope = {"step": completed, "data_position": completed,
-                    "method_state": state, "rng_state": encode_state(decoded["rng"])}
+        envelope = managed_envelope(state, decoded["rng"], completed)
         self.control.save(envelope, progress)
 
     def arguments(self, state):
         return {"progress": self.progress, "checkpoint_requested": self.requested,
-                "checkpoint_handler": self.save, "resume_state": restore_training_state(state)}
+                "checkpoint_handler": self.save, "resume_state": restore_training_state(state),
+                "checkpoint_byte_limit": min(LIMIT, self.control.descriptor["byte_limit"])}
 
 
 def managed_fit_o1(model, batches, plan, *, restored_state=None):

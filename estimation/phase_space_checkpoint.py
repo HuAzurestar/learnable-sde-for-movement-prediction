@@ -12,11 +12,14 @@ import numpy as np
 import torch
 
 from infrastructure.research_files import source_file_hash
+from infrastructure.research_control import canonical, ControlError, SCHEMA as CONTROL_SCHEMA
 from infrastructure.research_store import digest
 from models.phase_space import ModelContractError, PhaseSpaceSDE
 
 
 LIMIT = 4 * 1024 * 1024
+TRAINING_SCHEMA = "pirc26-training-state-v2"
+HISTORY_SCHEMA = "pirc26-history-columns-v1"
 SOURCE_FILES = ("estimation/phase_space_checkpoint.py", "estimation/phase_space.py",
                 "infrastructure/pirc26_checkpoint_contract.py",
                 "infrastructure/research_control.py",
@@ -98,8 +101,7 @@ def _decode(value, depth=0):
     return value
 
 
-def encode_state(value):
-    encoded = _encode(value)
+def _encoded_limits(encoded):
     try:
         # Leave envelope/RNG duplication margin below the shared 65,536 nodes.
         stack, remaining = [(encoded, 0)], 45000
@@ -121,8 +123,13 @@ def encode_state(value):
     return encoded
 
 
+def encode_state(value):
+    return _encoded_limits(_encode(value))
+
+
 def decode_state(value):
     try:
+        _encoded_limits(value)
         raw = json.dumps(value, allow_nan=False)
         if len(raw.encode()) > LIMIT:
             raise ModelContractError("RESOURCE_PLAN_REJECTED: checkpoint byte quota")
@@ -170,9 +177,137 @@ def restore_model(model, checkpoint):
     model.load_state_dict(restored.state_dict())
 
 
+def history_metadata(scope, step):
+    """Only immutable, source-bound counters; no loss/gradient recomputation."""
+    if scope["objective"] == "O1":
+        return {"batch_index": step % len(scope["data_identity"])}
+    if scope["objective"] != "O2":
+        raise ModelContractError("OBJECTIVE_INCOMPATIBLE: history codec requires O1/O2")
+    plan, examples = scope["plan"], scope["data_identity"]["examples"]
+    index = step % len(examples)
+    horizons = plan["horizon_indices"][:min(len(plan["horizon_indices"]), 1 + step // plan["curriculum_steps"])]
+    return {"batch_index": index, "horizon_indices": list(horizons),
+            "brownian_root_id": digest({"root": examples[index]["request"]["brownian_root_id"],
+                                        "phase": "o2-train", "step": step}),
+            "estimator_id": "energy-u-exact-v1"}
+
+
+def pack_history(history, scope):
+    """Lossless JSON columns, preserving every actual monitor/gradient value."""
+    if type(history) is not list or len(history) > scope["plan"]["max_steps"]:
+        raise ModelContractError("CHECKPOINT_INCOMPATIBLE: bounded history required")
+    objectives, gradients = [], []
+    for index, row in enumerate(history):
+        expected = history_metadata(scope, index)
+        if (type(row) is not dict or set(row) != {"step", "objective", "gradient_norm", *expected}
+                or type(row["step"]) is not int or row["step"] != index + 1
+                or any(type(row[k]) is not float or not math_isfinite(row[k]) for k in ("objective", "gradient_norm"))
+                or digest({key: row[key] for key in expected}) != digest(expected)):
+            raise ModelContractError("CHECKPOINT_INCOMPATIBLE: history differs from immutable scope")
+        objectives.append(row["objective"])
+        gradients.append(row["gradient_norm"])
+    return {"schema_version": HISTORY_SCHEMA, "objective": objectives, "gradient_norm": gradients}
+
+
+def unpack_history(columns, scope, step):
+    if (type(step) is not int or not 0 <= step <= scope["plan"]["max_steps"]
+            or type(columns) is not dict or set(columns) != {"schema_version", "objective", "gradient_norm"}
+            or columns["schema_version"] != HISTORY_SCHEMA
+            or any(type(columns[k]) is not list or len(columns[k]) != step
+                   or any(type(v) is not float or not math_isfinite(v) for v in columns[k])
+                   for k in ("objective", "gradient_norm"))):
+        raise ModelContractError("CHECKPOINT_INCOMPATIBLE: training position/history columns differ")
+    return [{"step": i + 1, "objective": columns["objective"][i], "gradient_norm": columns["gradient_norm"][i],
+             **history_metadata(scope, i)} for i in range(step)]
+
+
+def managed_envelope(method_state, rng, step):
+    return {"step": step, "data_position": step, "method_state": method_state, "rng_state": encode_state(rng)}
+
+
+def _checkpoint_capacity(encoded, encoded_rng, step, byte_limit=LIMIT):
+    """Exercise real owner codecs with conservative identifier/progress bounds.
+
+    This is an unpublished capacity probe, not a model/checkpoint qualification,
+    grant, reservation, budget restore or simulated owner checkpoint ACK.
+    """
+    if type(byte_limit) is not int or not 0 < byte_limit <= LIMIT:
+        raise ModelContractError("RESOURCE_PLAN_REJECTED: managed checkpoint byte quota")
+    _encoded_limits(encoded)
+    method = {"schema_version": TRAINING_SCHEMA, "scope_hash": "f"*64,
+              "initial_model_hash": "f"*64, "state": encoded, "sha256": "f"*64}
+    state = {"step": step, "data_position": step, "method_state": method, "rng_state": encoded_rng}
+    progress = {"completed_steps": step, "total_steps": step,
+                "throughput_per_second": -sys.float_info.max, "eta_seconds": sys.float_info.max}
+    frame = {"schema_version": CONTROL_SCHEMA, "attempt_id": "a"*128, "token": "f"*64,
+             "request_id": "f"*32, "state": state, "progress": progress}
+    publication = {"schema_version": "pirc25-checkpoint-v1", "parent_attempt_id": "a"*128,
+        "run_id": "a"*128, "plugin_id": "a"*128, "plugin_version": "a"*128,
+        "recovery_command_hash": "f"*64, "resume_level": "exact",
+        "bindings": {**{k: "f"*64 for k in ("code_hash", "data_hash", "protocol_hash", "feature_hash",
+                    "selection_hash", "model_hash", "objective_hash", "cell_hash", "execution_binding_hash")},
+                     "schema_version": "a"*128},
+        "payload_hash": "f"*64, "state": state, "admission_hash": "f"*64, "progress": progress}
+    try:
+        frame_bytes = len(canonical(frame, byte_limit))
+        publication_bytes = len(canonical(publication, LIMIT))
+        # The owner's _bounded_json additionally charges eight bytes per node.
+        # Checking this stricter allowance avoids importing the application layer.
+        stack, nodes = [publication], 0
+        while stack:
+            item = stack.pop()
+            nodes += 1
+            if type(item) is dict:
+                stack.extend(item.values())
+            elif type(item) is list:
+                stack.extend(item)
+        if publication_bytes + 8 * nodes > LIMIT:
+            raise ControlError("owner conservative JSON byte allowance")
+    except ControlError as exc:
+        raise ModelContractError("RESOURCE_PLAN_REJECTED: complete managed checkpoint capacity") from exc
+    return {"max_steps": step, "response_bytes": frame_bytes, "publication_bytes": publication_bytes,
+            "publication_nodes": nodes, "byte_limit": byte_limit, "node_limit": 65536}
+
+
+def preflight_training_checkpoint(model, optimizer, plan, scope, auxiliary=None, byte_limit=LIMIT):
+    """Full-plan history + fully populated default CPU Adam, before any update.
+
+    Shapes/groups come from the actual model/optimizer; Adam's source-bound
+    default recipe has step/exp_avg/exp_avg_sq. No optimizer step, RNG draw,
+    tensor mutation, state publication or data read is needed for this probe.
+    """
+    future = optimizer.state_dict()
+    future["state"] = {}
+    for group, actual in zip(future["param_groups"], optimizer.param_groups):
+        if any(actual[k] for k in ("amsgrad", "capturable", "differentiable", "fused")):
+            raise ModelContractError("RESOURCE_PLAN_REJECTED: unregistered Adam checkpoint recipe")
+        for identity, parameter in zip(group["params"], actual["params"]):
+            future["state"][identity] = {"step": torch.tensor(float(plan.max_steps)),
+                                       "exp_avg": parameter.detach(), "exp_avg_sq": parameter.detach()}
+    cp, rng = model.checkpoint(), rng_state()
+    # Python's optional cached Gaussian may become a float without changing shape.
+    rng["python"] = (*rng["python"][:2], -sys.float_info.max)
+    columns = {"schema_version": HISTORY_SCHEMA, "objective": [-sys.float_info.max]*plan.max_steps,
+               "gradient_norm": [-sys.float_info.max]*plan.max_steps}
+    probe = _encode({"step": plan.max_steps, "stale": plan.max_steps, "best": -sys.float_info.max,
+        "history": columns, "model": cp, "best_checkpoint": cp, "optimizer": future,
+        "auxiliary": None if auxiliary is None else auxiliary.state_dict(), "rng": rng})
+    def widest(item):
+        if type(item) is dict:
+            return {k: widest(v) for k, v in item.items()}
+        if type(item) is list:
+            return [widest(v) for v in item]
+        if type(item) is float:
+            return -sys.float_info.max
+        if type(item) is int:
+            return (1 << 255) - 1
+        return item
+    return _checkpoint_capacity(widest(probe), widest(_encode(rng)), plan.max_steps, byte_limit)
+
+
 def train_loop(model, parameters, plan, scope, objective, monitor, *, auxiliary=None,
                resume_state=None, cancellation=None, progress=None,
-               checkpoint_requested=None, checkpoint_handler=None):
+               checkpoint_requested=None, checkpoint_handler=None, checkpoint_byte_limit=LIMIT):
     """Continue the actual Adam/batch-counter state, with immutable input scope."""
     import time
     if torch.get_num_threads() != 1:
@@ -181,11 +316,12 @@ def train_loop(model, parameters, plan, scope, objective, monitor, *, auxiliary=
         raise ModelContractError("MODEL_CONTRACT_ERROR: checkpoint request and handler must be paired")
     scope_hash = digest(scope)
     optimizer = torch.optim.Adam(parameters, lr=plan.learning_rate)
+    capacity = preflight_training_checkpoint(model, optimizer, plan, scope, auxiliary, checkpoint_byte_limit)
     initial_model_hash = model.checkpoint()["sha256"]
     first_step, stale, best, history = 0, 0, None, []
     best_checkpoint = None
     if resume_state is not None:
-        if (not isinstance(resume_state, dict) or resume_state.get("schema_version") != "pirc26-training-state-v1"
+        if (not isinstance(resume_state, dict) or resume_state.get("schema_version") != TRAINING_SCHEMA
                 or resume_state.get("scope_hash") != scope_hash
                 or resume_state.get("initial_model_hash") != initial_model_hash):
             raise ModelContractError("CHECKPOINT_INCOMPATIBLE: code/data/model/objective/environment differs")
@@ -194,8 +330,10 @@ def train_loop(model, parameters, plan, scope, objective, monitor, *, auxiliary=
         if identity != digest(detached):
             raise ModelContractError("CHECKPOINT_INCOMPATIBLE: training state identity differs")
         state = decode_state(resume_state["state"])
-        first_step, stale, best, history = state["step"], state["stale"], state["best"], state["history"]
-        if type(first_step) is not int or not 0 <= first_step <= plan.max_steps or len(history) != first_step:
+        first_step, stale, best = state["step"], state["stale"], state["best"]
+        history = unpack_history(state["history"], scope, first_step)
+        if (type(stale) is not int or not 0 <= stale <= first_step
+                or best is not None and not math_isfinite(best)):
             raise ModelContractError("CHECKPOINT_INCOMPATIBLE: training position/history differs")
         restore_model(model, state["model"])
         optimizer.load_state_dict(state["optimizer"])
@@ -215,6 +353,8 @@ def train_loop(model, parameters, plan, scope, objective, monitor, *, auxiliary=
             break
         optimizer.zero_grad()
         loss, metadata = objective(step)
+        if type(metadata) is not dict or digest(metadata) != digest(history_metadata(scope, step)):
+            raise ModelContractError("MODEL_CONTRACT_ERROR: objective history metadata differs from scope")
         if loss.ndim != 0 or not torch.isfinite(loss):
             raise ModelContractError("NONFINITE: training objective")
         loss.backward()
@@ -235,12 +375,14 @@ def train_loop(model, parameters, plan, scope, objective, monitor, *, auxiliary=
         if progress is not None:
             progress({**row, "elapsed_seconds": time.perf_counter() - started})
         if checkpoint_requested is not None and checkpoint_requested():
-            state = {"step": step + 1, "stale": stale, "best": best, "history": history,
+            state = {"step": step + 1, "stale": stale, "best": best, "history": pack_history(history, scope),
                 "model": model.checkpoint(), "best_checkpoint": best_checkpoint,
                 "optimizer": optimizer.state_dict(), "auxiliary": None if auxiliary is None else auxiliary.state_dict(),
                 "rng": rng_state()}
-            saved = {"schema_version": "pirc26-training-state-v1", "scope_hash": scope_hash,
-                     "initial_model_hash": initial_model_hash, "state": encode_state(state)}
+            encoded = encode_state(state)
+            _checkpoint_capacity(encoded, encode_state(state["rng"]), step + 1, checkpoint_byte_limit)
+            saved = {"schema_version": TRAINING_SCHEMA, "scope_hash": scope_hash,
+                     "initial_model_hash": initial_model_hash, "state": encoded}
             last_state = {**saved, "sha256": digest(saved)}
             checkpoint_handler(last_state, {**row, "elapsed_seconds": time.perf_counter() - started})
             status = "CHECKPOINTED"
@@ -255,6 +397,7 @@ def train_loop(model, parameters, plan, scope, objective, monitor, *, auxiliary=
             "steps": len(history), "best_train_objective": best, "history": history,
             "checkpoint": model.checkpoint(), "scope_hash": scope_hash, "code_hash": scope["code_hash"],
             "training_state": last_state, "resume_level": "exact",
+            "checkpoint_capacity": capacity,
             "wall_seconds": time.perf_counter() - started, "peak_memory_bytes": None}
 
 

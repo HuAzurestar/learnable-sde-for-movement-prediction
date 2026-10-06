@@ -99,7 +99,8 @@ class O1Plan:
 
 
 def fit_o1(model: PhaseSpaceSDE, batches, plan: O1Plan, *, cancellation=None, progress=None,
-           resume_state=None, checkpoint_requested=None, checkpoint_handler=None):
+           resume_state=None, checkpoint_requested=None, checkpoint_handler=None,
+           checkpoint_byte_limit=4 * 1024 * 1024):
     """Finite local-gradient fitting component, called within a managed worker.
 
     This component is also used by numerical fixtures. It grants no permission
@@ -138,7 +139,8 @@ def fit_o1(model: PhaseSpaceSDE, batches, plan: O1Plan, *, cancellation=None, pr
 
     return train_loop(model, parameters, plan, scope, objective, monitor, auxiliary=diffusion,
                       resume_state=resume_state, cancellation=cancellation, progress=progress,
-                      checkpoint_requested=checkpoint_requested, checkpoint_handler=checkpoint_handler)
+                      checkpoint_requested=checkpoint_requested, checkpoint_handler=checkpoint_handler,
+                      checkpoint_byte_limit=checkpoint_byte_limit)
 
 
 def fit_residual_basis(model, batches, *, ridge, condition_number_max, curvature_penalty=0., cancellation=None, progress=None):
