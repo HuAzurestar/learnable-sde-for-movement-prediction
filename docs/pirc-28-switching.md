@@ -166,3 +166,57 @@ No scientific matrix has been executed merely by passing these software tests:
 ```console
 python -m pytest tests/test_pirc28_qualification.py -q
 ```
+
+## Shared-store qualification evidence
+
+`experiments.pirc28.evidence.collect_qualification` consumes existing registered
+studies, an exact `IdentifiabilitySpec`, evaluate-purpose grants and a shared
+budget poll. It creates no store, grant, run, reservation or fresh arm identity.
+It uses existing authorized artifact reads and verified-success reuse, including
+the original source/attempt/admission/worker/cost provenance. The shared APIs
+append their usual disclosure/read/reuse audit receipts. Production interval
+computation must be called under shared supervisor control; this library is not
+an unbudgeted research CLI.
+
+Scientific studies additionally bind a `phase_matrix_hash` pointing to the
+canonical `pirc28-phase-matrix-v1` produced by `phase_manifest(base, axes)`.
+The collector reconstructs the scenarios from the actual frozen baseline and
+requires the qualified axis ranges and physical model/schedule/noise to match.
+Only assigning arbitrary axis labels to a recipe cannot establish qualification.
+Each cell freezes `replicate_id`, `fit_K` and the paired seed. All registered
+scenarios/replicates/K values must be covered; independent seeds cannot be reused
+as additional replicates. The two fixed K arm identities remain cumulative
+across scenarios and studies, and cannot refresh their 24-hour balances.
+
+The source protocol physically hashes the canonical recipe as `synthetic-pirc28`.
+The pre-fit preregistration freezes `pirc28_identifiability_spec_hash`,
+`pirc28_phase_matrix_hash`, the actual K=1/K=2 proper-score comparison and
+`result_selection_rule=one-row-per-independent-replicate; immutable-success-else-latest-attempt`.
+Plans published after any source fit was admitted cannot qualify it. Synthetic
+pilot admission can establish this prerequisite gate; requiring a previously
+qualified formal blind-test study would create a circular gate. Formal studies
+retain all the existing blind-test admission requirements.
+
+An immutable successful outcome is one row; otherwise the latest attempt gives
+the row's terminal state. All retry histories and charged/outstanding costs stay
+in the lineage, including failures before a later success. Live or unstarted
+cells remain uncompleted; arm closure without a run is budget exhaustion, not a
+successful zero. One pass indexes source events/attempts instead of comparing
+every trajectory with every other trajectory. Per-result, total-input and final
+aggregate byte quotas refuse oversized collections rather than truncate rows.
+
+Grant checks also protect empty/failure-only metadata, and are repeated after
+extra source integrity and bootstrap work before disclosure. Complete source
+visibility/block scopes must be authorized. Fixture collection is opt-in and
+always `FIXTURE_ONLY`, regardless of a mathematical pass. A verified scientific
+synthetic gate may set `qualified_identifiability`, but `real_data_authorized`
+remains false: no result or aggregate grants access to private or reserved data.
+
+```console
+python -m pytest tests/test_pirc28_evidence.py -q
+```
+
+These tests use disposable stores and explicit synthetic operator attestations,
+including a managed pilot-mode control. They are software integration checks,
+not the production phase diagram, a crash-at-any-instruction proof or a claimed
+accepted scientific result.

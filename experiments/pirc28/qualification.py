@@ -121,6 +121,12 @@ def parameter_recovery(estimate, truth, scales):
             'matching_scales': scales, 'interpretation_level': 'synthetic-statistical-only'}
 
 
+def phase_manifest(base, axes):
+    """Canonical reconstruction evidence for axis meanings, not just axis labels."""
+    return {'schema_version': 'pirc28-phase-matrix-v1', 'baseline_scenario': base.to_dict(),
+            'axes': axes, 'scenarios': phase_scenarios(base, axes)}
+
+
 def mode_diagnostics(probabilities, modes, order, dwell, duration, *, bins=10):
     probabilities = np.asarray(probabilities, dtype=float)
     modes = np.asarray(modes)
