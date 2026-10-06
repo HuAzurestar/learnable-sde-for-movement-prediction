@@ -164,6 +164,13 @@ class AdmissionGate:
             if len(selected) != 1:
                 raise ResearchError("MISSING_INPUT", "cell block absent from frozen protocol")
             block = selected[0]
+            if plugin.plugin_id == "affine-propagation-qualification":
+                # Numerical qualification is real pilot computation, never
+                # free preflight work and never exposure to held-out test data.
+                if mode != "pilot" or block["split_role"] not in {"train", "validation"}:
+                    raise ResearchError("UNAUTHORIZED_DATA", "analytic qualification cannot consume test/final-eval inputs")
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
             if (plugin.plugin_id in {"affine-propagation-chunk", "synthetic-propagation-chunk"}
                     and cell.get("execution", {}).get("config", {}).get("method") == "mlmc-pilot"):
                 # BEFORE qualification artifacts or input exposure, including
@@ -298,6 +305,17 @@ class AdmissionGate:
         return validate
 
     def run(self, attempt_id, spec, cell, plugin, command_builder, budget, *, builtin_fixture=False, recovery_builder=None, checkpoint_handler=None):
+        if plugin.plugin_id == "affine-propagation-qualification":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.qualification_plugin import qualification_policy
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                policy = qualification_policy(spec, cell, package, request, config)
+                if budget.category != "pilot" or budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "analytic qualification requires the frozen pilot job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
         if (plugin.plugin_id in {"affine-propagation-chunk", "synthetic-propagation-chunk"}
                 and cell.get("execution", {}).get("config", {}).get("method") == "mlmc-pilot"
                 and budget.category != "pilot"):

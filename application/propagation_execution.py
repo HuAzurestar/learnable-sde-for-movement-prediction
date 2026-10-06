@@ -38,11 +38,15 @@ def validate_propagation_cell(spec, cell):
     from experiments.pirc27.plugin import propagation_plugin, execution_config, execution_inputs
     if spec.get("code_hash") != code_hash() or cell.get("visibility") != "synthetic":
         raise ResearchError("CONTRACT_MISMATCH", "only the frozen synthetic source is supported by this adapter")
-    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk"}:
+    qualification = cell["plugin_id"] == "affine-propagation-qualification"
+    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification"}:
         raise ResearchError("CONTRACT_MISMATCH", "unknown explicit propagation adapter")
     recovery = cell["plugin_id"].endswith("-chunk")
     synthetic = cell["plugin_id"].startswith("synthetic-")
     plugin = propagation_plugin(recovery=recovery, synthetic=synthetic)
+    if qualification:
+        from experiments.pirc27.qualification_plugin import qualification_plugin
+        plugin = qualification_plugin()
     execution_plan(spec, cell, plugin)
     request = request_from_manifest(cell["propagation_request"])
     package_type = FrozenNonlinearPackage if synthetic else FrozenDynamicsPackage
@@ -53,6 +57,10 @@ def validate_propagation_cell(spec, cell):
         raise ResearchError("CONTRACT_MISMATCH", "frozen propagation package schema/content/code differs") from exc
     config = cell["execution"]["config"]
     expected = execution_config(request, config["method"], level_samples=tuple(config["level_samples"]), proposal=tuple(config["proposal"]), recovery=recovery, synthetic=synthetic)
+    if qualification:
+        from experiments.pirc27.qualification_plugin import qualification_policy, qualification_config
+        policy = qualification_policy(spec, cell, package, request, config)
+        expected = qualification_config(request, config["method"], policy)
     if config != expected or cell["execution"]["inputs"] != execution_inputs(request) or request.arm_id != cell["arm_id"] or request.seed != cell["seed"]:
         raise ResearchError("CONTRACT_MISMATCH", "registered request, method/resource configuration or arm differs")
     required_capability = {"exact": "exact-transition", "gaussian": "generic-rollout", "euler": "generic-rollout",
@@ -108,6 +116,12 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None):
     if config["method"] == "mlmc-pilot":
         from inference.mlmc_pilot import analyze_mlmc_pilot
         output["forecast"]["pilot_analysis"] = analyze_mlmc_pilot(request, result, pilot_policy(spec, cell, request, config))
+    if plugin.plugin_id == "affine-propagation-qualification":
+        from experiments.pirc27.qualification_plugin import qualification_policy
+        from inference.affine_qualification import analyze_affine_qualification
+        policy = qualification_policy(spec, cell, package, request, config)
+        output["forecast"]["qualification_analysis"] = analyze_affine_qualification(package, request,
+            config["method"], policy, result)
     # Computational completion keeps low-ESS/unresolved estimates as artifacts;
     # estimator status remains visible and cannot be scientific qualification.
     return {"schema_version": "pirc25-result-v1", "status": "SUCCEEDED", "qualification": "fixture",

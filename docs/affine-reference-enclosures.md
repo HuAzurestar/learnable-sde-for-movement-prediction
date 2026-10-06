@@ -3,6 +3,9 @@
 For an explicitly frozen solver/grid law and signed discretization bias, see
 [finite-grid enclosures](affine-discrete-enclosures.md). Continuous reference,
 finite-grid law, sampling error and implemented path roundoff are distinct.
+Actual supervised analytic qualification evidence generation is described in
+[budgeted qualification](affine-analytic-qualification.md); formal admission is
+a separate gate, not a certificate flag.
 
 `inference.affine_reference.bound_affine_reference(package, request)` encloses
 the moments and requested endpoint functional of the **declared** four-state
