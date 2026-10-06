@@ -56,10 +56,26 @@ def validate_propagation_cell(spec, cell):
     if config != expected or cell["execution"]["inputs"] != execution_inputs(request) or request.arm_id != cell["arm_id"] or request.seed != cell["seed"]:
         raise ResearchError("CONTRACT_MISMATCH", "registered request, method/resource configuration or arm differs")
     required_capability = {"exact": "exact-transition", "gaussian": "generic-rollout", "euler": "generic-rollout",
-                           "heun": "generic-rollout", "mlmc": "coupled-level", "importance": "rare-event", "cubature": "generic-rollout"}[config["method"]]
+                           "heun": "generic-rollout", "mlmc": "coupled-level", "mlmc-pilot": "coupled-level", "importance": "rare-event", "cubature": "generic-rollout"}[config["method"]]
     if cell["capability"] != required_capability:
         raise ResearchError("CONTRACT_MISMATCH", "method differs from the cell's registered capability")
+    if config["method"] == "mlmc-pilot":
+        pilot_policy(spec, cell, request, config)
     return package, request, config, plugin
+
+
+def pilot_policy(spec, cell, request, config):
+    from domain.mlmc_pilot import MLMCPilotPolicy
+    try:
+        policy = MLMCPilotPolicy(**cell["mlmc_pilot_policy"])
+        policy.validate(request, tuple(config["level_samples"]))
+        arms = [arm for arm in spec["arms"] if arm["arm_id"] == request.arm_id]
+        if (len(arms) != 1 or arms[0]["method_family_id"] != "mlmc" or cell.get("execution_role") != "pilot"
+                or (spec.get("admission") or {}).get("mode") != "pilot"):
+            raise ValueError("pilot must retain the original MLMC arm and explicit pilot role/mode")
+        return policy
+    except (KeyError, TypeError, ValueError, DataValidationError) as exc:
+        raise ResearchError("UNQUALIFIED", "frozen independent pilot policy/role/shared MLMC arm is required") from exc
 
 
 def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None):
@@ -75,6 +91,7 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None):
         "euler": lambda: monte_carlo(package, request, **continuation),
         "heun": lambda: monte_carlo(package, request, solver="additive-heun", **continuation),
         "mlmc": lambda: mlmc_estimate(package, request, level_samples=tuple(config["level_samples"]), **continuation),
+        "mlmc-pilot": lambda: mlmc_estimate(package, request, level_samples=tuple(config["level_samples"]), phase=2, pilot=True, **continuation),
         "importance": lambda: importance_sampling(package, request, proposal=tuple(config["proposal"]), **continuation),
         "cubature": lambda: cubature_estimate(package, request)}
     result = methods[config["method"]]()
@@ -87,6 +104,9 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None):
                      "model_package_hash": package.package_hash, "request_hash": request.request_hash},
         "fit": {"training": "none; frozen synthetic generator"},
         "source_schema": "synthetic-endpoint-propagation-v1" if synthetic else "endpoint-propagation-v1"}
+    if config["method"] == "mlmc-pilot":
+        from inference.mlmc_pilot import analyze_mlmc_pilot
+        output["forecast"]["pilot_analysis"] = analyze_mlmc_pilot(request, result, pilot_policy(spec, cell, request, config))
     # Computational completion keeps low-ESS/unresolved estimates as artifacts;
     # estimator status remains visible and cannot be scientific qualification.
     return {"schema_version": "pirc25-result-v1", "status": "SUCCEEDED", "qualification": "fixture",

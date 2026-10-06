@@ -52,7 +52,7 @@ def propagation_plugin(*, recovery=False, synthetic=False):
     if recovery or synthetic:
         properties["work_steps"] = integer(1_000_000)
     if recovery:
-        properties["method"]["enum"] = ["euler", "heun", "mlmc", "importance"]
+        properties["method"]["enum"] = ["euler", "heun", "mlmc", "mlmc-pilot", "importance"]
     config = {"type": "object", "properties": properties, "required": sorted(properties), "additionalProperties": False}
     inputs = {"state_dim": {"type": "integer", "enum": [4]}, "horizon": {"type": "number", "minimum": 0},
               "model_package_hash": {"type": "string", "minLength": 64, "maxLength": 64},
@@ -85,19 +85,21 @@ def propagation_plugin(*, recovery=False, synthetic=False):
 
 def execution_config(request, method, *, level_samples=(), proposal=(0.0, 0.0), recovery=False, synthetic=False):
     request.validate()
-    allowed = {"euler", "heun", "mlmc", "importance", "cubature"} if synthetic else {"exact", "euler", "heun", "gaussian", "mlmc", "importance"}
+    allowed = {"euler", "heun", "mlmc", "mlmc-pilot", "importance", "cubature"} if synthetic else {"exact", "euler", "heun", "gaussian", "mlmc", "mlmc-pilot", "importance"}
     if method not in allowed:
         raise ResearchError("CONTRACT_MISMATCH", "method is not in the frozen adapter")
-    if method == "mlmc":
+    if method in {"mlmc", "mlmc-pilot"}:
         if (type(level_samples) is not tuple or not 1 <= len(level_samples) <= 9
                 or any(type(n) is not int or n < 2 for n in level_samples)
                 or sum(level_samples) != request.samples):
             raise ResearchError("CONTRACT_MISMATCH", "MLMC allocation must equal the registered total sample count")
+        if method == "mlmc-pilot" and (not recovery or len(level_samples) < 3):
+            raise ResearchError("CONTRACT_MISMATCH", "pilot requires a chunk adapter and at least three frozen levels")
     elif level_samples:
         raise ResearchError("CONTRACT_MISMATCH", "unexpected MLMC allocation for another method")
     if method != "importance" and proposal != (0.0, 0.0):
         raise ResearchError("CONTRACT_MISMATCH", "proposal drift is permitted only for the importance arm")
-    steps = request.steps*2**(len(level_samples)-1) if method == "mlmc" else request.steps
+    steps = request.steps*2**(len(level_samples)-1) if method in {"mlmc", "mlmc-pilot"} else request.steps
     result = {"method": method, "samples": request.samples, "base_steps": request.steps, "steps": steps,
             "chunk_size": request.chunk_size, "level_samples": list(level_samples), "proposal": list(proposal)}
     if synthetic:
@@ -106,7 +108,7 @@ def execution_config(request, method, *, level_samples=(), proposal=(0.0, 0.0), 
         if recovery and method in {"exact", "gaussian", "cubature"}:
             raise ResearchError("CONTRACT_MISMATCH", "analytic methods use the separate restart-only adapter")
         result["work_steps"] = (8*steps if method == "cubature" else sum(n * (request.steps*2**level + (request.steps*2**(level-1) if level else 0))
-                                   for level, n in enumerate(level_samples)) if method == "mlmc" else request.samples*steps)
+                                   for level, n in enumerate(level_samples)) if method in {"mlmc", "mlmc-pilot"} else request.samples*steps)
         if result["work_steps"] > 1_000_000 or steps > 8192:
             raise ResearchError("RESOURCE_PLAN_REJECTED", "chunk work/grid exceeds the declared shared quota")
     return result

@@ -14,14 +14,18 @@ from domain.frozen_dynamics import content_hash
 
 
 class ChunkState:
-    def __init__(self, request, method, counts, costs, *, phase=0, proposal=(), restored=None):
+    def __init__(self, request, method, counts, costs, *, phase=0, proposal=(), restored=None, measure_cost=False):
         request.validate()
+        if type(measure_cost) is not bool:
+            raise DataValidationError("explicit boolean cost measurement is required")
         self.request = request
         self.counts, self.costs = tuple(counts), tuple(costs)
         self.weighted = method == "importance"
         self.identity = {"schema_version": "endpoint-chunk-state-v1", "request_hash": request.request_hash,
             "method_hash": content_hash({"method": method, "counts": counts, "costs": costs,
                                          "phase": phase, "proposal": proposal})}
+        if measure_cost:
+            self.identity["cost_measurement"] = "completed-chunk-compute-ns-v1"
         self.rng = {"scheme": "per-sample-seedsequence-v1", "seed": request.seed,
             "coupling_id": request.coupling_id, "phase": phase, "bit_generator": "PCG64",
             "numpy_version": np.__version__}
@@ -29,6 +33,9 @@ class ChunkState:
                   "log_event2": None, "max_log_w": None} if self.weighted else
                  {"n": 0, "mean": 0.0, "m2": 0.0, "hits": 0})
         self.statistics = [dict(empty) for _ in counts]
+        if measure_cost:
+            for item in self.statistics:
+                item["compute_ns"] = 0
         self.level, self.position = 0, 0
         if restored is not None:
             self._restore(restored)
@@ -65,6 +72,11 @@ class ChunkState:
                         or type(item["hits"]) is not int or not 0 <= item["hits"] <= count):
                     reject()
                 for key, value in item.items():
+                    if key == "compute_ns":
+                        if (type(value) is not int or not 0 <= value < 2**63
+                                or (count == 0 and value != 0) or (count > 0 and value == 0)):
+                            reject()
+                        continue
                     if key in {"n", "hits"}:
                         continue
                     if self.weighted:

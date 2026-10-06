@@ -164,6 +164,14 @@ class AdmissionGate:
             if len(selected) != 1:
                 raise ResearchError("MISSING_INPUT", "cell block absent from frozen protocol")
             block = selected[0]
+            if (plugin.plugin_id in {"affine-propagation-chunk", "synthetic-propagation-chunk"}
+                    and cell.get("execution", {}).get("config", {}).get("method") == "mlmc-pilot"):
+                # BEFORE qualification artifacts or input exposure, including
+                # a caller that bypasses the propagation command builder.
+                if mode != "pilot" or block["split_role"] not in {"train", "validation"}:
+                    raise ResearchError("UNAUTHORIZED_DATA", "MLMC pilot cannot consume test/final-eval inputs")
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
             grant = self.store.authorization(settings["authorization_id"], version=settings.get("authorization_version"))
             if (grant["study_id"] != spec["study_id"] or grant.get("protocol_hash") != spec["protocol_hash"]
                     or "execute" not in grant["purposes"] or cell["block_id"] not in grant["block_ids"]
@@ -290,6 +298,11 @@ class AdmissionGate:
         return validate
 
     def run(self, attempt_id, spec, cell, plugin, command_builder, budget, *, builtin_fixture=False, recovery_builder=None, checkpoint_handler=None):
+        if (plugin.plugin_id in {"affine-propagation-chunk", "synthetic-propagation-chunk"}
+                and cell.get("execution", {}).get("config", {}).get("method") == "mlmc-pilot"
+                and budget.category != "pilot"):
+            self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code="CONTRACT_MISMATCH")
+            raise ResearchError("CONTRACT_MISMATCH", "MLMC pilot must use the existing pilot budget category")
         from .research_supervisor import ResearchSupervisor
         admitted = {}
         resource_plan = {}

@@ -27,6 +27,18 @@ def _mlmc_checkpoint_allocation(calibration_seconds):
     return (4*units, 2*units, units)
 
 
+def _path_checkpoint_samples(calibration_seconds):
+    # The same pre-store sizing for each actual method, not a budget extension.
+    return max(1024, min(1_000_000 // 128, math.ceil(16.0 * 128 / calibration_seconds)))
+
+
+@pytest.mark.parametrize("seconds", [0.01, 0.5, 1.0, 4.0, 10.0])
+def test_path_checkpoint_fixture_calibration_preserves_total_work_quota(seconds):
+    samples = _path_checkpoint_samples(seconds)
+    assert 1024 <= samples <= 1_000_000 // 128
+    assert samples*128 <= 1_000_000
+
+
 @pytest.mark.parametrize("seconds", [0.01, 0.5, 1.0, 4.0, 10.0])
 def test_mlmc_checkpoint_fixture_calibration_preserves_all_levels_and_work_quota(seconds):
     allocation = _mlmc_checkpoint_allocation(seconds)
@@ -36,7 +48,8 @@ def test_mlmc_checkpoint_fixture_calibration_preserves_all_levels_and_work_quota
     assert work <= 1_000_000 and sum(allocation) <= 1_000_000
 
 
-def prepare(tmp_path, method="euler", *, recovery=False, changes=None, level_samples=None, unbound_steps=None, synthetic=False):
+def prepare(tmp_path, method="euler", *, recovery=False, changes=None, level_samples=None, unbound_steps=None,
+            synthetic=False, formal=False, pilot_changes=None):
     # A disposable test store, not a new scientific ledger or protected input.
     store = ResearchStore(tmp_path, "propagation-unit", initialize=True)
     case = oracle_suite()[0]
@@ -47,11 +60,11 @@ def prepare(tmp_path, method="euler", *, recovery=False, changes=None, level_sam
         samples=16, steps=4, chunk_size=8)
     request = replace(request, **(changes or {}))
     plugin = propagation_plugin(recovery=recovery, synthetic=synthetic)
-    config = execution_config(request, method, level_samples=(level_samples or (8, 8)) if method == "mlmc" else (),
+    config = execution_config(request, method, level_samples=(level_samples or (8, 8)) if method in {"mlmc", "mlmc-pilot"} else (),
                               proposal=(1.0, 0.0) if method == "importance" else (0.0, 0.0), recovery=recovery, synthetic=synthetic)
     inputs = execution_inputs(request)
     cell = {"arm_id": request.arm_id, "block_id": "generator-v1", "seed": request.seed, "horizon": 1.0,
-            "plugin_id": plugin.plugin_id, "capability": {"mlmc": "coupled-level", "exact": "exact-transition", "importance": "rare-event"}.get(method, "generic-rollout"),
+            "plugin_id": plugin.plugin_id, "capability": {"mlmc": "coupled-level", "mlmc-pilot": "coupled-level", "exact": "exact-transition", "importance": "rare-event"}.get(method, "generic-rollout"),
             "visibility": "synthetic", "frozen_dynamics": package.manifest(),
             "propagation_request": json.loads(encode(asdict(request)))}
     if unbound_steps is not None:
@@ -60,15 +73,23 @@ def prepare(tmp_path, method="euler", *, recovery=False, changes=None, level_sam
         cell["propagation_request"]["steps"] = unbound_steps
     cell["resource_class"] = "cpu"
     cell["execution"] = execution_binding(plugin.registry_entry, config, inputs, matrix_cells=1)
+    if method == "mlmc-pilot":
+        from tests.test_mlmc_pilot import policy_for
+        cell.update(study_role="secondary", execution_role="pilot", mlmc_pilot_policy=asdict(policy_for(request,
+            maximum_samples=1_000_000, maximum_work_steps=1_000_000)))
+        cell.update(pilot_changes or {})
     spec = {"schema_version": "pirc25-contract-v1", "study_id": "propagation-unit", "experiment_id": "oracle-unit",
         "comparison_family": "synthetic-engineering", "code_hash": code_hash(),
         "protocol_hash": digest("placeholder"), "data_hash": digest("placeholder"),
         "feature_hash": digest("no-terrain"), "selection_hash": digest("none"),
         "arms": [{"arm_id": request.arm_id, "model_family_id": "tanh-stress-v1" if synthetic else "affine-stable-v1",
-                  "method_family_id": method, "objective_id": request.functional, "budget_seconds": 86400}],
+                  "method_family_id": "mlmc" if method == "mlmc-pilot" else method,
+                  "objective_id": request.functional, "budget_seconds": 86400}],
         "cells": [cell], "runtime_binding": {"root": str(tmp_path.resolve()), "store_id": store.store_id}}
-    admit_fixture(store, spec, plugin, tmp_path, execution_config=config, execution_inputs=inputs, legacy_upstream=False,
+    admit_fixture(store, spec, plugin, tmp_path, formal=formal, execution_config=config, execution_inputs=inputs, legacy_upstream=False,
         recovery_command_builder=propagation_resume_command if recovery else None)
+    if method == "mlmc-pilot":
+        spec["admission"]["mode"] = "pilot"
     registry = CapabilityRegistry()
     registry.register(plugin)
     return store, spec, registry
@@ -130,6 +151,7 @@ def test_actual_chunk_worker_stops_and_reopened_resume_preserves_computation_and
     # reachable at a completed boundary. No fake clock, sleep-only worker,
     # budget extension, forced checkpoint file or state-only roundtrip.
     allocation = None
+    samples = 2048
     if method == "mlmc":
         from inference.propagation_methods import mlmc_estimate
         case = oracle_suite()[0]
@@ -139,7 +161,19 @@ def test_actual_chunk_worker_stops_and_reopened_resume_preserves_computation_and
         started = time.monotonic()
         mlmc_estimate(case.package, calibration, level_samples=(64, 32, 16))
         allocation = _mlmc_checkpoint_allocation(time.monotonic()-started)
-    changes = {"samples": sum(allocation) if allocation else 2048, "steps": 128, "chunk_size": 1}
+    else:
+        from inference.propagation_methods import monte_carlo, importance_sampling
+        case = oracle_suite()[0]
+        calibration = PropagationRequest("timing-fixture", case.package.package_hash, case.initial_mean,
+            case.initial_covariance, 0.0, 0.0, (1.0,), "endpoint-halfspace" if method == "importance" else "endpoint-x",
+            11, "paired-root", "affine-method", samples=128, steps=128, chunk_size=1)
+        started = time.monotonic()
+        if method == "importance":
+            importance_sampling(case.package, calibration, proposal=(1.0, 0.0))
+        else:
+            monte_carlo(case.package, calibration, solver="additive-heun" if method == "heun" else "euler")
+        samples = _path_checkpoint_samples(time.monotonic()-started)
+    changes = {"samples": sum(allocation) if allocation else samples, "steps": 128, "chunk_size": 1}
     store, spec, registry = prepare(tmp_path, method, recovery=True, changes=changes,
         level_samples=allocation)
     cell = spec["cells"][0]
@@ -148,7 +182,7 @@ def test_actual_chunk_worker_stops_and_reopened_resume_preserves_computation_and
     # Calibrate only this synthetic test's job duration, not a research arm.
     # Faster hosts must still exercise a real save before workload completion;
     # no clock or deadline is altered after the reservation is made.
-    job_seconds = max(3.0 if method == "mlmc" else 5.0, min(20.0, (time.monotonic()-started)*0.5))
+    job_seconds = max(3.0, min(20.0, (time.monotonic()-started)*0.5))
     store.register(spec, digest(spec))
     adapters = RecoveryRegistry()
     adapters.register(propagation_recovery_plugin())

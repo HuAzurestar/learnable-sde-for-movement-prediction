@@ -31,6 +31,58 @@ estimate and its interval are retained without probability clipping.
 `allocate_mlmc` proposes bounded allocations from supplied independent pilot
 variance/cost measurements; it starts no additional work or budget reservation.
 
+## Explicit managed MLMC pilot
+
+`mlmc-pilot` is an explicit chunk-adapter execution configuration, not a new
+method family, budget arm, automatic matrix expansion, or production estimator.
+Register a separate immutable pilot request/cell under the original `mlmc`
+method-family arm, with `execution_role: pilot`, admission mode `pilot`, and
+`BudgetSpec(..., category="pilot")`. Its independent sampling phase is fixed to
+2; ordinary MLMC uses phase 1. A different production seed and explicit coupling
+identity must be frozen in the policy before the pilot. The upstream study role
+retains its existing primary/secondary meaning, independently of execution role.
+
+The cell's `mlmc_pilot_policy` is the full serialized
+`domain.mlmc_pilot.MLMCPilotPolicy`: pilot request hash, production seed/coupling,
+sampling and bias tolerances, maximum correction variance ratio and measured cost
+ratio, minimum level samples, maximum samples and total fine/coarse work. There
+are no default research thresholds. Register at least three fixed levels;
+allocation, finest-grid, sample and total-work caps are checked before exposure.
+Only train/validation protocol blocks are permitted. Test/final-eval input and
+qualification artifact reads are refused at the admission boundary, even if the
+caller bypasses the numerical command builder. The existing 1800-second pilot
+stage cap and original cumulative arm budget remain authoritative.
+
+Each completed chunk measures monotonic compute nanoseconds, including path and
+functional/statistic computation but excluding checkpoint callback and owner ACK.
+Per-level compute totals are saved with completed numerical statistics, then
+accumulated only for remaining samples on resume. These hardware-dependent cost
+measurements are not ledger charges or restorable budget balances. The shared
+owner independently charges whole-worker slot occupancy, including startup and
+save/ACK. Numerical results replay within the frozen environment; timing values,
+empirical cost ratios, recommendations and resulting output hashes need not.
+
+`inference.mlmc_pilot.analyze_mlmc_pilot` reports correction-level variance ratios
+(level zero is not a correction), measured cost ratios, separate signed affine
+time bias and reference uncertainty, and explicit rejection reasons. A bounded
+sampling-only allocation may be proposed when empirical sampling/rate checks
+pass; unknown bias/reference components remain unknown and cannot grant
+qualification. Every current adapter's pilot analysis remains `UNQUALIFIED` /
+`ENGINEERING_ONLY`, and the shared result remains `fixture`. Production requires
+separate registration and qualification; no proposal executes or adds levels.
+The allocation principle follows [Giles's primary MLMC research and software
+references](https://people.maths.ox.ac.uk/gilesm/mlmc.html); this implementation
+is a bounded engineering slice, not a certified convergence theorem or research
+comparison.
+
+Engineering tests:
+
+```console
+python -m pytest tests/test_mlmc_pilot.py tests/test_mlmc_pilot_shared.py -q
+```
+
+## Other methods and shared recovery
+
 Importance sampling changes drift only by `L @ u` and retains the original
 diffusion. Its discrete path likelihood ratio is accumulated in log space:
 `log w = -sum(u @ dW) - 0.5 * ||u||^2 * horizon`. The estimator is unnormalized,

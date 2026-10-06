@@ -246,29 +246,41 @@ def importance_sampling(package, request, *, proposal, resume_state=None, checkp
          ("max_log_weight", max_log_weight), ("hits", hits), ("self_normalized", False)))
 
 
-def mlmc_estimate(package, request, *, level_samples, phase=1, resume_state=None, checkpoint=None):
+def mlmc_estimate(package, request, *, level_samples, phase=1, resume_state=None, checkpoint=None, pilot=False):
     """A fixed registered allocation; pilot proposals do not start extra work."""
     if (type(level_samples) is not tuple or not 1 <= len(level_samples) <= 9
             or any(type(n) is not int or not 2 <= n <= 1_000_000 for n in level_samples)
             or sum(level_samples) > 1_000_000):
         raise DataValidationError("invalid bounded MLMC allocation")
     request.validate()
+    if type(pilot) is not bool or pilot and (type(phase) is not int or phase != 2):
+        raise DataValidationError("MLMC pilot requires its independent fixed stream phase")
     if request.steps*2**(len(level_samples)-1) > 8192:
         raise DataValidationError("MLMC finest grid exceeds registered step limit")
     from .propagation_recovery import ChunkState
     _inputs(package, request)
     costs = tuple(request.steps*2**level + (request.steps*2**(level-1) if level else 0) for level in range(len(level_samples)))
-    state = ChunkState(request, "mlmc", level_samples, costs, phase=phase, restored=resume_state)
+    state = ChunkState(request, "mlmc", level_samples, costs, phase=phase, restored=resume_state, measure_cost=pilot)
     for level in range(state.level, len(level_samples)):
         count, stats = level_samples[level], state.statistics[level]
         offset = state.position if level == state.level else 0
-        for _, stop, fine, coarse, _ in endpoint_chunks(package, request, level=level, paired=level>0,
-                                                    phase=phase, start_sample=offset, sample_count=count-offset):
+        chunks = iter(endpoint_chunks(package, request, level=level, paired=level>0,
+                                     phase=phase, start_sample=offset, sample_count=count-offset))
+        while True:
+            if pilot:
+                import time
+                started_ns = time.perf_counter_ns()
+            try:
+                _, stop, fine, coarse, _ = next(chunks)
+            except StopIteration:
+                break
             values = _functional(fine, request)
             if level:
                 values = values - _functional(coarse, request)
             stats["n"], stats["mean"], stats["m2"] = _merge_moments(stats["n"], stats["mean"], stats["m2"], values)
             stats["hits"] += int(np.count_nonzero(values))
+            if pilot:
+                stats["compute_ns"] += max(1, time.perf_counter_ns()-started_ns)
             state.completed(level, stop, checkpoint)
     means = [stats["mean"] for stats in state.statistics]
     variances = [stats["m2"]/(stats["n"]-1) for stats in state.statistics]
@@ -276,13 +288,18 @@ def mlmc_estimate(package, request, *, level_samples, phase=1, resume_state=None
     se = math.sqrt(math.fsum(v/n for v, n in zip(variances, level_samples)))
     # Never clip a noisy signed MLMC probability estimator to [0,1].
     status = "UNRESOLVED_SAMPLING" if request.functional == "endpoint-halfspace" and se == 0 else "SUCCEEDED"
-    return FunctionalResult(request.request_hash, "coupled-euler-mlmc-v1", "functional_estimate", estimate,
+    diagnostics = (("level_samples", level_samples), ("level_means", tuple(means)), ("level_variances", tuple(variances)),
+         ("coupling", "coarse-increment=sum(two-fine-increments)"), ("bias_bound", "unknown; affine signed bias in error budget"))
+    if pilot:
+        diagnostics += (("pilot_phase", 2), ("production_phase", 1),
+            ("level_compute_ns", tuple(stats["compute_ns"] for stats in state.statistics)),
+            ("level_work_per_sample", costs), ("cost_scope", "compute-only-excludes-checkpoint-ACK-not-budget-charge"))
+    return FunctionalResult(request.request_hash, "coupled-euler-mlmc-pilot-v1" if pilot else "coupled-euler-mlmc-v1", "functional_estimate", estimate,
         None if status != "SUCCEEDED" else se, (estimate-1.959963984540054*se, estimate+1.959963984540054*se) if status == "SUCCEEDED" else None,
         "independent-level-normal-approximation-95" if status == "SUCCEEDED" else "unavailable-zero-observed-level-variance",
         sum(level_samples), _error_budget(package, request, "euler", request.steps*2**(len(level_samples)-1),
-                                        se if status == "SUCCEEDED" else None), status,
-        (("level_samples", level_samples), ("level_means", tuple(means)), ("level_variances", tuple(variances)),
-         ("coupling", "coarse-increment=sum(two-fine-increments)"), ("bias_bound", "unknown; affine signed bias in error budget")))
+                                        se if status == "SUCCEEDED" else None), "PILOT_ONLY" if pilot and status == "SUCCEEDED" else status,
+        diagnostics)
 
 
 def allocate_mlmc(variances, costs, sampling_tolerance, *, maximum_samples=1_000_000):
