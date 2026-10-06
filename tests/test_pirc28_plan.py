@@ -14,7 +14,7 @@ from experiments.pirc28.__main__ import main as runtime_main
 from experiments.pirc28.plan import (MAXIMUM_PLAN_BYTES, REFERENCE_PLAN, describe_plan,
                                     load_plan, main, prepare_definition)
 from experiments.pirc28.pipeline import recipe_resources
-from experiments.pirc28.qualification import AXES, IdentifiabilitySpec, _wilson
+from experiments.pirc28.qualification import AXES, PARAMETERS, IdentifiabilitySpec, _wilson
 from experiments.pirc28.runtime import switching_plugin
 from experiments.pirc28.study import SyntheticStudyDefinition
 from infrastructure.research_store import ResearchError, ResearchStore, digest, encode
@@ -195,3 +195,35 @@ def test_brier_thresholds_are_not_impossible_zero_noise_targets(reference):
     assert thresholds['mode_brier'] < 0.5
     assert thresholds['any_jump_brier'] > 0.25 and thresholds['different_endpoint_mode_brier'] > 0.25
     assert plan['qualification']['coverage_nominal'] == 0.9
+
+
+@pytest.mark.parametrize('parameter', list(PARAMETERS))
+def test_required_parameter_gates_must_exclude_individual_zero_estimates(reference, parameter):
+    plan, definition = reference
+    value = definition.to_dict()
+    roles = value['identifiability_spec']['scenario_roles']
+    errors = []
+    for name, recipe in value['recipes'].items():
+        if roles[name] != 'required-qualified':
+            continue
+        model = recipe['scenario']['model']
+        if parameter == 'diffusion_covariance':
+            l = np.asarray(model['L'])
+            actual = l @ l.swapaxes(-1, -2)
+        else:
+            actual = np.asarray(model[parameter])
+        errors.append(float(np.sqrt(np.mean(actual**2))))
+    metric = PARAMETERS[parameter]
+    assert plan['qualification']['thresholds'][metric] < min(errors)
+    changed = copy.deepcopy(plan)
+    changed['qualification']['thresholds'][metric] = min(errors)
+    with pytest.raises(ResearchError, match='zero-parameter baseline'):
+        prepare_definition(changed)
+
+
+def test_true_zero_coefficient_is_correct_truth_not_a_vacuous_parameter_gate(reference):
+    plan = copy.deepcopy(reference[0])
+    plan['truth_parameters']['A'] = np.zeros((2, 2, 2)).tolist()
+    value = prepare_definition(plan).to_dict()
+    assert all(recipe['scenario']['model']['A'] == np.zeros((2, 2, 2)).tolist()
+               for recipe in value['recipes'].values())

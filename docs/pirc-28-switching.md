@@ -460,18 +460,25 @@ does not claim an RSS sandbox or guaranteed elapsed time. Shared per-job and
 
 | Recovery/calibration quantity | Maximum per-replicate value |
 | --- | --- |
-| Q RMSE (s^-1) | 0.5 |
-| A RMSE (s^-2) | 0.04 |
-| B RMSE (s^-1) | 0.2 |
+| Q RMSE (s^-1) | 0.25 |
+| A RMSE (s^-2) | 0.01 |
+| B RMSE (s^-1) | 0.05 |
 | a RMSE (m s^-2) | 0.3 |
-| L L^T RMSE (m^2 s^-3) | 0.04 |
+| L L^T RMSE (m^2 s^-3) | 0.01 |
 | Two-component mode Brier | 0.3 |
 | Mode ECE / continuous-dwell occupancy error | 0.1 / 0.1 |
 | Absolute coordinate-marginal coverage error, nominal 0.9 | 0.1 |
 | Any-jump / different-endpoint binary Brier | 0.3 / 0.3 |
 
 These are operational scientific criteria, not universal identifiability
-constants. Parameter matching uses frozen scales Q=1 s^-1, A=0.04 s^-2,
+constants. A pre-data analytical review tightened the initial A/B/Q/covariance
+criteria: zero A would have RMSE 0.0282843 s^-2, zero B 0.1414214 s^-1,
+zero covariance 0.0282843 m^2 s^-3 and zero Q at the slow required point
+0.5 s^-1. The initial thresholds admitted those individual null estimates.
+No scientific fitting or recovery outcomes informed the correction. The compiler
+now refuses any required-point nonzero parameter threshold at or above its
+zero-estimate error. Truly zero generating coefficients are valid null truths
+and are not refused. Parameter matching scales are unchanged: Q=1 s^-1, A=0.04 s^-2,
 B=0.2 s^-1, a=1 m s^-2 and diffusion covariance=0.04 m^2 s^-3; it compares
 L L^T, not the noise-rotation-dependent L. Two-label matching is unchanged.
 A balanced uninformative two-component mode forecast has Brier risk 0.5.

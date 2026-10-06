@@ -14,7 +14,7 @@ from inference.switching import InferenceSpec
 from infrastructure.research_files import opened_regular_file
 from infrastructure.research_store import ResearchError, digest, encode, identifier
 from models.switching import SwitchingError, SwitchingSDEModel
-from .qualification import AXES, IdentifiabilitySpec, _wilson, phase_manifest
+from .qualification import AXES, PARAMETERS, IdentifiabilitySpec, _wilson, phase_manifest
 from .study import SCHEMA, SyntheticStudyDefinition, arm_bindings
 from .synthetic import ScenarioSpec
 
@@ -145,6 +145,21 @@ def _prepare(plan):
         raise ResearchError('NEEDS_PREREGISTRATION', 'non-vacuous numeric scientific gates required')
     if _wilson(count, count, qualification.confidence)[0] < qualification.minimum_recovery_fraction:
         raise ResearchError('CONTRACT_MISMATCH', 'even all-success Wilson lower bound cannot meet the registered recovery gate')
+    for name, role in roles.items():
+        if role != 'required-qualified':
+            continue
+        model = points[name]['scenario']['model']
+        arrays = {key: np.asarray(model[key], dtype=float) for key in ('Q', 'A', 'B', 'a')}
+        l = np.asarray(model['L'], dtype=float)
+        arrays['diffusion_covariance'] = l @ l.swapaxes(-1, -2)
+        for parameter, metric in PARAMETERS.items():
+            zero_error = float(np.sqrt(np.mean(arrays[parameter]**2)))
+            # A genuinely zero true coefficient is a correct null, not a
+            # vacuous gate. Otherwise even an individual zero estimate must
+            # fail this parameter's recovery criterion at a required point.
+            if zero_error > 0 and qualification.thresholds[metric] >= zero_error:
+                raise ResearchError('CONTRACT_MISMATCH',
+                    'required '+parameter+' recovery threshold admits a zero-parameter baseline')
     recipes, seeds = {}, {}
     origin, horizons = frozen['forecast_origin_s'], frozen['forecast_horizons_s']
     if (type(origin) not in (int, float) or not math.isfinite(origin) or origin < 0

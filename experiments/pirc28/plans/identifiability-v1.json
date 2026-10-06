@@ -73,11 +73,11 @@
   "forecast_horizons_s": [0.5, 1.0],
   "qualification": {
     "thresholds": {
-      "rate_rmse_s_inv": 0.5,
-      "position_drift_rmse_s_inv2": 0.04,
-      "velocity_drift_rmse_s_inv": 0.2,
+      "rate_rmse_s_inv": 0.25,
+      "position_drift_rmse_s_inv2": 0.01,
+      "velocity_drift_rmse_s_inv": 0.05,
       "acceleration_rmse_m_s2": 0.3,
-      "diffusion_covariance_rmse_m2_s3": 0.04,
+      "diffusion_covariance_rmse_m2_s3": 0.01,
       "mode_brier": 0.3,
       "mode_ece": 0.1,
       "occupancy_error": 0.1,
