@@ -24,6 +24,13 @@ from tests.test_pirc26_dynamics import model
 from tests.test_research_store import spec
 
 
+# A finite frozen workload for the real80% test, not a production plan change.
+# 600 updates completed before the40s job's soft threshold on a warm machine.
+# This gives more computation margin without faking time/control or relaxing
+# the unchanged 40/100-second test budgets. Qualification remains CPU-scoped.
+RECOVERY_STEPS = 1200
+
+
 @pytest.fixture(autouse=True)
 def one_thread():
     previous = torch.get_num_threads()
@@ -59,8 +66,8 @@ def prepare(tmp_path, *, operation="fit-and-forecast", role="train", corrupt=Fal
     cfg["forecast_request_hashes"] = [digest(asdict(req))]
     profile["steps"] = 4
     if long_training:
-        cfg["plan"].update(max_steps=600, patience=600, tolerance=0.)
-        profile.update(steps=600, observations=4098)
+        cfg["plan"].update(max_steps=RECOVERY_STEPS, patience=RECOVERY_STEPS, tolerance=0.)
+        profile.update(steps=RECOVERY_STEPS, observations=4098)
     if basis_family(family):
         cfg["plan"].update(max_batch_rows=32, ridge=.001, curvature_penalty=.03 if family == "M1-S" else 0.)
         profile.update(steps=128, observations=101, batches=8)
@@ -180,14 +187,19 @@ def test_actual_versioned_worker_reopens_exact_training_and_forecasts_under_new_
         spec1["study_id"], digest(spec1["cells"][0]), budget=BudgetSpec(100))
     assert expected["state"] == "SUCCEEDED", expected
     target = json.loads((baseline.path / "artifacts" / expected["artifact_id"]).read_bytes())
+    assert target["fit"]["steps"] == RECOVERY_STEPS
     store, value, _, _, registry, recovery, grant = prepare(tmp_path / "resumed", long_training=True)
     stopped = SharedRunner(store, registry, recovery_registry=recovery).run_cell(
         value["study_id"], digest(value["cells"][0]), budget=BudgetSpec(40))
+    prior_cost = BudgetLedger(store).balance("affine")["committed_ms"]
+    assert prior_cost > 0  # even an unexpectedly fast complete attempt is charged
     assert stopped["state"] == "FAILED", stopped
     assert store.attempts()[stopped["attempt_id"]]["error_code"] == "CHECKPOINT_SAVED"
     saves = [event["payload"] for event in store.events() if event["event_kind"] == "CHECKPOINT_SAVED"]
-    assert len(saves) == 1 and 0 < saves[0]["progress"]["completed_steps"] < 600
-    prior_cost = BudgetLedger(store).balance("affine")["committed_ms"]
+    assert len(saves) == 1 and 0 < saves[0]["progress"]["completed_steps"] < RECOVERY_STEPS
+    requests = [event["payload"] for event in store.events() if event["event_kind"] == "CHECKPOINT_REQUESTED"]
+    assert len(requests) == 1 and requests[0]["supported"]
+    assert 0 < requests[0]["remaining_seconds"] <= 40 * .2
     reopened = ResearchStore(tmp_path / "resumed", store.store_id)
     result = SharedRecovery(reopened, registry, recovery).resume(stopped["attempt_id"], saves[0]["artifact_id"],
         authorization=grant, budget=BudgetSpec(100))
