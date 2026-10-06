@@ -19,21 +19,23 @@ from infrastructure.research_store import ResearchError, ResearchStore, digest, 
 from tests.research_admission_fixtures import admit_fixture
 
 
-def prepare(tmp_path, method="euler", *, recovery=False, changes=None, level_samples=None, unbound_steps=None):
+def prepare(tmp_path, method="euler", *, recovery=False, changes=None, level_samples=None, unbound_steps=None, synthetic=False):
     # A disposable test store, not a new scientific ledger or protected input.
     store = ResearchStore(tmp_path, "propagation-unit", initialize=True)
     case = oracle_suite()[0]
-    request = PropagationRequest("endpoint-fixture", case.package.package_hash, case.initial_mean,
-        case.initial_covariance, 0.0, 0.0, (1.0,), "endpoint-halfspace" if method == "importance" else "endpoint-x", 11, "paired-root", "affine-method",
+    from experiments.pirc27.nonlinear import nonlinear_package
+    package = nonlinear_package() if synthetic else case.package
+    request = PropagationRequest("endpoint-fixture", package.package_hash, case.initial_mean,
+        case.initial_covariance, 0.0, 0.0, (1.0,), "endpoint-halfspace" if method == "importance" else "endpoint-x", 11, "paired-root", "synthetic-method" if synthetic else "affine-method",
         samples=16, steps=4, chunk_size=8)
     request = replace(request, **(changes or {}))
-    plugin = propagation_plugin(recovery=recovery)
+    plugin = propagation_plugin(recovery=recovery, synthetic=synthetic)
     config = execution_config(request, method, level_samples=(level_samples or (8, 8)) if method == "mlmc" else (),
-                              proposal=(1.0, 0.0) if method == "importance" else (0.0, 0.0), recovery=recovery)
+                              proposal=(1.0, 0.0) if method == "importance" else (0.0, 0.0), recovery=recovery, synthetic=synthetic)
     inputs = execution_inputs(request)
     cell = {"arm_id": request.arm_id, "block_id": "generator-v1", "seed": request.seed, "horizon": 1.0,
             "plugin_id": plugin.plugin_id, "capability": {"mlmc": "coupled-level", "exact": "exact-transition", "importance": "rare-event"}.get(method, "generic-rollout"),
-            "visibility": "synthetic", "frozen_dynamics": case.package.manifest(),
+            "visibility": "synthetic", "frozen_dynamics": package.manifest(),
             "propagation_request": json.loads(encode(asdict(request)))}
     if unbound_steps is not None:
         # Register this malformed pairing as the original matrix, so the test
@@ -45,7 +47,7 @@ def prepare(tmp_path, method="euler", *, recovery=False, changes=None, level_sam
         "comparison_family": "synthetic-engineering", "code_hash": code_hash(),
         "protocol_hash": digest("placeholder"), "data_hash": digest("placeholder"),
         "feature_hash": digest("no-terrain"), "selection_hash": digest("none"),
-        "arms": [{"arm_id": request.arm_id, "model_family_id": "affine-stable-v1",
+        "arms": [{"arm_id": request.arm_id, "model_family_id": "tanh-stress-v1" if synthetic else "affine-stable-v1",
                   "method_family_id": method, "objective_id": request.functional, "budget_seconds": 86400}],
         "cells": [cell], "runtime_binding": {"root": str(tmp_path.resolve()), "store_id": store.store_id}}
     admit_fixture(store, spec, plugin, tmp_path, execution_config=config, execution_inputs=inputs, legacy_upstream=False,

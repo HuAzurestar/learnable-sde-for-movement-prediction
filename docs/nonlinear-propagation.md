@@ -31,9 +31,14 @@ misrepresent central probability mass; it is not a preregistered scientific
 applicability or gain result. Euler/Heun zero-noise convergence is separately
 checked against an independent scalar RK4 calculation.
 
-Engineering kernels and package/code validation are available. The current
-registered shared adapter is still affine-only; nonlinear managed execution must
-be explicitly registered/integrated and qualified before any research run.
-Raw kernel tests do not authorize scientific execution or a new ledger. Actual
+`propagation_plugin(synthetic=True)` explicitly registers a separate synthetic
+adapter; its chunk variant uses `propagation_recovery_plugin(synthetic=True)`.
+The affine adapter never silently changes models. The synthetic adapter permits
+Euler/Heun MC, MLMC, IS and restart-only cubature, and reserves at least eight
+workspace rows even with one path per chunk. Its measured functional estimate is
+not labelled an error against a nonexistent nonlinear oracle.
+
+Raw kernel tests and managed fixture grants do not authorize scientific execution
+or a new ledger. Actual
 research still requires the existing explicit shared root/store, admission,
 qualification/preregistration, exposure permission and original arm budget.

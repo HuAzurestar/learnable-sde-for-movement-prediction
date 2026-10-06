@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from domain.frozen_dynamics import FrozenDynamicsPackage
+from domain.nonlinear_dynamics import FrozenNonlinearPackage
+from domain.errors import DataValidationError
 from domain.propagation import PropagationRequest
 from infrastructure.research_store import ResearchError, digest
 
-from .propagation_inputs import validate_oracle_input
+from .propagation_inputs import validate_oracle_input, validate_nonlinear_input
 from .research_execution import execution_plan
 
 
@@ -36,18 +38,25 @@ def validate_propagation_cell(spec, cell):
     from experiments.pirc27.plugin import propagation_plugin, execution_config, execution_inputs
     if spec.get("code_hash") != code_hash() or cell.get("visibility") != "synthetic":
         raise ResearchError("CONTRACT_MISMATCH", "only the frozen synthetic source is supported by this adapter")
-    recovery = cell["plugin_id"] == "affine-propagation-chunk"
-    plugin = propagation_plugin(recovery=recovery)
+    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk"}:
+        raise ResearchError("CONTRACT_MISMATCH", "unknown explicit propagation adapter")
+    recovery = cell["plugin_id"].endswith("-chunk")
+    synthetic = cell["plugin_id"].startswith("synthetic-")
+    plugin = propagation_plugin(recovery=recovery, synthetic=synthetic)
     execution_plan(spec, cell, plugin)
     request = request_from_manifest(cell["propagation_request"])
-    package = FrozenDynamicsPackage.from_manifest(cell["frozen_dynamics"], expected_hash=request.model_package_hash)
-    validate_oracle_input(package, expected_package_hash=request.model_package_hash)
+    package_type = FrozenNonlinearPackage if synthetic else FrozenDynamicsPackage
+    try:
+        package = package_type.from_manifest(cell["frozen_dynamics"], expected_hash=request.model_package_hash)
+        (validate_nonlinear_input if synthetic else validate_oracle_input)(package, expected_package_hash=request.model_package_hash)
+    except DataValidationError as exc:
+        raise ResearchError("CONTRACT_MISMATCH", "frozen propagation package schema/content/code differs") from exc
     config = cell["execution"]["config"]
-    expected = execution_config(request, config["method"], level_samples=tuple(config["level_samples"]), proposal=tuple(config["proposal"]), recovery=recovery)
+    expected = execution_config(request, config["method"], level_samples=tuple(config["level_samples"]), proposal=tuple(config["proposal"]), recovery=recovery, synthetic=synthetic)
     if config != expected or cell["execution"]["inputs"] != execution_inputs(request) or request.arm_id != cell["arm_id"] or request.seed != cell["seed"]:
         raise ResearchError("CONTRACT_MISMATCH", "registered request, method/resource configuration or arm differs")
     required_capability = {"exact": "exact-transition", "gaussian": "generic-rollout", "euler": "generic-rollout",
-                           "heun": "generic-rollout", "mlmc": "coupled-level", "importance": "rare-event"}[config["method"]]
+                           "heun": "generic-rollout", "mlmc": "coupled-level", "importance": "rare-event", "cubature": "generic-rollout"}[config["method"]]
     if cell["capability"] != required_capability:
         raise ResearchError("CONTRACT_MISMATCH", "method differs from the cell's registered capability")
     return package, request, config, plugin
@@ -55,6 +64,7 @@ def validate_propagation_cell(spec, cell):
 
 def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None):
     from inference.propagation_methods import (analytic_estimate, monte_carlo, mlmc_estimate, importance_sampling)
+    from inference.nonlinear_propagation import cubature_estimate
     package, request, config, plugin = validate_propagation_cell(spec, cell)
     recovery = plugin.resume_level == "chunk"
     if not recovery and (resume_state is not None or checkpoint is not None):
@@ -65,18 +75,22 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None):
         "euler": lambda: monte_carlo(package, request, **continuation),
         "heun": lambda: monte_carlo(package, request, solver="additive-heun", **continuation),
         "mlmc": lambda: mlmc_estimate(package, request, level_samples=tuple(config["level_samples"]), **continuation),
-        "importance": lambda: importance_sampling(package, request, proposal=tuple(config["proposal"]), **continuation)}
+        "importance": lambda: importance_sampling(package, request, proposal=tuple(config["proposal"]), **continuation),
+        "cubature": lambda: cubature_estimate(package, request)}
     result = methods[config["method"]]()
-    reference = analytic_estimate(package, request).estimate
+    synthetic = isinstance(package, FrozenNonlinearPackage)
+    metrics = ({"functional_estimate": result.estimate} if synthetic else
+               {"absolute_error_vs_float64_reference": abs(result.estimate-analytic_estimate(package, request).estimate)})
     unit = "m" if request.functional == "endpoint-x" else "1"
-    output = {"metrics": {"absolute_error_vs_float64_reference": abs(result.estimate-reference)},
+    output = {"metrics": metrics,
         "forecast": {"kind": result.kind, "horizons": list(request.horizons), "functional": result.manifest(),
                      "model_package_hash": package.package_hash, "request_hash": request.request_hash},
-        "fit": {"training": "none; frozen synthetic generator"}, "source_schema": "endpoint-propagation-v1"}
+        "fit": {"training": "none; frozen synthetic generator"},
+        "source_schema": "synthetic-endpoint-propagation-v1" if synthetic else "endpoint-propagation-v1"}
     # Computational completion keeps low-ESS/unresolved estimates as artifacts;
     # estimator status remains visible and cannot be scientific qualification.
     return {"schema_version": "pirc25-result-v1", "status": "SUCCEEDED", "qualification": "fixture",
             "spec_hash": digest(spec), "cell_hash": digest(cell), "protocol_hash": spec["protocol_hash"],
             "state_order": list(plugin.state_order), "units": list(plugin.units), "time_unit": "s",
             "resume_level": plugin.resume_level, "input_hash": spec["data_hash"], "output_hash": digest(output),
-            "metric_units": {"absolute_error_vs_float64_reference": unit}, **output}
+            "metric_units": {name: unit for name in metrics}, **output}
