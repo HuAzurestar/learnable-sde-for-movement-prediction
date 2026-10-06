@@ -408,3 +408,114 @@ Fixture use additionally requires `--allow-fixture` and a smoke budget; it can
 only publish FIXTURE_ONLY. Even a synthetic scientific pass does not grant
 real-data access or replace the remaining preregistration, applicable-range,
 study execution, paper, review and acceptance obligations.
+
+## Explicit six-axis scientific plan
+
+`experiments/pirc28/plans/identifiability-v1.json` is the first explicit numeric
+scientific plan, not a software fixture, observed result or operator approval.
+It is prepared before scientific fitting; no thresholds or ranges were chosen
+from a production recovery result. Its source-bound compiler reads at most
+64 KiB of unique-key finite JSON and expands the complete immutable definition.
+Every inference, sampling, initialization, threshold, scale and scope field is
+explicit; missing fields are refused instead of taking fixture defaults.
+
+| Axis | Frozen levels |
+| --- | --- |
+| Affine drift-contrast multiplier | 0, 2 |
+| Stationary mean sojourn (s) | 0.5, 2 |
+| Position observation interval (s) | 0.25, 0.5 |
+| Isotropic position-noise standard deviation (m) | 0.1, 0.5 |
+| Trajectory length (s) | 8, 16 |
+| Stationary synthetic mode-0 occupancy | 0.2, 0.5 |
+
+All 64 Cartesian points have 16 independent source replicates and paired K=1/K=2
+cells: 2,048 cells, not 2,048 independent replicates for one point. Each replicate
+has 3 training, 2 selection and 8 test paths; within-path points, paths in a cell,
+64 forecast samples and the two K=2 initializations are not CI sampling units.
+Seeds derive from the complete plan hash, physical scenario and replicate ID,
+with collision refusal rather than silent reseeding. K arms share source streams;
+train/selection/test retain their existing independent role streams. Initializers
+are fixed across every scenario and never adapted to generated truth.
+
+The required qualification points are contrast 2, interval 0.25 s, noise 0.1 m,
+length 16 s and occupancy 0.5, at both 0.5 s and 2 s mean sojourns. All 32 zero-
+contrast points are required-unidentifiable controls. They have identical A, B,
+a and diffusion covariance plus the same mode-conditional initial law; zero
+drift contrast alone would not establish that control. The other 30 points are
+phase-diagram-only, retained regardless of outcome. These are exact predeclared
+points, not a post-fit selector or an interpolated applicable box. Every control
+requires complete successful pairs: numerical failure cannot establish it.
+
+Physical truth has common A=-0.04 I s^-2, B=-0.2 I s^-1 and L=0.2 I m s^-3/2;
+baseline a=(-0.8,0.4)/(0.8,-0.4) m s^-2 is scaled only by the contrast axis.
+The initial state has zero mean and covariance diag(0.25,0.25,1,1) in its
+coordinate units. Position alone is observed; velocity and mode truth remain
+evaluator-only. All fitted models use the same [0,5] s^-1 rate family. The plan
+declares 12 GEM iterations, two distinct K=2 initializers, max step 0.125 s,
+rate-step product <=0.05 and 1,600 substeps. The compiler checks the quota at the
+maximum allowed fitted rate on every physical grid, not just at initial rates.
+All cells fit the existing 20-million-element/512-MiB declaration limits. This
+does not claim an RSS sandbox or guaranteed elapsed time. Shared per-job and
+24-hour original-arm caps still govern all fits, scenarios, retries and aggregates.
+
+| Recovery/calibration quantity | Maximum per-replicate value |
+| --- | --- |
+| Q RMSE (s^-1) | 0.5 |
+| A RMSE (s^-2) | 0.04 |
+| B RMSE (s^-1) | 0.2 |
+| a RMSE (m s^-2) | 0.3 |
+| L L^T RMSE (m^2 s^-3) | 0.04 |
+| Two-component mode Brier | 0.3 |
+| Mode ECE / continuous-dwell occupancy error | 0.1 / 0.1 |
+| Absolute coordinate-marginal coverage error, nominal 0.9 | 0.1 |
+| Any-jump / different-endpoint binary Brier | 0.3 / 0.3 |
+
+These are operational scientific criteria, not universal identifiability
+constants. Parameter matching uses frozen scales Q=1 s^-1, A=0.04 s^-2,
+B=0.2 s^-1, a=1 m s^-2 and diffusion covariance=0.04 m^2 s^-3; it compares
+L L^T, not the noise-rotation-dependent L. Two-label matching is unchanged.
+A balanced uninformative two-component mode forecast has Brier risk 0.5.
+For a future Bernoulli event with probability p, even an oracle forecast has
+expected Brier p(1-p), up to 0.25. The 0.3 event gates therefore allow inherent
+future randomness; they must not be misreported as improvement over a constant
+0.5 binary forecast. Rate recovery and the remaining calibration gates are
+separate requirements. Coverage is coordinate-marginal, never joint-region.
+
+Each point needs at least 14 effective paired replicates, minimum posterior
+occupancy 0.05 and maximum registered-denominator collapse fraction 0.125.
+The 95% Wilson lower bound on the failure-inclusive joint recovery/calibration
+fraction must be >=0.7: with 16 registered replicates, 16 or 15 successes can
+meet that bound, while 14 cannot. The compiler refuses a count/confidence/gate
+combination that cannot pass even with all successes. Mean-metric and paired
+energy intervals use 2,000 bounded bootstrap draws, seed 2026100701, sampling
+independent replicates. These are pointwise intervals, not simultaneous
+64-point coverage or a familywise error-rate claim. No negative/unidentifiable
+outcome is hidden, and no failure is assigned fabricated metrics.
+
+Read-only preparation requires no runtime or grants:
+
+```console
+python -m experiments.pirc28.plan experiments/pirc28/plans/identifiability-v1.json
+```
+
+The summary reports definition/plan/current-source hashes, role/count/byte
+checks and an analytical all-success Wilson bound. It always reports zero
+scientific groups executed, prepared_only=true, registered_studies=false and
+qualified_identifiability=real_data_authorized=false. It is not data exposure,
+scientific qualification or frozen operator preregistration in the shared store.
+
+After the canonical root and original store identity are supplied, metadata can
+be staged explicitly, without creating a store, study, grant or reservation:
+
+```console
+python -m experiments.pirc28 --root SHARED_ROOT --store-id ORIGINAL_STORE_ID stage-plan experiments/pirc28/plans/identifiability-v1.json
+python -m pytest tests/test_pirc28_plan.py -q
+```
+
+Source-bound definitions change when runtime source changes. Stage the final
+tested source before source admission and fitting; a later code/plan change
+requires its own explicit preregistration and does not reset original arm costs.
+Actual operator protocols, packages, grants and pre-fit full-master publication
+remain mandatory. This plan does not replace known-state/K=1 numerical controls,
+scientific recovery, approximation/calibration verification, qualified real-data
+comparison, paper, independent review, human acceptance or merged delivery.

@@ -34,6 +34,8 @@ def main(argv=None):
     qualify.add_argument('--reason')
     stage = commands.add_parser('stage-definition', help='publish immutable pre-fit metadata; never creates grants or studies')
     stage.add_argument('path', type=Path)
+    plan = commands.add_parser('stage-plan', help='expand explicit scientific plan and publish pre-fit metadata only')
+    plan.add_argument('path', type=Path)
     args = parser.parse_args(argv)
     if args.root is None:
         parser.error('explicit shared --root or SDE_RUNTIME_ROOT is required; no implicit new ledger')
@@ -70,9 +72,13 @@ def main(argv=None):
         else:
             from infrastructure.research_files import opened_regular_file
             from .study import MAXIMUM_DEFINITION_BYTES, SyntheticStudyDefinition, stage_definition
-            path = args.path.absolute()
-            with opened_regular_file(path.parent, path, maximum_bytes=MAXIMUM_DEFINITION_BYTES) as (stream, _, _):
-                definition = SyntheticStudyDefinition(stream.read(MAXIMUM_DEFINITION_BYTES+1))
+            if args.command == 'stage-plan':
+                from .plan import load_plan, prepare_definition
+                definition = prepare_definition(load_plan(args.path))
+            else:
+                path = args.path.absolute()
+                with opened_regular_file(path.parent, path, maximum_bytes=MAXIMUM_DEFINITION_BYTES) as (stream, _, _):
+                    definition = SyntheticStudyDefinition(stream.read(MAXIMUM_DEFINITION_BYTES+1))
             output = stage_definition(store, definition)
         print(json.dumps(output, sort_keys=True))
         return 0
