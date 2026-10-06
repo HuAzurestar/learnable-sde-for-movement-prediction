@@ -182,9 +182,11 @@ class ObservedBlock:
         return segment["state"][indices].clone()
 
 
-def decode_block(admission, model):
+def decode_block(admission, model, *, max_observations=1048576):
     """Validate the authorized transport before allocating numerical tensors."""
     from models.phase_space import PhaseSpaceSDE
+    if type(max_observations) is not int or not 1 <= max_observations <= 1048576:
+        raise ResearchError("RESOURCE_PLAN_REJECTED", "explicit bounded observation capacity required")
     fields = {"schema_version", "protocol_hash", "block_id", "source_identity", "split_role", "purpose", "content_sha256", "content_utf8"}
     if (type(admission) is not dict or set(admission) != fields or admission["schema_version"] != "pirc26-admitted-block-v1"
             or not isinstance(model, PhaseSpaceSDE) or PURPOSES.get(admission["split_role"]) != admission["purpose"]
@@ -227,6 +229,6 @@ def decode_block(admission, model):
         seen.add(segment["segment_id"])
         observations += len(t)
         elements += len(t) * (6 + model.spec.context_dim)
-        if observations > 1048576 or elements > 1048576:
+        if observations > max_observations or elements > 1048576:
             raise ResearchError("RESOURCE_PLAN_REJECTED", "decoded observed-state tensor quota")
     return ObservedBlock(admission, document, model)

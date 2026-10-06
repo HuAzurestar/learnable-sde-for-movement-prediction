@@ -90,7 +90,7 @@ def exit_managed_worker(code):
     or receiving the checkpoint ACK. The owner retains its process-tree check.
     https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-exitprocess
     """
-    if type(code) is not int or code not in (0, 85) or WorkerControl.from_environment() is None:
+    if type(code) is not int or code not in (0, 1, 85) or WorkerControl.from_environment() is None:
         raise ResearchError("CONTRACT_MISMATCH", "terminal exit requires the managed worker channel and supported code")
     if os.name == "nt":
         import ctypes
