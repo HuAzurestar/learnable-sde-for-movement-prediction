@@ -99,6 +99,9 @@ def test_actual_formal_mlmc_save_ack_reopened_resume_retains_stream_receipt_and_
     # Fixed engineering-only pilot policy before any reservation. The actual
     # pilot's measured allocation, not an inflated or hand-written allocation,
     # supplies the independently registered production workload.
+    # Predeclare at most four linked continuations: a correctly budget-stopped
+    # resume may itself save at80%, never requiring a longer live deadline.
+    maximum_resumes = 4
     startup_seconds = _worker_startup_seconds()
     store, spec, registry, recovery, grant, _, _ = prepared_source(tmp_path,
         sampling_tolerance=.001, counts=(1024, 1024, 1024), request_changes={"chunk_size": 1})
@@ -150,10 +153,32 @@ def test_actual_formal_mlmc_save_ack_reopened_resume_retains_stream_receipt_and_
     with pytest.raises(ResearchError):
         restored.prepare(parent["attempt_id"], saved["artifact_id"], authorization=denied)
     assert BudgetLedger(reopened).balance(arm) == before
-    resumed = restored.resume(parent["attempt_id"], saved["artifact_id"], authorization=grant, budget=BudgetSpec(60))
+    continued = []
+    failed_ids = {parent["attempt_id"]}
+    previous = parent["attempt_id"]
+    checkpoint = saved["artifact_id"]
+    completed = saved["progress"]["completed_steps"]
+    for _ in range(maximum_resumes):
+        reopened = ResearchStore(tmp_path, store.store_id)
+        resumed = SharedRecovery(reopened, registry, recovery).resume(previous, checkpoint,
+            authorization=grant, budget=BudgetSpec(60))
+        continued.append(resumed)
+        current = reopened.attempts()[resumed["attempt_id"]]
+        assert current["parent_attempt_id"] == previous
+        assert not BudgetLedger(reopened).balance(arm)["closed"]
+        if resumed["state"] == "SUCCEEDED":
+            break
+        # Never retry a timeout, hard fuse or numerical/admission failure.
+        # Only an actual verified new completed-boundary save can continue.
+        assert resumed["state"] == "FAILED" and current["error_code"] == "CHECKPOINT_SAVED", resumed
+        next_saved = resumed["checkpoint"]
+        assert completed < next_saved["progress"]["completed_steps"] < config["work_steps"]
+        completed = next_saved["progress"]["completed_steps"]
+        previous, checkpoint = resumed["attempt_id"], next_saved["artifact_id"]
+        failed_ids.add(previous)
     assert resumed["state"] == "SUCCEEDED", resumed
     current = reopened.attempts()[resumed["attempt_id"]]
-    assert current["parent_attempt_id"] == parent["attempt_id"]
+    assert current["parent_attempt_id"] in failed_ids
     actual = json.loads((reopened.path/"artifacts"/resumed["artifact_id"]).read_bytes())
     receipt = reopened.manifest("admission-"+actual["admission_hash"])
     assert receipt["attempt_id"] == resumed["attempt_id"] and actual["admission_hash"] != value["admission_hash"]
@@ -164,12 +189,13 @@ def test_actual_formal_mlmc_save_ack_reopened_resume_retains_stream_receipt_and_
     assert unmodified == json.loads(encode({k: v for k, v in expected.manifest().items() if k != "error_budget"}))
     validate_formal_mlmc_result(receipt, spec, cell, actual)
     after = BudgetLedger(reopened).balance(arm)
-    assert after["committed_ms"] == before["committed_ms"]+resumed["elapsed_ms"] and not after["closed"]
+    assert after["committed_ms"] == before["committed_ms"]+sum(a["elapsed_ms"] for a in continued) and not after["closed"]
     bundle = export_evidence(reopened, spec["study_id"], grant)
     row = bundle["cells"][0]
-    assert {a["attempt_id"] for a in row["history"]} == {parent["attempt_id"], resumed["attempt_id"]}
-    assert row["cost"]["charged_ms"] == interrupted["elapsed_ms"]+resumed["elapsed_ms"]
-    assert {e["payload"]["attempt_id"] for e in row["cost"]["sources"]} == {parent["attempt_id"], resumed["attempt_id"]}
+    target_ids = failed_ids | {resumed["attempt_id"]}
+    assert {a["attempt_id"] for a in row["history"]} == target_ids
+    assert row["cost"]["charged_ms"] == interrupted["elapsed_ms"]+sum(a["elapsed_ms"] for a in continued)
+    assert {e["payload"]["attempt_id"] for e in row["cost"]["sources"]} == target_ids
     checked = paper_validate(tmp_path, bundle)
     assert checked.returncode == 0, checked.stderr
     assert json.loads(checked.stdout)["verified_mlmc_cells"] == 1

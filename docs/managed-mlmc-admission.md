@@ -48,7 +48,10 @@ independent phase1 stream and same-arm charge. The formal-production-specific
 engineering control exercises a real80% request, partial completed-chunk save,
 ACK-backed exit, reopened store and linked resume with a fresh current owner
 receipt. Its signed-level statistics equal uninterrupted pure-kernel output;
-the original arm retains pilot, failed prefix and resumed charges. Authorized
+the original arm retains pilot, every failed prefix and resumed charges. A
+resume may itself reach80% and save again; the engineering control predeclares
+at most four linked resumes, each under the same frozen cap. It never retries
+a timeout, fused arm or numerical/admission failure. Authorized
 export keeps failed/resumed history and passes the independent paper reader.
 An evaluate permission cannot replace resume permission; missing or zeroed
 failed-attempt charges are refused. No clock, deadline or workload completion
