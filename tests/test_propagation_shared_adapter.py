@@ -3,6 +3,8 @@
 from dataclasses import asdict, replace
 import json
 import math
+import subprocess
+import sys
 import time
 
 import pytest
@@ -30,6 +32,28 @@ def _mlmc_checkpoint_allocation(calibration_seconds):
 def _path_checkpoint_samples(calibration_seconds):
     # The same pre-store sizing for each actual method, not a budget extension.
     return max(1024, min(1_000_000 // 128, math.ceil(16.0 * 128 / calibration_seconds)))
+
+
+def _worker_startup_seconds():
+    # Read-only engineering calibration before a store/grant/reservation exists.
+    # Parent imports are warm; a real fresh worker must import these packages.
+    started = time.monotonic()
+    subprocess.run([sys.executable, "-c", "from experiments.pirc27.worker import execute_propagation; "
+        "from inference.propagation_methods import mlmc_estimate; "
+        "from experiments.pirc27.oracles import oracle_suite; oracle_suite()"],
+        check=True, timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    return time.monotonic()-started
+
+
+def _checkpoint_job_seconds(compute_seconds, startup_seconds):
+    # One predeclared job, never a live deadline extension or save grace period.
+    return max(3., min(20., .5*compute_seconds+startup_seconds))
+
+
+@pytest.mark.parametrize("compute,startup,expected", [(12., 6., 12.), (16., .5, 8.5),
+    (1., .1, 3.), (100., 10., 20.)])
+def test_checkpoint_job_sizing_includes_fresh_startup_with_existing_fixture_cap(compute, startup, expected):
+    assert _checkpoint_job_seconds(compute, startup) == expected
 
 
 @pytest.mark.parametrize("seconds", [0.01, 0.5, 1.0, 4.0, 10.0])
@@ -174,6 +198,7 @@ def test_actual_chunk_worker_stops_and_reopened_resume_preserves_computation_and
             monte_carlo(case.package, calibration, solver="additive-heun" if method == "heun" else "euler")
         samples = _path_checkpoint_samples(time.monotonic()-started)
     changes = {"samples": sum(allocation) if allocation else samples, "steps": 128, "chunk_size": 1}
+    startup_seconds = _worker_startup_seconds()
     store, spec, registry = prepare(tmp_path, method, recovery=True, changes=changes,
         level_samples=allocation)
     cell = spec["cells"][0]
@@ -182,7 +207,7 @@ def test_actual_chunk_worker_stops_and_reopened_resume_preserves_computation_and
     # Calibrate only this synthetic test's job duration, not a research arm.
     # Faster hosts must still exercise a real save before workload completion;
     # no clock or deadline is altered after the reservation is made.
-    job_seconds = max(3.0, min(20.0, (time.monotonic()-started)*0.5))
+    job_seconds = _checkpoint_job_seconds(time.monotonic()-started, startup_seconds)
     store.register(spec, digest(spec))
     adapters = RecoveryRegistry()
     adapters.register(propagation_recovery_plugin())

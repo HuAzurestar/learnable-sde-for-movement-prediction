@@ -10,7 +10,8 @@ from application.research_recovery import RecoveryRegistry, SharedRecovery
 from experiments.pirc25.runner import SharedRunner
 from experiments.pirc27.plugin import propagation_plugin, propagation_recovery_plugin
 from infrastructure.research_store import ResearchError, ResearchStore, digest
-from tests.test_propagation_shared_adapter import prepare, _mlmc_checkpoint_allocation
+from tests.test_propagation_shared_adapter import (prepare, _mlmc_checkpoint_allocation,
+    _worker_startup_seconds, _checkpoint_job_seconds)
 
 
 def setup(tmp_path, **kwargs):
@@ -96,12 +97,13 @@ def test_actual_pilot_soft_save_and_reopened_resume_preserve_measured_completed_
     started = time.monotonic()
     mlmc_estimate(case.package, request, level_samples=(64, 32, 16), phase=2, pilot=True)
     counts = _mlmc_checkpoint_allocation(time.monotonic()-started)
+    startup_seconds = _worker_startup_seconds()
     store, spec, registry = prepare(tmp_path, "mlmc-pilot", recovery=True, level_samples=counts,
         changes={"samples": sum(counts), "steps": 128, "chunk_size": 1})
     cell = spec["cells"][0]
     started = time.monotonic()
     expected = execute_propagation(spec, cell)
-    job_seconds = max(3., min(20., (time.monotonic()-started)*.5))
+    job_seconds = _checkpoint_job_seconds(time.monotonic()-started, startup_seconds)
     store.register(spec, digest(spec))
     adapters = RecoveryRegistry()
     adapters.register(propagation_recovery_plugin())
