@@ -22,7 +22,7 @@ from experiments.pirc25.affine import code_hash
 from experiments.pirc25.runner import SharedRunner
 from experiments.pirc27.path_production_plugin import path_production_plugin, path_production_config
 from experiments.pirc27.plugin import execution_inputs, propagation_resume_command
-from infrastructure.research_store import ResearchError, digest
+from infrastructure.research_store import ResearchError, digest, encode
 from tests.research_admission_fixtures import admit_fixture
 from tests.test_path_qualification import policies, prepared
 from tests.path_paper_helpers import independent_reader, independent_aggregate, paper_validate
@@ -129,7 +129,7 @@ def test_completed_target_finalization_uses_saved_paths_and_own_metric_not_gener
     monkeypatch.setattr(evidence_module, "bound_affine_discrete", forbidden)
     current = execute_propagation(spec, spec["cells"][0],
         resume_state=result["forecast"]["path_output_analysis"]["completed_statistics"], admission=receipt)
-    assert current["forecast"] == result["forecast"] and current["metrics"] == result["metrics"]
+    assert encode(current["forecast"]) == encode(result["forecast"]) and current["metrics"] == result["metrics"]
 
 
 @pytest.mark.parametrize("method", METHODS, ids=["euler", "heun", "rev", "is"])
