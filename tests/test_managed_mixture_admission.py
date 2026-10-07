@@ -322,8 +322,13 @@ def test_actual_formal_mixture_save_ack_reopened_resume_retains_current_receipt_
     maximum_resumes = 2
     steps = (1_000_000-400001)//(8*(1+1+4**3))
     startup = _mixture_worker_startup_seconds()
-    store, spec, registry, grant, _, _ = prepare_target(tmp_path, 1, request_changes={"steps": steps,
-        "chunk_size": 1, "initial_covariance": tuple(tuple(.25 if i == j else 0. for j in range(4)) for i in range(4))})
+    # A nonzero endpoint threshold with a nontrivial frozen probability-error
+    # target, not the zero-threshold symmetric case or a scientific default.
+    store, spec, registry, grant, _, _ = prepare_target(tmp_path, 1,
+        changes={"maximum_retained_functional_error": .01, "maximum_time_bias": .01,
+            "maximum_total_functional_error": .1},
+        request_changes={"steps": steps, "chunk_size": 1, "tolerance": .1, "threshold": .5,
+            "initial_covariance": tuple(tuple(.25 if i == j else 0. for j in range(4)) for i in range(4))})
     cell = spec["cells"][0]
     model, request, config, _ = validate_propagation_cell(spec, cell)
     mixture = MixturePolicy.from_manifest(cell["mixture_policy"])
@@ -390,6 +395,10 @@ def test_actual_formal_mixture_save_ack_reopened_resume_retains_current_receipt_
     assert receipt["attempt_id"] == resumed["attempt_id"] and actual["admission_hash"] != saved_value["admission_hash"]
     proof = receipt["documents"]["propagation_qualification"]
     assert proof["policy"] == cell["mixture_qualification_policy"] and proof["mixture_policy"] == cell["mixture_policy"]
+    assert request.tolerance == proof["policy"]["maximum_total_functional_error"] == .1
+    assert 0 < actual["metrics"][METRIC] <= request.tolerance
+    components = actual["forecast"]["qualified_error_components"]
+    assert components["retained_functional_error_upper"] <= .01 and components["time_bias_absolute_upper"] <= .01
     assert receipt["input_evidence"] and all(proof["completion_event"]["sequence"] < event["sequence"]
         for event in receipt["input_evidence"])
     assert proof["settlement_event"]["payload"]["charged_ms"] > 0

@@ -39,6 +39,9 @@ independent CLI rejects missing or zero parent charges. Evaluate permission
 cannot borrow separate resume permission. The control predeclares at most two
 fixed 60-second continuations, never extends a live deadline, and never resumes
 a hard fuse, timeout, numerical or admission failure.
+Its nonzero endpoint threshold is 0.5, with frozen probability-error caps of
+0.1 total and 0.01 each for retained-functional error and time bias. These are
+explicit engineering-control targets, not an approved study accuracy default.
 The paired paper-side `scripts/pirc25/mixture_qualification.py` independently
 checks saved mixture-specific numerical evidence, owner/native-cost order and
 current full functional lineage. `validate_mixture.py bundle.json --expected-hash
