@@ -11,7 +11,8 @@ from .pipeline import validate_recipe
 
 
 def failure_result(diagnostic, spec, cell, plugin):
-    payload = {'failure': diagnostic, 'source_schema': 'pirc28-synthetic-failure-v3' if 'reference_execution' in diagnostic
+    payload = {'failure': diagnostic, 'source_schema': 'pirc28-synthetic-failure-v4' if 'k1_boundary_execution' in diagnostic
+               else 'pirc28-synthetic-failure-v3' if 'reference_execution' in diagnostic
                else 'pirc28-synthetic-failure-v2'
                if 'approximation_checks' in diagnostic else 'pirc28-synthetic-failure-v1'}
     return {'schema_version': 'pirc25-failure-v1', 'status': 'FAILED', 'qualification': 'failed',
@@ -31,12 +32,16 @@ def validate_cell_failure(result, spec, cell):
     stages = {'generation', 'fit', 'selection', 'test-inference', 'forecast', 'evaluation'}
     native_reference = result.get('source_schema') == 'pirc28-synthetic-failure-v3'
     approximation = native_reference or result.get('source_schema') == 'pirc28-synthetic-failure-v2'
+    k1_boundary = result.get('source_schema') == 'pirc28-synthetic-failure-v4'
+    if k1_boundary:
+        keys |= {'k1_boundary_checks', 'k1_boundary_execution'}
+        stages |= {'k1-boundary'}
     if approximation:
         keys |= {'approximation_checks'}
         stages |= {'approximation'}
     if native_reference:
         keys |= {'reference_execution'}
-    if (result.get('source_schema') not in {'pirc28-synthetic-failure-v1', 'pirc28-synthetic-failure-v2', 'pirc28-synthetic-failure-v3'} or type(value) is not dict
+    if (result.get('source_schema') not in {'pirc28-synthetic-failure-v1', 'pirc28-synthetic-failure-v2', 'pirc28-synthetic-failure-v3', 'pirc28-synthetic-failure-v4'} or type(value) is not dict
             or set(value) != keys or value['schema_version'] != 'pirc28-numerical-cell-failure-v1'
             or type(value['stage']) is not str or value['stage'] not in stages
             or type(value['error_code']) is not str or value['error_code'] not in NUMERICAL_CODES
@@ -44,6 +49,18 @@ def validate_cell_failure(result, spec, cell):
             or value['recipe_hash'] != digest({'recipe': spec['switching_recipe'], 'K': cell['fit_K'], 'seed': cell['seed']})):
         raise ResearchError('CONTRACT_MISMATCH', 'numerical failure recipe/stage/schema differs')
     scenario, models, inference, prior_mean, prior_covariance = validate_recipe(spec['switching_recipe'], cell['fit_K'])
+    if k1_boundary:
+        from .approximation import RECIPE_SCHEMA
+        if (cell['fit_K'] != 1 or spec['switching_recipe']['schema_version'] != RECIPE_SCHEMA
+                or spec.get('admission', {}).get('mode') not in ('fixture', 'pilot')
+                or value['stage'] not in {'k1-boundary', *POST_REFERENCE_STAGES}):
+            raise ResearchError('CONTRACT_MISMATCH', 'native K1 failure scope differs')
+        report = value['k1_boundary_checks']
+        if (value['stage'] in POST_REFERENCE_STAGES and
+                (type(report) is not dict or report.get('state') != 'NUMERICAL_CHECKS_PASSED')
+                or value['stage'] == 'k1-boundary' and report is not None
+                and (type(report) is not dict or report.get('state') != 'INFERENCE_INAPPLICABLE')):
+            raise ResearchError('CONTRACT_MISMATCH', 'native K1 failure disposition differs')
     if approximation:
         from .approximation import ApproximationSpec, RECIPE_SCHEMA
         from .approximation_evidence import reference_seed
@@ -111,6 +128,13 @@ def validate_cell_failure(result, spec, cell):
             if chosen is None:
                 raise ResearchError('CONTRACT_MISMATCH', 'native reference has no selected fit')
             validate_reference_execution(record, spec, cell, attempt, chosen['model'], report)
+        if k1_boundary:
+            from .k1_execution import validate_execution
+            record = value['k1_boundary_execution']
+            attempt = {'attempt_id': record.get('attempt_id'), 'run_id': record.get('run_id')} if type(record) is dict else {}
+            if chosen is None:
+                raise ResearchError('CONTRACT_MISMATCH', 'native K1 failure has no selected fit')
+            validate_execution(record, spec, cell, attempt, chosen['model'], report)
     cause = value['cause']
     if value['stage'] in {'fit', 'selection'}:
         if cause is not None or value['error_code'] != 'INFERENCE_INAPPLICABLE':

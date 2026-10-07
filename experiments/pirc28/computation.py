@@ -39,9 +39,10 @@ def computation_plan(definition, maximum_total_bytes, *, source_recipes=()):
     prefix_elements = 0
     for recipe in source_recipes:
         if recipe['schema_version'] == RECIPE_SCHEMA:
-            allocation = recipe_allocation(recipe, 2)
-            plan_resources(switching_plugin().registry_entry, allocation['config'], allocation['inputs'], matrix_cells=1)
-            prefix_elements = max(prefix_elements, allocation['combined_tensor_elements'])
+            for k in (1, 2):
+                allocation = recipe_allocation(recipe, k)
+                plan_resources(switching_plugin().registry_entry, allocation['config'], allocation['inputs'], matrix_cells=1)
+                prefix_elements = max(prefix_elements, allocation['combined_tensor_elements'])
     if (elements+prefix_elements)*8 > 512*1024*1024:
         raise ResearchError('RESOURCE_PLAN_REJECTED', 'additive bootstrap/prefix numeric envelope exceeds 512 MiB')
     return {'maximum_result_bytes': MAXIMUM_RESULT_BYTES,

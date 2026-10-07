@@ -30,9 +30,32 @@ def _require(condition, detail):
 
 def _projection(result, study, cell):
     recipe = study['switching_recipe']
-    if recipe['schema_version'] != RECIPE_SCHEMA or cell['fit_K'] != 2:
+    if recipe['schema_version'] != RECIPE_SCHEMA:
         return None
     _require(study['code_hash'] == code_hash(), 'prefix replay requires the original current code source')
+    if cell['fit_K'] == 1:
+        if result['status'] == 'SUCCEEDED':
+            fit = result.get('fit')
+            scope = ('engineering-only; not-managed-authority-proof' if study['admission']['mode'] == 'fixture'
+                     else 'admitted-source-diagnostic-only; not-managed-authority-proof')
+            _require(type(fit) is dict and fit.get('approximation_execution_scope') == scope,
+                     'K1 diagnostic execution scope differs')
+            report = fit.get('k1_boundary_checks')
+            _require(type(report) is dict and report.get('state') == 'NUMERICAL_CHECKS_PASSED',
+                     'successful V2 K1 artifact lacks complete passed boundary report')
+        elif result['status'] == 'FAILED' and result.get('source_schema') == 'pirc28-synthetic-failure-v4':
+            from .evidence import validate_initialization_history
+            body = result['failure']
+            chosen = validate_initialization_history(study, cell, body, body['generated_inputs'])
+            _require(chosen is not None, 'K1 boundary failure has no selected fit')
+            fit = {name: body[name] for name in ('recipe_hash', 'generated_inputs', 'initializations', 'selection')}
+            fit.update(model=chosen['model'], k1_boundary_execution=body['k1_boundary_execution'],
+                       interpretation_level='synthetic-statistical-only', qualified_identifiability=False)
+            report = body['k1_boundary_checks']
+        else:
+            return None
+        _require(type(result.get('admission_hash')) is str, 'original K1 admission missing')
+        return fit, report, result['admission_hash']
     if result['status'] == 'SUCCEEDED':
         fit = result.get('fit')
         scope = ('engineering-only; not-managed-authority-proof' if study['admission']['mode'] == 'fixture'
@@ -67,20 +90,27 @@ def _projection(result, study, cell):
 
 def _receipt(store, study, cell, attempt, metadata, grant, history, projection, native_events):
     fit, report, admission_hash = projection
-    execution = fit.get('reference_execution')
-    reference_complete = validate_reference_execution(execution, study, cell, attempt, fit['model'], report,
-                                                       admission_hash=admission_hash)
-    _, _, inference, mean, covariance = validate_recipe(study['switching_recipe'], 2)
+    k = cell['fit_K']
+    if k == 1:
+        from .k1_execution import validate_execution
+        execution = fit.get('k1_boundary_execution')
+        validate_execution(execution, study, cell, attempt, fit['model'], report, admission_hash=admission_hash)
+        reference_complete = False
+    else:
+        execution = fit.get('reference_execution')
+        reference_complete = validate_reference_execution(execution, study, cell, attempt, fit['model'], report,
+                                                           admission_hash=admission_hash)
+    _, _, inference, mean, covariance = validate_recipe(study['switching_recipe'], k)
     view = {name: fit[name] for name in ('recipe_hash', 'model', 'selection', 'initializations', 'generated_inputs')}
     if report is not None:
         _require(report.get('spec_hash') == ApproximationSpec.from_dict(
             study['switching_recipe']['approximation_spec']).spec_hash
-            and report.get('reference_seed') == reference_seed(study['switching_recipe'], cell['seed'])
+            and (k == 1 or report.get('reference_seed') == reference_seed(study['switching_recipe'], cell['seed']))
             and report.get('model_hash') == digest(fit['model'])
             and report.get('inference_hash') == digest(inference.to_dict())
             and report.get('origin_index') == study['switching_recipe']['forecast_origin_index']
-            and report.get('initial_state_hash') == digest({'probability': [0.5, 0.5],
-                'means': np.tile(mean, (2, 1)).tolist(), 'covariances': np.tile(covariance, (2, 1, 1)).tolist()}),
+            and report.get('initial_state_hash') == digest({'probability': (np.ones(k)/k).tolist(),
+                'means': np.tile(mean, (k, 1)).tolist(), 'covariances': np.tile(covariance, (k, 1, 1)).tolist()}),
             'prefix report expected model/prior/recipe identity differs')
     # Attached failure bodies are disclosed separately; this projection binds
     # EVERY attempt's immutable identity, parent, state, artifact and full cost.
@@ -96,7 +126,7 @@ def _receipt(store, study, cell, attempt, metadata, grant, history, projection, 
         and stops[0]['payload'].get('confirmation') == 'native-job-or-process-group-no-running-descendants'
         and starts[0]['sequence'] < stops[0]['sequence'] < settlements[0]['sequence'],
         'prefix source has no actual native whole-tree stop/cost proof')
-    return {'schema_version': SCHEMA, 'study_id': study['study_id'], 'cell_hash': digest(cell),
+    receipt = {'schema_version': SCHEMA, 'study_id': study['study_id'], 'cell_hash': digest(cell),
         'run_id': attempt['run_id'], 'attempt_id': attempt['attempt_id'], 'arm_id': cell['arm_id'],
         'runtime_binding': {'root': str(store.path.parent), 'store_id': store.store_id},
         'source_code_hash': study['code_hash'], 'artifact_id': attempt['artifact_id'],
@@ -106,10 +136,10 @@ def _receipt(store, study, cell, attempt, metadata, grant, history, projection, 
         'selection_input_hash': fit['generated_inputs'][1]['observations_hash'],
         'selected_model_hash': digest(fit['model']),
         'generated_input_replay_hash': digest(expected_input_receipt(
-            fit['generated_inputs'], study['switching_recipe'], cell['seed'], k=2)),
+            fit['generated_inputs'], study['switching_recipe'], cell['seed'], k=k)),
         'reference_report_hash': None if report is None else digest(report),
         'observation_prefix_hash': None if report is None else report['observation_prefix_hash'],
-        'reference_seed': reference_seed(study['switching_recipe'], cell['seed']),
+        'reference_seed': reference_seed(study['switching_recipe'], cell['seed']) if k == 2 else None,
         'state': 'NO_REFERENCE_REPORT' if report is None else report['state'],
         'selection_scores_recomputed': True, 'prefix_inputs_replayed': report is not None,
         'prefix_diagnostics_consistent': report is not None,
@@ -117,13 +147,17 @@ def _receipt(store, study, cell, attempt, metadata, grant, history, projection, 
         'reference_execution_hash': digest(execution),
         'full_generated_input_hashes_verified': True, 'reference_sampling_verified': reference_complete,
         'managed_evidence_bound': False, 'qualified_identifiability': False, 'real_data_authorized': False}
+    if k == 1:
+        receipt.update(reference_execution_hash=None, k1_boundary_execution_hash=digest(execution),
+                       k1_boundary_verified=report is not None and report['state'] == 'NUMERICAL_CHECKS_PASSED')
+    return receipt
 
 
 def check_cell_prefix(store, study, cell, attempt, result, metadata, grant, history, *, check_budget):
     """Caller must first authorize/read canonical bytes and verify native reuse/failure."""
     _require(callable(check_budget), 'explicit funded prefix evidence poll required')
     check_budget()
-    if study['switching_recipe']['schema_version'] == RECIPE_SCHEMA and cell['fit_K'] == 2:
+    if study['switching_recipe']['schema_version'] == RECIPE_SCHEMA:
         from application.research_evidence import authorize_study
         from application.research_reuse import verified_failure, verified_reuse
         from .runtime import switching_plugin
@@ -140,20 +174,25 @@ def check_cell_prefix(store, study, cell, attempt, result, metadata, grant, hist
     if projection is None:
         return None
     fit, report, _ = projection
-    validate_generated_inputs(fit['generated_inputs'], study['switching_recipe'], cell['seed'], k=2,
+    k = cell['fit_K']
+    validate_generated_inputs(fit['generated_inputs'], study['switching_recipe'], cell['seed'], k=k,
                               check_budget=check_budget)
-    model, _ = validate_selected_fit(fit, study['switching_recipe'], cell['seed'], k=2,
+    model, _ = validate_selected_fit(fit, study['switching_recipe'], cell['seed'], k=k,
                                      check_budget=check_budget)
     if report is not None:
-        prefix, _ = replay_test_prefix(study['switching_recipe'], cell['seed'], check_budget=check_budget)
-        _, _, inference, mean, covariance = validate_recipe(study['switching_recipe'], 2)
-        receipt = validate_prefix_numbers(report, prefix, model, np.ones(2)/2,
-            np.tile(mean, (2, 1)), np.tile(covariance, (2, 1, 1)), inference,
+        prefix, _ = replay_test_prefix(study['switching_recipe'], cell['seed'], k=k, check_budget=check_budget)
+        _, _, inference, mean, covariance = validate_recipe(study['switching_recipe'], k)
+        from .k1_boundary import validate_k1_boundary
+        verifier = validate_k1_boundary if k == 1 else validate_prefix_numbers
+        extras = {} if k == 1 else {'seed': reference_seed(study['switching_recipe'], cell['seed'])}
+        receipt = verifier(report, prefix, model, np.ones(k)/k,
+            np.tile(mean, (k, 1)), np.tile(covariance, (k, 1, 1)), inference,
             ApproximationSpec.from_dict(study['switching_recipe']['approximation_spec']),
             origin_index=study['switching_recipe']['forecast_origin_index'],
-            seed=reference_seed(study['switching_recipe'], cell['seed']), check_budget=check_budget)
+            check_budget=check_budget, **extras)
         if result['status'] == 'SUCCEEDED':
-            _require(digest(fit.get('approximation_consistency')) == digest(receipt),
+            name = 'k1_boundary_consistency' if k == 1 else 'approximation_consistency'
+            _require(digest(fit.get(name)) == digest(receipt),
                      'source diagnostic consistency receipt differs from independent check')
     check_budget()
     events = [event for event in store.events() if event['payload'].get('attempt_id') == attempt['attempt_id']]
@@ -181,7 +220,7 @@ def validate_collected_prefix_bindings(store, studies, report, authorizations, m
     expected, consumed = [], 0
     plugin = switching_plugin()
     for _, _, k, study, cell in cells:
-        if k != 2 or study['switching_recipe']['schema_version'] != RECIPE_SCHEMA:
+        if study['switching_recipe']['schema_version'] != RECIPE_SCHEMA:
             continue
         related = by_run.get(_run_id(study, cell, study_hashes[study['study_id']]), [])
         history = _cost_history(store, study, cell, related, events_by_attempt)

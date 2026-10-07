@@ -1061,9 +1061,26 @@ proof of the transition implementation. Reports bind the selected model, prefix,
 prior, inference and specification and retain an inapplicable boundary outcome.
 All authority flags remain false. V2 K1 recipe resources add its filter workspace,
 retained report and owner-copy envelope to existing source/fit/forecast allocations;
-legacy resources and K2 reference allocations are unchanged. The actual K1 worker
-artifact/failure lifecycle and funded collector/owner adapter are still pending:
-this standalone receipt must never substitute for original native provenance.
+legacy resources and K2 reference allocations are unchanged. A standalone receipt
+must never substitute for original native provenance.
+
+The admitted V2 K1 worker now runs the analytic check after selection and before
+prediction, without invoking its K2 reference callback. Canonical success and V4
+numerical-failure artifacts carry original attempt/model/report provenance and,
+for pilot sources, the complete-master preflight and actual admission identity.
+A boundary exception keeps a partial report; a failed boundary keeps its full
+inapplicable report; a later prediction/evaluation failure retains its complete
+passed boundary report. Failures never gain success metrics. Deadline, grant and
+unknown errors are not reclassified as numerical failures.
+
+Original-K2-arm funded collection independently replays K1 generated role hashes,
+all disclosed selection scores and prefix/Kalman arithmetic. The publication
+owner only binds the canonical artifact, original native stop, every attempt's
+cost, grants and bounded receipt metadata. Qualification resources cover BOTH
+source arms without inventing a new sampling arm or increasing any cap. K1
+receipts explicitly say reference sampling is false (zero particles/batches),
+and distinguish a passed analytic boundary from an inapplicable one. All scientific
+and real-data qualification flags remain false pending aggregate release evidence.
 
 ```console
 python -m pytest tests/test_pirc28_source_preflight.py -q

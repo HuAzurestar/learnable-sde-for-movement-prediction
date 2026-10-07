@@ -17,6 +17,15 @@ from .failures import NumericalCellFailure
 from .failure_artifacts import failure_result
 
 
+def _diagnostic_recovery(k, phase):
+    if k == 1:
+        return {'reference_phase': 'not-applicable; K1-without-MC',
+                'reference_recovery': 'not-applicable; K1-without-MC',
+                'k1_boundary_recovery': 'restart-complete-original-K1-boundary-on-each-original-arm-attempt'}
+    return {'reference_phase': phase,
+            'reference_recovery': 'restart-all-fixed-batches-from-frozen-recipe-cell-seed; no-partial-reuse'}
+
+
 def main():
     root, store_id, study_id, cell_hash, output, *restored = sys.argv[1:]
     store = ResearchStore(Path(root), store_id)
@@ -99,8 +108,7 @@ def main():
             state = {'step': completed, 'data_position': {'accepted_EM_steps': completed},
                      'method_state': dict(latest), 'rng_state': latest['rng_state']}
             if managed_reference:
-                state['data_position'].update(reference_phase=reference_phase,
-                    reference_recovery='restart-all-fixed-batches-from-frozen-recipe-cell-seed; no-partial-reuse')
+                state['data_position'].update(_diagnostic_recovery(cell['fit_K'], reference_phase))
             control.save(state, {'completed_steps': completed, 'total_steps': total,
                 'throughput_per_second': completed/elapsed,
                 'eta_seconds': None if managed_reference else (total-completed)*elapsed/max(1, completed)})
@@ -112,6 +120,9 @@ def main():
             fixture_approximation_executor=fixture_reference if engineering_reference else None,
             source_approximation_executor=fixture_reference if source_preflight is not None else None)
     except NumericalCellFailure as error:
+        if managed_reference and 'k1_boundary_checks' in error.diagnostic:
+            from .k1_execution import attach_failure
+            attach_failure(error.diagnostic, spec, cell, attempt, source_preflight=source_preflight)
         if managed_reference and 'approximation_checks' in error.diagnostic:
             from .reference_execution import attach_reference_failure
             attach_reference_failure(error.diagnostic, spec, cell, attempt, completed_batches,
@@ -123,6 +134,10 @@ def main():
         poll()
         atomic_write(Path(output), content)
         os._exit(86)
+    if managed_reference and cell['fit_K'] == 1:
+        from .k1_execution import execution_record as k1_record
+        payload['fit']['k1_boundary_execution'] = k1_record(spec, cell, attempt, payload['fit']['model'],
+            payload['fit']['k1_boundary_checks'], source_preflight=source_preflight)
     if managed_reference and cell['fit_K'] == 2:
         from .reference_execution import execution_record
         payload['fit']['reference_execution'] = execution_record(spec, cell, attempt, payload['fit']['model'],

@@ -306,17 +306,18 @@ def reference_seed(recipe, cell_seed):
     return int(digest([identity, 'pirc28-prefix-reference-v1'])[:16], 16)
 
 
-def replay_test_prefix(recipe, cell_seed, *, check_budget):
+def replay_test_prefix(recipe, cell_seed, *, check_budget, k=2):
     """Observation-only deterministic replay; no future generation/fit/store."""
     from .pipeline import recipe_allocation, validate_recipe
     from .runtime import switching_plugin
     from application.research_registry import plan_resources
     _require(callable(check_budget), 'explicit input replay budget poll required')
     _integer(cell_seed, 0, 2**64-1)
+    _integer(k, 1, 2)
     _require(type(recipe) is dict and recipe.get('schema_version') == RECIPE_SCHEMA, 'frozen V2 recipe required')
     check_budget()
-    scenario, _, _, _, _ = validate_recipe(recipe, 2)
-    allocation = recipe_allocation(recipe, 2)
+    scenario, _, _, _, _ = validate_recipe(recipe, k)
+    allocation = recipe_allocation(recipe, k)
     # A small reference alone does not authorize its concurrent source/fit/
     # forecast envelope. Enforce the registered SUM before generating anything.
     plan_resources(switching_plugin().registry_entry, allocation['config'], allocation['inputs'], matrix_cells=1)
@@ -329,8 +330,9 @@ def replay_test_prefix(recipe, cell_seed, *, check_budget):
     # generated; per-path/role seed streams make this prefix equal to full replay.
     prefix = replace(observations, scenario_hash=full.scenario_hash)
     return prefix, {'schema_version': 'pirc28-replayed-prefix-input-v1',
-        'recipe_cell_hash': digest({'recipe': recipe, 'K': 2, 'seed': cell_seed}),
+        'recipe_cell_hash': digest({'recipe': recipe, 'K': k, 'seed': cell_seed}),
         'test_split_seed': int(seeds[2]), 'test_scenario_hash': full.scenario_hash,
-        'observation_prefix_hash': digest(prefix.to_dict()), 'reference_seed': reference_seed(recipe, cell_seed),
+        'observation_prefix_hash': digest(prefix.to_dict()),
+        'reference_seed': reference_seed(recipe, cell_seed) if k == 2 else None,
         'prefix_inputs_replayed': True, 'full_generated_input_hashes_verified': False,
         'source_authority_verified': False, 'managed_evidence_bound': False}

@@ -193,6 +193,10 @@ def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, res
             failure.diagnostic['approximation_checks'] = None
         elif context['stage'] in POST_REFERENCE_STAGES and 'approximation_checks' in context:
             failure.diagnostic['approximation_checks'] = context['approximation_checks']
+        if context['stage'] == 'k1-boundary':
+            failure.diagnostic['k1_boundary_checks'] = None
+        elif context['stage'] in POST_REFERENCE_STAGES and 'k1_boundary_checks' in context:
+            failure.diagnostic['k1_boundary_checks'] = context['k1_boundary_checks']
         raise failure from error
 
 
@@ -311,6 +315,24 @@ def _execute_recipe(recipe, k, seed, *, check_budget, progress_callback, resume_
     selection = complete_selection(selection)
     context['selection'] = selection
     approximation_checks, approximation_consistency = None, None
+    k1_checks, k1_consistency = None, None
+    if recipe['schema_version'] == RECIPE_SCHEMA and k == 1:
+        from .k1_boundary import check_k1_boundary, validate_k1_boundary
+        context['stage'] = 'k1-boundary'
+        approximation = ApproximationSpec.from_dict(recipe['approximation_spec'])
+        k1_checks = check_k1_boundary(batches[2], selected.model, probability, means, covariance,
+            inference, approximation, origin_index=recipe['forecast_origin_index'], check_budget=check_budget)
+        k1_consistency = validate_k1_boundary(k1_checks, batches[2], selected.model, probability, means,
+            covariance, inference, approximation, origin_index=recipe['forecast_origin_index'],
+            check_budget=check_budget)
+        if k1_checks['state'] != 'NUMERICAL_CHECKS_PASSED':
+            cause = numerical_diagnostic(SwitchingError('INFERENCE_INAPPLICABLE', 'K1 boundary gate failed'),
+                                         'k1-boundary', None)
+            failure = NumericalCellFailure('k1-boundary', histories, selection, cause=cause)
+            failure.diagnostic.update(recipe_hash=identity, generated_inputs=generated,
+                                      k1_boundary_checks=k1_checks)
+            raise failure
+        context['k1_boundary_checks'] = k1_checks
     if recipe['schema_version'] == RECIPE_SCHEMA and k == 2:
         from .approximation_evidence import reference_seed, validate_prefix_numbers
         context['stage'] = 'approximation'
@@ -411,6 +433,8 @@ def _execute_recipe(recipe, k, seed, *, check_budget, progress_callback, resume_
             approximation_consistency=approximation_consistency,
             approximation_execution_scope=('engineering-only; not-managed-authority-proof'
                 if source_approximation_executor is None else 'admitted-source-diagnostic-only; not-managed-authority-proof'))
+        if k == 1:
+            fit_payload.update(k1_boundary_checks=k1_checks, k1_boundary_consistency=k1_consistency)
     # Shared case views consume this registered first-path preview. The full
     # synthetic paths remain separately named, rather than confused with n blocks.
     preview = forecasts[0]
