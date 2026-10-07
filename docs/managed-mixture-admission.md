@@ -29,8 +29,16 @@ components are bounded; no zero-closure, KL or distribution-wide claim follows.
 The same shared owner validates current metrics, provenance and errors before
 publishing the artifact, and charges native occupancy to the original arm.
 
-The adapter declares the existing chunk protocol and 64 KiB mixture state
-limit. Actual interrupted formal-target restoration must be separately verified.
+The adapter uses the existing chunk protocol and 64 KiB mixture state limit.
+An actual affine cap=1 engineering control exercises formal-target 80% save/ACK,
+native tree stop, reopening the store and linked restoration under the same
+original arm. It checks positive progress/ETA, full frozen policy/current
+functional lineage and a fresh owner receipt; no budget is restored from state.
+All interrupted/resumed costs remain in the authorized export, and the
+independent CLI rejects missing or zero parent charges. Evaluate permission
+cannot borrow separate resume permission. The control predeclares at most two
+fixed 60-second continuations, never extends a live deadline, and never resumes
+a hard fuse, timeout, numerical or admission failure.
 The paired paper-side `scripts/pirc25/mixture_qualification.py` independently
 checks saved mixture-specific numerical evidence, owner/native-cost order and
 current full functional lineage. `validate_mixture.py bundle.json --expected-hash
@@ -39,6 +47,6 @@ export hash is required and does not authenticate an arbitrary rehashed journal.
 It never consumes Gaussian approval or replays a numerical engine. Actual cap=1
 and cap=4 pilot/formal/export chains and resealed semantic refusals are exercised
 in paired engineering tests. Generic export alone is not independent
-qualification. This is not a scientific study, full candidate qualification,
-manuscript result or delivery acceptance. Formal-target interrupted restoration
-still requires a separate actual owner test.
+qualification. These bounded engineering controls are not a scientific study,
+qualification of every method/configuration, manuscript result or delivery
+acceptance, nor a cross-hardware bit-reproducibility claim.

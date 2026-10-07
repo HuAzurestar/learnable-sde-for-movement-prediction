@@ -355,6 +355,7 @@ def test_actual_formal_mixture_save_ack_reopened_resume_retains_current_receipt_
     assert 0 < requested["remaining_seconds"] <= .2*job_seconds and saved["elapsed_ms"] < job_seconds*1000
     saved_value = json.loads((store.path/"artifacts"/saved["artifact_id"]).read_bytes())
     state = saved_value["state"]
+    assert len(encode(state)) <= 65536
     assert state["method_state"]["policy_hash"] == mixture.policy_hash
     assert state["method_state"]["request_hash"] == request.request_hash
     assert state["rng_state"]["scheme"] == "deterministic-cubature-no-sampled-rng-v1"
@@ -389,6 +390,9 @@ def test_actual_formal_mixture_save_ack_reopened_resume_retains_current_receipt_
     assert receipt["attempt_id"] == resumed["attempt_id"] and actual["admission_hash"] != saved_value["admission_hash"]
     proof = receipt["documents"]["propagation_qualification"]
     assert proof["policy"] == cell["mixture_qualification_policy"] and proof["mixture_policy"] == cell["mixture_policy"]
+    assert receipt["input_evidence"] and all(proof["completion_event"]["sequence"] < event["sequence"]
+        for event in receipt["input_evidence"])
+    assert proof["settlement_event"]["payload"]["charged_ms"] > 0
     assert {k: v for k, v in actual["forecast"]["functional"].items() if k != "error_budget"} == json.loads(
         encode({k: v for k, v in expected.items() if k != "error_budget"}))
     validate_formal_mixture_result(receipt, spec, cell, actual)
