@@ -3,6 +3,9 @@
 from dataclasses import replace
 import json
 import math
+import subprocess
+import sys
+import time
 
 import pytest
 
@@ -21,6 +24,45 @@ from infrastructure.research_store import ResearchError, digest
 from tests.research_admission_fixtures import admit_fixture
 from tests.test_propagation_shared_adapter import prepare
 from tests.test_propagation_study_design import fixture
+
+
+def _mixture_worker_startup_seconds():
+    # Measure fresh imports AND real mixture request/source/resource validation,
+    # not just generic path imports. One-step unprotected engineering input;
+    # no store, grant, reservation, owner clock or scientific evidence exists.
+    settings = MixtureSettings(1, 0., 0., (1.,)*4, 0., 1_000_000, 60.)
+    frozen = freeze_design(fixture(methods=(StudyMethod("mixture", steps=1,
+        samples=8, chunk_size=1, recovery=True, mixture_settings=settings),),
+        horizons=(1.,), seeds=(11,)))
+    spec = frozen.study_spec(expected_hash=frozen.manifest_hash)
+    command = [sys.executable, "-c", "import json,sys; "
+        "from experiments.pirc27.worker import execute_propagation; "
+        "spec=json.load(sys.stdin); execute_propagation(spec,spec['cells'][0])"]
+    started = time.monotonic()
+    subprocess.run(command, input=json.dumps(spec).encode("utf-8"), check=True,
+        timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    return time.monotonic()-started
+
+
+def test_mixture_startup_calibration_uses_full_bounded_pipeline_without_store(monkeypatch):
+    from infrastructure.research_store import ResearchStore
+    def no_store(*args, **kwargs):
+        pytest.fail("startup calibration created a store")
+    monkeypatch.setattr(ResearchStore, "__init__", no_store)
+    calls = []
+    def cold_process(command, **kwargs):
+        calls.append((command, kwargs))
+        spec = json.loads(kwargs["input"])
+        assert len(spec["cells"]) == 1 and "admission" not in spec and "runtime_binding" not in spec
+        cell = spec["cells"][0]
+        assert cell["propagation_request"]["steps"] == 1
+        assert cell["execution"]["config"]["work_steps"] == 528
+        assert "execute_propagation(spec,spec['cells'][0])" in command[-1]
+        assert kwargs["check"] is True and kwargs["timeout"] == 30
+    monkeypatch.setattr(subprocess, "run", cold_process)
+    # The no-op process mock can finish within one Windows monotonic clock tick;
+    # real positive measurements are still required by duration sizing below.
+    assert _mixture_worker_startup_seconds() >= 0 and len(calls) == 1
 
 
 def _mixture_checkpoint_job_seconds(compute, startup):
@@ -136,28 +178,28 @@ def test_fixture_mode_cannot_consume_heldout_mixture_block(tmp_path):
 
 
 def test_actual_mixture_save_ack_reopened_resume_keeps_policy_lineage_and_all_costs(tmp_path):
-    import time
     from application.research_recovery import RecoveryRegistry, SharedRecovery
     from application.propagation_execution import execute_propagation
     from infrastructure.research_store import ResearchStore, encode
-    from tests.test_propagation_shared_adapter import _worker_startup_seconds
 
     # Freeze the engineering workload within the unchanged million-work quota
     # and predeclare at most two60s continuations before creating any store.
     maximum_resumes = 2
     steps = 1_000_000 // (8*(1+1+4**3))
-    startup = _worker_startup_seconds()
+    startup = _mixture_worker_startup_seconds()
     store, spec, registry = prepared(tmp_path, request_changes={"steps": steps, "chunk_size": 1})
     cell = spec["cells"][0]
     started = time.monotonic()
     expected = execute_propagation(spec, cell)  # Pure unprotected unit control.
-    job_seconds = _mixture_checkpoint_job_seconds(time.monotonic()-started, startup)
+    compute = time.monotonic()-started
+    job_seconds = _mixture_checkpoint_job_seconds(compute, startup)
     store.register(spec, digest(spec))
     adapters = RecoveryRegistry()
     adapters.register(mixture_recovery_plugin())
     interrupted = SharedRunner(store, registry, recovery_registry=adapters).run_cell(
         spec["study_id"], digest(cell), budget=BudgetSpec(job_seconds, category="smoke"))
-    assert interrupted["state"] == "FAILED", interrupted
+    assert interrupted["state"] == "FAILED", {**interrupted,
+        "engineering_calibration_seconds": {"startup": startup, "compute": compute, "job": job_seconds}}
     parent = store.attempts()[interrupted["attempt_id"]]
     assert parent["error_code"] == "CHECKPOINT_SAVED", interrupted
     saved = interrupted["checkpoint"]

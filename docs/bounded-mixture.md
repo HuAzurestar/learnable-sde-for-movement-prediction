@@ -85,7 +85,12 @@ failure evidence or a portable recovery pass. The revised initial job sizing
 targets the signal at measured startup plus half the numerical work,
 `job_seconds = min(20, (startup + 0.5 * compute) / 0.8)`, before reservation.
 There is no 3 s minimum that can outlast the whole kernel on a fast host; the same
-workload/work quota and frozen 60 s job cap remain. The signal, hard deadline and
+workload/work quota and frozen 60 s job cap remain. Cold-start calibration now
+executes the actual mixture source/request/resource validation plus a single
+unprotected grid step in a fresh interpreter before any store/grant/reservation,
+instead of measuring generic path imports alone. A subsequent Windows control
+with generic-import calibration timed out before checkpoint response; its arm
+was charged and closed, not resumed or reset. The signal, hard deadline and
 ACK grace themselves are not modified.
 
 Engineering regressions cover moment-preserving reduction, the affine Euler
