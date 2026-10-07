@@ -121,6 +121,33 @@ there is no step expansion, PSD projection or stability promotion. Finite
 outputs remain engineering fixtures until independent method/reference
 qualification. No multiplicative-noise Itô model is supported.
 
+`tests/test_integrator_convergence.py` adds independent manufactured-law
+controls for Euler, additive Heun and reversible Heun. Fixed grids 8/16/32
+check the damped-oscillator endpoint expectation against its scalar closed form
+and integrated-Brownian half-space probability against closed-form moments/CDF,
+not against the production continuous moment solver. These slices distinguish
+Euler's first-order weak functional bias from the Heun variants' second-order
+weak bias. They do not establish an order for arbitrary region functionals.
+
+Nonzero-noise strong controls call the actual paired endpoint sampler at
+horizons 1 and 10, reconstruct its documented per-sample entropy contract
+independently, and verify every fine/coarse physical endpoint against weighted
+increments and actual adjacent fine-increment sums. For `dx=v dt, dv=sigma dW`,
+the exact endpoint conditional on the increments includes the independent
+Gaussian Brownian-bridge residual with variance `T*h^2/12`. The ideal-law
+position mean-square error is `sigma^2*T*h^2/3` for Euler and
+`sigma^2*T*h^2/12` for both Heun variants on this nilpotent drift. The finite
+PRNG ensembles check those meanings and first-order strong RMS refinement;
+weak second order must not be reported as strong second order. Velocity alone
+being exact does not mean the four-state path has zero error.
+
+These bounded, disposable unit controls neither create a research store nor
+authorize a study. Different resolution ensembles are not independent study
+blocks. Cross-platform roundoff/PRNG coverage, nonlinear weak/strong rates,
+long-horizon stability, complete method/physical-axis qualification and actual
+registered error-cost studies remain separate requirements. The original
+sampling kernels, recovery protocol, grants and cumulative budgets are unchanged.
+
 Recovery occurs only after *complete sample chunks*. There is no partial path
 or auxiliary trajectory to serialize at that boundary: completed statistics
 are saved and remaining independent sample streams reconstruct both initial
