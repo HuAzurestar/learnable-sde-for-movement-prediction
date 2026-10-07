@@ -15,6 +15,10 @@ component cap (1–32), scaled merge distance, absolute prune threshold, four
 positive state scales, maximum discarded mass, work quota and job cap. There
 are no default scientific thresholds. Requests exceeding the frozen work
 quota are refused rather than reduced to a smaller grid or component count.
+Settings and policies reject malformed, nested or oversized primitive fields
+before dataclass copying/serialization; manifest scale arity and primitive
+values are checked before tuple construction. The compiler performs the
+settings check before serializing arm/request identities.
 
 At each Euler grid step, each live Gaussian produces eight equally weighted
 symmetric-root cubature points. Each point is pushed through the frozen drift
@@ -65,16 +69,24 @@ save/ACK/charged linked-resume proof. Only these dedicated adapters accept the
 The watchdog, 80% signal, ACK grace and original-arm settlement are unchanged.
 
 An engineering integration test runs the actual bounded affine-mixture worker,
-receives the owner's real80% signal, completes a partial-grid save/ACK, verifies
+receives the owner's real 80% signal, completes a partial-grid save/ACK, verifies
 native worker-tree stop before settlement, then reopens the physical store and
 resumes only through the verified checkpoint/recovery registry. It compares
 full functional/lineage/output content with an uninterrupted unit control and
 checks a fresh owner receipt and all-attempt charges on the same original arm.
-Resume permission is distinct from evaluate permission. At most two60s linked
+Resume permission is distinct from evaluate permission. At most two 60 s linked
 continuations are declared before fixture creation; only new verified partial
 saves may continue, never timeout/fused/numerical/admission failures. No forced
 save, fake clock, live budget extension or sleep-only worker is used. This is
 an engineering test, not formal mixture qualification or a research experiment.
+An intermediate Python3.12 CI control completed normally instead of producing
+the required partial save. That failure is retained; it is not numerical-method
+failure evidence or a portable recovery pass. The revised initial job sizing
+targets the signal at measured startup plus half the numerical work,
+`job_seconds = min(20, (startup + 0.5 * compute) / 0.8)`, before reservation.
+There is no 3 s minimum that can outlast the whole kernel on a fast host; the same
+workload/work quota and frozen 60 s job cap remain. The signal, hard deadline and
+ACK grace themselves are not modified.
 
 Engineering regressions cover moment-preserving reduction, the affine Euler
 moment limit, distinct nonlinear component centres, pruning accounting and

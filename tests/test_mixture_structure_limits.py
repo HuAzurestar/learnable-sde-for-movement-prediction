@@ -33,7 +33,8 @@ def test_invalid_design_settings_refused_before_any_dataclass_serialization(monk
 
 @pytest.mark.parametrize("field,value", [("state_scales", [1.]*5),
     ("state_scales", [[1.]*100]*4), ("component_cap", True),
-    ("merge_distance", {"unexpected": [0.]*100}), ("maximum_job_seconds", 7201)])
+    ("merge_distance", {"unexpected": [0.]*100}), ("maximum_job_seconds", 7201),
+    ("code_hash", "0"*65), ("schema_version", "wrong-schema")])
 def test_invalid_policy_manifest_refused_before_canonical_copy(monkeypatch, field, value):
     document = MixturePolicy("a"*64, "b"*64, "c"*64,
         8, 0., 0., (1.,)*4, 0., 1_000_000, 60.).manifest()
@@ -60,3 +61,26 @@ def test_direct_settings_binding_refuses_before_copy(monkeypatch, changes):
     monkeypatch.setattr(mixture_module, "asdict", forbid_copy)
     with pytest.raises(DataValidationError):
         settings.bind(package, request, source)
+
+
+@pytest.mark.parametrize("operation", ["parse", "manifest", "bind", "design"])
+def test_cyclic_values_rejected_as_data_errors_without_recursion(operation):
+    cyclic = []
+    cyclic.append(cyclic)
+    settings = MixtureSettings(8, 0., 0., (cyclic,)*4, 0., 1_000_000, 60.)
+    document = MixturePolicy("a"*64, "b"*64, "c"*64,
+        8, 0., 0., (1.,)*4, 0., 1_000_000, 60.).manifest()
+    document["state_scales"] = [cyclic]*4
+    package, request = inputs(steps=2)
+    design = fixture(methods=(StudyMethod("mixture", steps=2, samples=8,
+        recovery=True, mixture_settings=settings),))
+    with pytest.raises(DataValidationError):
+        if operation == "parse":
+            MixturePolicy.from_manifest(document)
+        elif operation == "manifest":
+            replace(MixturePolicy.from_manifest({**document, "state_scales": [1.]*4}),
+                state_scales=(cyclic,)*4).manifest()
+        elif operation == "bind":
+            settings.bind(package, request, "c"*64)
+        else:
+            freeze_design(design)

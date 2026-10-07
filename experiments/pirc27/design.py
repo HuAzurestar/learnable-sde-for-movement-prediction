@@ -213,6 +213,8 @@ def freeze_design(design):
         if (method.mixture_settings is not None
                 and (type(method.mixture_settings) is not MixtureSettings or method.method != "mixture" or not method.recovery)):
             raise DataValidationError("mixture requires explicit immutable settings and chunk adapter")
+        if method.mixture_settings is not None:
+            method.mixture_settings.validate()
         if method.recovery and method.method not in {"euler", "heun", "reversible-heun", "mlmc", "importance", "mixture"}:
             raise DataValidationError("method has no declared chunk continuation")
         if method.method == "mlmc":

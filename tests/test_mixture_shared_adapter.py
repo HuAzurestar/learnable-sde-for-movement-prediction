@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 import json
+import math
 
 import pytest
 
@@ -20,6 +21,31 @@ from infrastructure.research_store import ResearchError, digest
 from tests.research_admission_fixtures import admit_fixture
 from tests.test_propagation_shared_adapter import prepare
 from tests.test_propagation_study_design import fixture
+
+
+def _mixture_checkpoint_job_seconds(compute, startup):
+    # Target the real80% signal at measured startup plus half the numerical
+    # work. A3s floor can outlast the whole kernel on a fast host. Freeze this
+    # initial duration BEFORE reservation; the workload/caps/watchdog do not
+    # change. The20s bound is the same first-job engineering cap as before.
+    if any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in (compute, startup)):
+        raise ValueError("positive finite measured mixture calibration required")
+    return min(20., (startup+.5*compute)/.8)
+
+
+@pytest.mark.parametrize("compute,startup,expected", [(.5, .5, .9375), (1., .5, 1.25),
+    (12., 6., 15.), (16., .5, 10.625), (100., 10., 20.)])
+def test_mixture_signal_calibration_is_bounded_and_not_after_fast_work_completion(compute, startup, expected):
+    job = _mixture_checkpoint_job_seconds(compute, startup)
+    assert job == pytest.approx(expected) and 0 < job <= 20
+    assert startup < .8*job < startup+compute
+
+
+@pytest.mark.parametrize("compute,startup", [(0., 1.), (1., 0.), (-1., 1.), (True, 1.),
+    (float("nan"), 1.), (1., float("inf"))])
+def test_invalid_mixture_calibration_refused(compute, startup):
+    with pytest.raises(ValueError):
+        _mixture_checkpoint_job_seconds(compute, startup)
 
 
 def prepared(root, *, synthetic=False, formal=False, maximum_job_seconds=60, request_changes=None):
@@ -114,7 +140,7 @@ def test_actual_mixture_save_ack_reopened_resume_keeps_policy_lineage_and_all_co
     from application.research_recovery import RecoveryRegistry, SharedRecovery
     from application.propagation_execution import execute_propagation
     from infrastructure.research_store import ResearchStore, encode
-    from tests.test_propagation_shared_adapter import _checkpoint_job_seconds, _worker_startup_seconds
+    from tests.test_propagation_shared_adapter import _worker_startup_seconds
 
     # Freeze the engineering workload within the unchanged million-work quota
     # and predeclare at most two60s continuations before creating any store.
@@ -125,7 +151,7 @@ def test_actual_mixture_save_ack_reopened_resume_keeps_policy_lineage_and_all_co
     cell = spec["cells"][0]
     started = time.monotonic()
     expected = execute_propagation(spec, cell)  # Pure unprotected unit control.
-    job_seconds = _checkpoint_job_seconds(time.monotonic()-started, startup)
+    job_seconds = _mixture_checkpoint_job_seconds(time.monotonic()-started, startup)
     store.register(spec, digest(spec))
     adapters = RecoveryRegistry()
     adapters.register(mixture_recovery_plugin())
