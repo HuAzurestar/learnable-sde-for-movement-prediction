@@ -131,6 +131,10 @@ def _axis(values, kind, name):
         raise DataValidationError("invalid bounded immutable " + name + " axis")
 
 
+def _state_vector(value):
+    return type(value) is tuple and len(value) == 4 and all(_finite(x) for x in value)
+
+
 def _request(design, model, method, functional, horizon, seed, arm_id):
     paired = {"model_package_hash": model.package.package_hash,
               "initial_mean": model.initial_mean, "initial_covariance": model.initial_covariance,
@@ -205,8 +209,25 @@ def freeze_design(design):
             identifier(value)
         if len(set(values)) != len(values):
             raise DataValidationError("duplicate family/method/functional axis; declare configuration once")
+    # Bound primitive shape/type before any dataclass copying, package evaluation
+    # or numeric allocation. PSD/symmetry and per-method work checks still run
+    # below; these are the existing request constraints, not new numeric policy.
+    for model in design.models:
+        if (not _state_vector(model.initial_mean) or type(model.initial_covariance) is not tuple
+                or len(model.initial_covariance) != 4
+                or not all(_state_vector(row) for row in model.initial_covariance)):
+            raise DataValidationError("invalid bounded immutable initial distribution")
+    for functional in design.functionals:
+        if (type(functional.kind) is not str or functional.kind not in {"endpoint-x", "endpoint-halfspace"}
+                or not _state_vector(functional.normal) or not any(x != 0 for x in functional.normal)
+                or not _finite(functional.threshold) or type(functional.closed) is not bool
+                or not _finite(functional.tolerance) or functional.tolerance <= 0):
+            raise DataValidationError("invalid bounded endpoint functional")
     for method in design.methods:
         if (method.method not in METHODS or type(method.recovery) is not bool
+                or type(method.steps) is not int or not 1 <= method.steps <= 8192
+                or type(method.samples) is not int or not 2 <= method.samples <= 1_000_000
+                or type(method.chunk_size) is not int or not 1 <= method.chunk_size <= 256
                 or type(method.level_samples) is not tuple or type(method.proposal) is not tuple
                 or len(method.proposal) != 2 or not all(_finite(x) for x in method.proposal)):
             raise DataValidationError("unknown or mutable method configuration")
@@ -230,8 +251,8 @@ def freeze_design(design):
         raise DataValidationError("explicit existing immutable arm family bindings are required")
     arms = {}
     for arm in design.arms:
-        for value in asdict(arm).values():
-            identifier(value)
+        for field in ("arm_id", "model_family_id", "method_family_id", "objective_id"):
+            identifier(getattr(arm, field))
         family = (arm.model_family_id, arm.method_family_id, arm.objective_id)
         if family in arms or arm.arm_id in arms.values():
             raise DataValidationError("duplicate budget identity or family")

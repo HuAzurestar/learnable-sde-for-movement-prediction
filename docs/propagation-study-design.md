@@ -16,6 +16,13 @@ Initial covariance requiring projection is rejected, not repaired.
 Axes are immutable, unique and bounded. The candidate product must be at most
 10,000 before any Cartesian expansion. A separate conservative 32 MiB manifest
 quota is checked before expansion, and the final encoded size is checked again.
+Initial mean/covariance have their immutable four-state finite-scalar shape
+checked before tensor conversion. Endpoint geometry, method count/grid/chunk
+fields and all arm identity fields are checked before dataclass copying or
+request-ID serialization. Nested or cyclic malformed fields are rejected as
+contract errors, not recursively copied. These early checks preserve the
+existing request constraints; covariance symmetry/PSD and method-specific work
+checks still apply and are not replaced by structural validation.
 Each runnable method configuration is validated against its shared typed resource
 contract before matrix construction, including the finest MLMC grid and total
 fine/coarse work. No automatic sample allocation or experiment expansion occurs.
@@ -111,6 +118,9 @@ shared store and grants.
 hashing, exact owner preflight compatibility, paired inputs, stable budget arms,
 cap-before-expansion, invalid metadata/configuration, retained missing methods,
 source freshness and tampered resource bindings without executing research.
+`tests/test_study_structure_limits.py` checks primitive refusal before copying,
+numeric allocation or package evaluation, including malformed later arm fields
+and cyclic values using bounded engineering inputs.
 `tests/test_research_declared_disposition.py` checks terminal/concurrent refusal,
 malformed declarations and direct owner-plan bypasses.
 `tests/test_propagation_matrix_dispositions.py` exports the actual registered
