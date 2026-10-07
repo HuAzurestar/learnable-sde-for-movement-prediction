@@ -281,14 +281,15 @@ def freeze_design(design):
         raise DataValidationError("arm bindings must cover exactly the model/method/objective families")
     # Different labels cannot disguise duplicate numerical configurations as
     # independent cells. All primitive and mixture settings checks precede copy.
-    numerical_configs = set()
+    numerical_configs = []
     for method in design.methods:
         numerical = _method_manifest(method)
         numerical.pop("configuration_id", None)
-        key = content_hash(numerical)
-        if key in numerical_configs:
+        # All fields are already bounded and typed. Numeric equality also
+        # identifies int/float zero and signed-zero aliases, unlike JSON hashes.
+        if numerical in numerical_configs:
             raise DataValidationError("duplicate numerical configuration under different labels")
-        numerical_configs.add(key)
+        numerical_configs.append(numerical)
     # Validate each model and each small configuration combination first. No
     # estimator is evaluated, and no horizon/seed matrix is materialized here.
     from inference.affine_oracle import _covariance

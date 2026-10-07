@@ -91,6 +91,14 @@ def test_legacy_single_configuration_shape_and_pairing_are_not_relabelled():
     assert all("numerical_configuration" not in row["cell"]["comparison_dimensions"] for row in doc["matrix"])
 
 
+@pytest.mark.parametrize("proposal", [(0, 0), (-0., 0.)])
+def test_scalar_aliases_cannot_disguise_duplicate_numerical_configuration(proposal):
+    original = configurations(("euler",))[0]
+    duplicate = replace(original, configuration_id="alias-label", proposal=proposal)
+    with pytest.raises(DataValidationError, match="duplicate numerical configuration"):
+        freeze_design(fixture(methods=(original, duplicate)))
+
+
 @pytest.mark.parametrize("nonlinear", [False, True])
 def test_all_method_configs_keep_full_resource_or_nonexecution_bindings(nonlinear):
     names = ("exact", "gaussian", "euler", "heun", "reversible-heun", "mlmc",

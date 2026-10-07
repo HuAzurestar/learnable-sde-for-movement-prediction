@@ -69,6 +69,15 @@ or numerical-engine replay. Its no-fallback CLI reports PASSED and FAILED
 counts separately. Completed numeric failures/unresolved outputs do not enter
 complete paired aggregation or adjudication; execution status, metrics, costs,
 expected-cell denominators and CSV numeric dispositions are preserved.
+Runtime evidence import reconstructs both `comparison_eligible_cells` and
+`path_output_dispositions` columns exactly as the paired Paper serializer does,
+including empty-metric rows and managed comparison proof fields. Whole-table
+byte equality and the original manifest/index/worker-proof checks remain
+mandatory: resealing CSV/index/manifest hashes cannot change these columns.
+Legacy aggregates without eligibility fields retain their old table shape;
+partial or mixed new field sets are refused, never interpreted as legacy or
+filled with fabricated zero counts. This serialization does not itself certify
+the numerical classification or grant scientific qualification.
 Disposable engineering controls exercise all four path families through actual
 supervised formal 80% save/ACK, native tree stop, reopened linked restoration,
 exact current final statistics and functional identity, original-arm costs,

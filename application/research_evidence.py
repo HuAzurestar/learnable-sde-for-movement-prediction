@@ -335,20 +335,27 @@ def expected_metrics_csv(aggregate):
     stream = io.StringIO(newline="")
     writer = csv.writer(stream, lineterminator="\n")
     extra = [name for name in ("adjudication", "computation_ref") if name in aggregate]
-    writer.writerow(["aggregate_hash", "arm_id", "metric", "value", "unit", "independent_n", "expected_cells", "successful_cells", "status", "stratum_id", "comparison_dimensions", "charged_ms", "reserved_ms", "measured_ms", "cost_unit", "cost_scope", "status_rates", *extra])
+    eligibility_fields = ("comparison_eligible_cells", "path_output_dispositions")
+    current_eligibility = ("comparison_eligible_cell_count" in aggregate or "path_output_dispositions" in aggregate
+                          or any(name in arm for arm in aggregate["arms"] for name in eligibility_fields))
+    if current_eligibility and any(not all(name in arm for name in eligibility_fields) for arm in aggregate["arms"]):
+        raise ResearchError("CONTRACT_MISMATCH", "incomplete frozen CSV eligibility fields")
+    columns = list(eligibility_fields) if current_eligibility else []
+    writer.writerow(["aggregate_hash", "arm_id", "metric", "value", "unit", "independent_n", "expected_cells", "successful_cells", "status", "stratum_id", "comparison_dimensions", "charged_ms", "reserved_ms", "measured_ms", "cost_unit", "cost_scope", "status_rates", *columns, *extra])
     frozen = [encode(aggregate[name]).decode() for name in extra]
     for arm in aggregate["arms"]:
         costs = [arm["cost"][key] for key in ("charged_ms", "reserved_ms", "measured_ms", "unit", "scope")]
         rates = encode(arm.get("status_rates")).decode()
         dimensions = encode(arm["comparison_dimensions"]).decode()
+        eligibility = [arm["comparison_eligible_cells"], encode(arm["path_output_dispositions"]).decode()] if current_eligibility else []
         if not arm["metrics"]:
             writer.writerow([aggregate["aggregate_hash"], arm["arm_id"], "", "", "", arm["independent_n"],
                              arm["expected_cells"], arm["successful_cells"], arm["status"], arm["stratum_id"],
-                             dimensions, *costs, rates, *frozen])
+                             dimensions, *costs, rates, *eligibility, *frozen])
         for metric, value in sorted(arm["metrics"].items()):
             writer.writerow([aggregate["aggregate_hash"], arm["arm_id"], metric, value, arm["metric_units"][metric],
                              arm["independent_n"], arm["expected_cells"], arm["successful_cells"], arm["status"],
-                             arm["stratum_id"], dimensions, *costs, rates, *frozen])
+                             arm["stratum_id"], dimensions, *costs, rates, *eligibility, *frozen])
     return stream.getvalue().encode()
 
 
