@@ -166,12 +166,13 @@ def validate_failed_fit(value, initial_model, index, observations_hash, probabil
 
 
 def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, resume_state=None,
-                   fixture_approximation_executor=None):
+                   fixture_approximation_executor=None, source_approximation_executor=None):
     context = {'stage': 'validation'}
     try:
         return _execute_recipe(recipe, k, seed, check_budget=check_budget, progress_callback=progress_callback,
                                resume_state=resume_state, context=context,
-                               fixture_approximation_executor=fixture_approximation_executor)
+                               fixture_approximation_executor=fixture_approximation_executor,
+                               source_approximation_executor=source_approximation_executor)
     except NumericalCellFailure:
         raise
     except NUMERICAL_EXCEPTIONS as error:
@@ -189,19 +190,22 @@ def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, res
 
 
 def _execute_recipe(recipe, k, seed, *, check_budget, progress_callback, resume_state, context,
-                    fixture_approximation_executor):
+                    fixture_approximation_executor, source_approximation_executor):
     scenario, initial_models, inference, prior_mean, prior_covariance = validate_recipe(recipe, k)
     if type(seed) is not int or not 0 <= seed < 2**64:
         raise SwitchingError('CONTRACT_MISMATCH', 'cell seed must be unsigned 64-bit')
-    if fixture_approximation_executor is not None and (not callable(fixture_approximation_executor)
+    if fixture_approximation_executor is not None and source_approximation_executor is not None:
+        raise ResearchError('CONTRACT_MISMATCH', 'one explicit diagnostic executor required')
+    executor = fixture_approximation_executor if fixture_approximation_executor is not None else source_approximation_executor
+    if executor is not None and (not callable(executor)
             or recipe['schema_version'] != RECIPE_SCHEMA):
-        raise ResearchError('CONTRACT_MISMATCH', 'explicit V2 engineering executor required')
-    if recipe['schema_version'] == RECIPE_SCHEMA and fixture_approximation_executor is None:
+        raise ResearchError('CONTRACT_MISMATCH', 'explicit V2 diagnostic executor required')
+    if recipe['schema_version'] == RECIPE_SCHEMA and executor is None:
         # Metadata/resource preflight is not an implemented diagnostic adapter.
         # Refuse before any generation/fitting; do not create a numerical-failure
         # artifact for a software implementation gap or invent successful proof.
         raise ResearchError('NEEDS_IMPLEMENTATION', 'managed approximation executor/evidence adapter is not implemented')
-    if fixture_approximation_executor is not None:
+    if executor is not None:
         from application.research_registry import plan_resources
         from .runtime import switching_plugin
         allocation = recipe_allocation(recipe, k)
@@ -305,7 +309,7 @@ def _execute_recipe(recipe, k, seed, *, check_budget, progress_callback, resume_
         context['stage'] = 'approximation'
         approximation = ApproximationSpec.from_dict(recipe['approximation_spec'])
         frozen_seed = reference_seed(recipe, seed)
-        approximation_checks = fixture_approximation_executor(batches[2], selected.model, probability, means,
+        approximation_checks = executor(batches[2], selected.model, probability, means,
             covariance, inference, approximation, origin_index=recipe['forecast_origin_index'],
             seed=frozen_seed, check_budget=check_budget)
         approximation_consistency = validate_prefix_numbers(approximation_checks, batches[2], selected.model,
@@ -398,7 +402,8 @@ def _execute_recipe(recipe, k, seed, *, check_budget, progress_callback, resume_
     if recipe['schema_version'] == RECIPE_SCHEMA:
         fit_payload.update(approximation_checks=approximation_checks,
             approximation_consistency=approximation_consistency,
-            approximation_execution_scope='engineering-only; not-managed-authority-proof')
+            approximation_execution_scope=('engineering-only; not-managed-authority-proof'
+                if source_approximation_executor is None else 'admitted-source-diagnostic-only; not-managed-authority-proof'))
     # Shared case views consume this registered first-path preview. The full
     # synthetic paths remain separately named, rather than confused with n blocks.
     preview = forecasts[0]

@@ -176,7 +176,7 @@ def test_actual_pilot_admission_cannot_enable_engineering_reference(tmp_path, mo
     result = runner.run_cell(study['study_id'], digest(cell), budget=BudgetSpec(45))
     assert result['state'] == 'FAILED' and result.get('artifact_id') is None
     logs = list((store.path / 'artifacts').glob('.attempt-*/worker.log'))
-    assert any('NEEDS_IMPLEMENTATION' in path.read_text(errors='replace') for path in logs)
+    assert any('NEEDS_PREREGISTRATION: complete pre-fit master required' in path.read_text(errors='replace') for path in logs)
     assert BudgetLedger(store).balance('pirc28-k2')['committed_ms'] > 0
 
 

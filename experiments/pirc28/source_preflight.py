@@ -73,7 +73,9 @@ def validate_scientific_source(store, study, cell, attempt, *, check_budget):
             and event['payload'].get('attempt_id') == attempt['attempt_id'] for event in events),
             'UNQUALIFIED', 'pre-fit work needs its original outstanding reservation')
         reserve = reserves[0]
-        _require(admissions[0]['sequence'] < reserve['sequence']
+        # SharedSupervisor funds command preparation first; AdmissionGate then
+        # publishes its receipt, before the actual worker is launched.
+        _require(reserve['sequence'] < admissions[0]['sequence']
             and type(reserve['payload'].get('reserved_ms')) is int
             and 0 < reserve['payload']['reserved_ms'] <= 1_800_000
             and all(reserve['payload'].get(name) == value for name, value in {

@@ -50,8 +50,9 @@ def validate_cell_failure(result, spec, cell):
         post_reference = value['stage'] in POST_REFERENCE_STAGES
         if (value['stage'] != 'approximation' and not post_reference or cell['fit_K'] != 2
                 or spec['switching_recipe']['schema_version'] != RECIPE_SCHEMA
-                or spec.get('admission', {}).get('mode') != 'fixture'):
-            raise ResearchError('CONTRACT_MISMATCH', 'engineering approximation failure scope differs')
+                or spec.get('admission', {}).get('mode') not in ('fixture', 'pilot')
+                or spec.get('admission', {}).get('mode') == 'pilot' and not native_reference):
+            raise ResearchError('CONTRACT_MISMATCH', 'admitted approximation failure scope differs')
         report = value['approximation_checks']
         if post_reference and (type(report) is not dict or report.get('state') != 'NUMERICAL_CHECKS_PASSED'):
             raise ResearchError('CONTRACT_MISMATCH', 'later cell failure requires complete passed prefix evidence')

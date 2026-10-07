@@ -28,8 +28,8 @@ def admitted_sources(tmp_path_factory):
         cell = next(cell for cell in study['cells'] if cell['fit_K'] == k)
         run = store.register_run(study['study_id'], cell)
         attempt_id = store.new_attempt(run)
-        AdmissionGate(store).prepare(study, cell, switching_plugin(), attempt_id)
         BudgetLedger(store).reserve(attempt_id, BudgetSpec(60, category='pilot'))
+        AdmissionGate(store).prepare(study, cell, switching_plugin(), attempt_id)
         attempt = store.transition(attempt_id, 'RUNNING')
         sources.append((study, cell, attempt))
     return store, master, grants, sources
@@ -110,12 +110,15 @@ def test_borrowed_or_incomplete_canonical_metadata_is_refused(admitted_sources, 
         validate_scientific_source(store, study, cell, attempt, check_budget=poll)
 
 
-@pytest.mark.parametrize('damage', ['late-master', 'late-preregistration', 'missing-admission', 'missing-reserve', 'settled'])
+@pytest.mark.parametrize('damage', ['late-master', 'late-preregistration', 'missing-admission', 'missing-reserve', 'settled',
+    'admission-before-funding'])
 def test_publication_admission_and_original_funding_order(admitted_sources, monkeypatch, damage):
     store, _, _, sources = admitted_sources
     study, cell, attempt = sources[1]
     events = store.events()
     last = events[-1]['sequence']+1
+    reserve_sequence = next(event['sequence'] for event in events if event['event_kind'] == 'RESERVE'
+        and event['payload'].get('attempt_id') == attempt['attempt_id'])
     modified = []
     for event in events:
         own = event['payload'].get('attempt_id') == attempt['attempt_id']
@@ -126,6 +129,8 @@ def test_publication_admission_and_original_funding_order(admitted_sources, monk
             damage == 'late-master' and event['payload']['object_id'].startswith('pirc28-study-definition-')
             or damage == 'late-preregistration' and event['payload']['object_id'].startswith('preregistration-')):
             event['sequence'] = last
+        if own and damage == 'admission-before-funding' and event['event_kind'] == 'ADMISSION':
+            event['sequence'] = reserve_sequence-1
         modified.append(event)
         if own and damage == 'settled' and event['event_kind'] == 'RESERVE':
             modified.append({**event, 'event_kind': 'SETTLE'})
@@ -179,7 +184,7 @@ def test_self_consistent_borrowed_receipt_cannot_bypass_specific_binding(admitte
     assert error.value.code == ('IDENTITY_CONFLICT' if damage == 'command' else 'UNAUTHORIZED_DATA')
 
 
-def test_worker_preflight_does_not_enable_default_v2_generation(admitted_sources, monkeypatch):
+def test_worker_valid_preflight_supplies_only_explicit_source_diagnostic_executor(admitted_sources, monkeypatch):
     from experiments.pirc28 import pipeline, source_preflight, worker
     store, _, _, sources = admitted_sources
     study, cell, attempt = sources[1]
@@ -199,9 +204,14 @@ def test_worker_preflight_does_not_enable_default_v2_generation(admitted_sources
         checked.append(value)
         return value
     monkeypatch.setattr(source_preflight, 'validate_scientific_source', observed)
+    def execute(*args, **kwargs):
+        assert callable(kwargs['source_approximation_executor'])
+        assert kwargs['fixture_approximation_executor'] is None
+        raise ResearchError('TEST_PIPELINE_ENTERED', 'disposable invocation control, no numerical execution')
+    monkeypatch.setattr(worker, 'execute_recipe', execute)
     with pytest.raises(ResearchError) as error:
         worker.main()
-    assert error.value.code == 'NEEDS_IMPLEMENTATION'
+    assert error.value.code == 'TEST_PIPELINE_ENTERED'
     assert len(checked) == 1 and checked[0]['attempt_id'] == attempt['attempt_id']
 
 

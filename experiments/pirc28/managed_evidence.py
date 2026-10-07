@@ -35,8 +35,9 @@ def _projection(result, study, cell):
     _require(study['code_hash'] == code_hash(), 'prefix replay requires the original current code source')
     if result['status'] == 'SUCCEEDED':
         fit = result.get('fit')
-        _require(type(fit) is dict and fit.get('approximation_execution_scope') ==
-                 'engineering-only; not-managed-authority-proof', 'prefix execution scope differs')
+        scope = ('engineering-only; not-managed-authority-proof' if study['admission']['mode'] == 'fixture'
+                 else 'admitted-source-diagnostic-only; not-managed-authority-proof')
+        _require(type(fit) is dict and fit.get('approximation_execution_scope') == scope, 'prefix execution scope differs')
         report = fit.get('approximation_checks')
         _require(type(report) is dict and report.get('state') == 'NUMERICAL_CHECKS_PASSED',
                  'successful V2 K2 artifact lacks complete passed prefix report')
@@ -67,7 +68,8 @@ def _projection(result, study, cell):
 def _receipt(store, study, cell, attempt, metadata, grant, history, projection, native_events):
     fit, report, admission_hash = projection
     execution = fit.get('reference_execution')
-    reference_complete = validate_reference_execution(execution, study, cell, attempt, fit['model'], report)
+    reference_complete = validate_reference_execution(execution, study, cell, attempt, fit['model'], report,
+                                                       admission_hash=admission_hash)
     _, _, inference, mean, covariance = validate_recipe(study['switching_recipe'], 2)
     view = {name: fit[name] for name in ('recipe_hash', 'model', 'selection', 'initializations', 'generated_inputs')}
     if report is not None:

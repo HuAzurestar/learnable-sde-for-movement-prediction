@@ -1022,19 +1022,35 @@ again. Complete source/protocol/preregistration/admission metadata is bounded
 to 16 MiB; deadline and final disclosure-expiry checks remain authoritative.
 
 This metadata preflight is not native execution proof or a scientific grant.
-Passing it does NOT supply an approximation executor: default V2 execution
-still refuses before generation/fitting. Fixture/native engineering behavior
-is unchanged; legacy V1 diagnostics are not promoted. Formal V2 sources are
+Preflight alone does not supply an executor; default/direct V2 execution still
+refuses before generation/fitting. The managed worker separately connects its
+actual diagnostic sampler ONLY after successful complete preflight. Fixture
+engineering behavior is unchanged; legacy V1 diagnostics are not promoted. Formal V2 sources are
 refused because the current immutable synthetic master freezes an exploratory
-pilot, not a blind formal admission. Extending native sampling to validated
-scientific sources and deriving independent collector/owner release evidence
-are still required. Every scientific/real-data authority flag stays false.
+pilot, not a blind formal admission. Deriving independent collector/owner
+scientific release evidence is still required; every scientific/real-data
+authority flag stays false. Validated pilot K2 native records use V2 provenance
+binding the exact original master/preflight/attempt/admission plus actual fixed
+batch completions. Source artifacts alone cannot grant scientific qualification.
 
 The preflight controls use disposable simulated operator metadata and an
 explicitly simulated RUNNING state, not production science or native worker
 proof. Self-consistent borrowed-receipt controls reach command/grant binding
 checks rather than relying only on byte-hash rejection. Worker-call controls
-verify preflight precedes the pipeline and does not enable V2 generation.
+verify preflight precedes the pipeline and only passes an explicit diagnostic
+executor after validation. Actual native pilot controls additionally exercise
+the real worker/sampler/artifact/cost path in disposable engineering stores with
+simulated operator provenance, not production scientific evidence.
+
+SharedSupervisor reserves the original arm budget BEFORE AdmissionGate builds
+its command receipt; both precede worker launch. Preflight follows this actual
+order, not an independently fabricated admission-before-funding sequence.
+K2 prefix/reference and later numerical failures retain original complete or
+partial evidence as appropriate, without success metrics. Authorized collection
+and the bounded owner bind the pilot preflight to the actual source admission.
+K1 fitting remains its original analytic affine path; independently qualified
+K1 input/limit evidence and aggregate scientific release remain open. No extra
+K1 MC sampler allocation is introduced outside its registered resource plan.
 
 ```console
 python -m pytest tests/test_pirc28_source_preflight.py -q

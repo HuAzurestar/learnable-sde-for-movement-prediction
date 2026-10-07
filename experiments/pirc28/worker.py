@@ -40,14 +40,13 @@ def main():
     if Path(output) != control.directory / 'result.json':
         raise ResearchError('IDENTITY_CONFLICT', 'worker output is outside the managed attempt')
     from .approximation import RECIPE_SCHEMA
+    source_preflight = None
     if spec['admission']['mode'] != 'fixture' and spec['switching_recipe']['schema_version'] == RECIPE_SCHEMA:
         from .source_preflight import validate_scientific_source
         def prefit_poll():
             if time.monotonic() >= control.descriptor['deadline']:
                 raise ResearchError('TIMEOUT', 'shared supervisor pre-fit deadline reached')
-        validate_scientific_source(store, spec, cells[0], attempt, check_budget=prefit_poll)
-        # Preflight is not an implemented scientific approximation adapter.
-        # Default V2 execution remains refused before generation/fitting below.
+        source_preflight = validate_scientific_source(store, spec, cells[0], attempt, check_budget=prefit_poll)
     # Fixture admission is explicitly engineering-only. Scientific admission
     # must bind the actual canonical recipe in the source data protocol.
     if spec['admission']['mode'] != 'fixture':
@@ -74,6 +73,7 @@ def main():
     latest, started = {}, time.monotonic()
     engineering_reference = (spec['admission']['mode'] == 'fixture'
         and spec['switching_recipe']['schema_version'] == RECIPE_SCHEMA)
+    managed_reference = engineering_reference or source_preflight is not None
     reference_phase = 'not-started'
     completed_batches = []
     def fixture_reference(*args, **kwargs):
@@ -98,22 +98,24 @@ def main():
             elapsed = max(now-started, 1e-9)
             state = {'step': completed, 'data_position': {'accepted_EM_steps': completed},
                      'method_state': dict(latest), 'rng_state': latest['rng_state']}
-            if engineering_reference:
+            if managed_reference:
                 state['data_position'].update(reference_phase=reference_phase,
                     reference_recovery='restart-all-fixed-batches-from-frozen-recipe-cell-seed; no-partial-reuse')
             control.save(state, {'completed_steps': completed, 'total_steps': total,
                 'throughput_per_second': completed/elapsed,
-                'eta_seconds': None if engineering_reference else (total-completed)*elapsed/max(1, completed)})
+                'eta_seconds': None if managed_reference else (total-completed)*elapsed/max(1, completed)})
             os._exit(85)
 
     try:
         payload = execute_recipe(spec['switching_recipe'], cell['fit_K'], cell['seed'],
             check_budget=poll, progress_callback=progress, resume_state=saved,
-            fixture_approximation_executor=fixture_reference if engineering_reference else None)
+            fixture_approximation_executor=fixture_reference if engineering_reference else None,
+            source_approximation_executor=fixture_reference if source_preflight is not None else None)
     except NumericalCellFailure as error:
-        if engineering_reference and 'approximation_checks' in error.diagnostic:
+        if managed_reference and 'approximation_checks' in error.diagnostic:
             from .reference_execution import attach_reference_failure
-            attach_reference_failure(error.diagnostic, spec, cell, attempt, completed_batches)
+            attach_reference_failure(error.diagnostic, spec, cell, attempt, completed_batches,
+                                     source_preflight=source_preflight)
         content = encode(failure_result(error.diagnostic, spec, cell, plugin))
         if len(content) > plan['maximum_result_bytes']:
             raise ResearchError('RESOURCE_LIMIT', 'failure exceeds its frozen byte quota')
@@ -121,10 +123,10 @@ def main():
         poll()
         atomic_write(Path(output), content)
         os._exit(86)
-    if engineering_reference and cell['fit_K'] == 2:
+    if managed_reference and cell['fit_K'] == 2:
         from .reference_execution import execution_record
         payload['fit']['reference_execution'] = execution_record(spec, cell, attempt, payload['fit']['model'],
-            payload['fit']['approximation_checks'], completed_batches)
+            payload['fit']['approximation_checks'], completed_batches, source_preflight=source_preflight)
     units = payload.pop('metric_units')
     result = {'schema_version': 'pirc25-result-v1', 'status': 'SUCCEEDED',
         'spec_hash': digest(spec), 'cell_hash': digest(cell), 'protocol_hash': spec['protocol_hash'],

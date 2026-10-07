@@ -14,6 +14,9 @@ from .approximation import ApproximationSpec, RECIPE_SCHEMA
 from .approximation_evidence import _integer, _keys, _require, reference_seed
 
 SCHEMA = 'pirc28-native-reference-execution-v1'
+SOURCE_SCHEMA = 'pirc28-native-reference-execution-v2'
+PREFLIGHT_FIELDS = {'study_definition_hash', 'attempt_id', 'run_id', 'admission_hash',
+                    'qualified_identifiability', 'real_data_authorized'}
 BATCH_FIELDS = {'batch_index', 'seed_entropy', 'probabilities', 'means',
                 'log_likelihood_trace', 'minimum_ess_fraction', 'jump_count'}
 COMPLETION_FIELDS = {'path_index', 'batch_index', 'seed_entropy', 'summary_hash'}
@@ -63,7 +66,7 @@ def _report_completions(report, recipe):
     return records
 
 
-def execution_record(study, cell, attempt, model, report, completed):
+def execution_record(study, cell, attempt, model, report, completed, *, source_preflight=None):
     """Build worker evidence / owner's expected metadata; not grant authority."""
     recipe = study['switching_recipe']
     for name, size in (('attempt_id', 32), ('run_id', 64)):
@@ -78,8 +81,21 @@ def execution_record(study, cell, attempt, model, report, completed):
     _require(type(binding['root']) is str and 0 < len(binding['root']) <= 4096
         and Path(binding['root']).is_absolute() and type(binding['store_id']) is str
         and 0 < len(binding['store_id']) <= 128, 'typed original native runtime identity required')
+    mode = study['admission']['mode']
     _require(recipe['schema_version'] == RECIPE_SCHEMA and cell['fit_K'] == 2
-        and study['admission']['mode'] == 'fixture', 'native reference engineering scope differs')
+        and mode in ('fixture', 'pilot'), 'native reference source scope differs')
+    if mode == 'fixture':
+        _require(source_preflight is None, 'engineering reference cannot borrow scientific preflight')
+    else:
+        _keys(source_preflight, PREFLIGHT_FIELDS, 'original source preflight')
+        _require(source_preflight['study_definition_hash'] == study.get('pirc28_study_definition_hash')
+            and source_preflight['attempt_id'] == attempt['attempt_id']
+            and source_preflight['run_id'] == attempt['run_id']
+            and all(type(source_preflight[name]) is str and re.fullmatch('[0-9a-f]{64}', source_preflight[name])
+                    for name in ('study_definition_hash', 'admission_hash'))
+            and source_preflight['qualified_identifiability'] is False
+            and source_preflight['real_data_authorized'] is False,
+            'original scientific source preflight identity differs')
     spec = ApproximationSpec.from_dict(recipe['approximation_spec'])
     seed = reference_seed(recipe, cell['seed'])
     _validate_completions(completed, recipe, seed)
@@ -103,23 +119,31 @@ def execution_record(study, cell, attempt, model, report, completed):
         'completed_batches': completed, 'complete': complete,
         'recovery': 'restart-all-fixed-batches-on-each-original-arm-attempt; no-partial-reuse',
         'managed_evidence_bound': False, 'qualified_identifiability': False, 'real_data_authorized': False}
+    if mode == 'pilot':
+        record.update(schema_version=SOURCE_SCHEMA,
+            scope='preregistered-synthetic-pilot-native-execution-only; not-scientific-qualification',
+            source_preflight=source_preflight, source_preflight_hash=digest(source_preflight))
     limit = 16384+256*recipe['test_paths']*spec.to_dict()['event_driven_reference']['independent_batches']
     _require(len(encode(record)) <= limit, 'native reference completion bytes exceed quota')
     return record
 
 
-def validate_reference_execution(record, study, cell, attempt, model, report):
+def validate_reference_execution(record, study, cell, attempt, model, report, *, admission_hash=None):
     """Bounded owner metadata; never repeat sampling or trust complete=true."""
     _require(type(record) is dict, 'actual native reference execution record missing')
-    expected = execution_record(study, cell, attempt, model, report, record.get('completed_batches'))
+    expected = execution_record(study, cell, attempt, model, report, record.get('completed_batches'),
+                                source_preflight=record.get('source_preflight'))
+    if study['admission']['mode'] == 'pilot' and admission_hash is not None:
+        _require(expected['source_preflight']['admission_hash'] == admission_hash,
+                 'native source preflight belongs to a different actual admission')
     _require(digest(record) == digest(expected), 'native reference execution/source binding differs')
     return expected['complete']
 
 
-def attach_reference_failure(diagnostic, study, cell, attempt, completed):
+def attach_reference_failure(diagnostic, study, cell, attempt, completed, *, source_preflight=None):
     """Worker-only metadata attachment; caller still needs actual native provenance."""
     from .evidence import validate_initialization_history
     chosen = validate_initialization_history(study, cell, diagnostic, diagnostic['generated_inputs'])
     _require(chosen is not None, 'reference failure has no selected fit')
     diagnostic['reference_execution'] = execution_record(study, cell, attempt, chosen['model'],
-        diagnostic['approximation_checks'], completed)
+        diagnostic['approximation_checks'], completed, source_preflight=source_preflight)
