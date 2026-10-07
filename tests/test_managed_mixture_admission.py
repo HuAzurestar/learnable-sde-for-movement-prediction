@@ -300,3 +300,153 @@ def test_production_registry_preserves_physical_dimensions_saved_proof_and_chunk
     assert plan["counts"]["state_dim"] == 4 and plan["tensor_bytes"] >= 64*1024*1024
     assert plan["counts"]["steps"] == cell["propagation_request"]["steps"]*MixturePolicy.from_manifest(cell["mixture_policy"]).work_per_step
     assert plugin.resume_level == mixture_production_recovery_plugin().resume_level == "chunk"
+
+
+@pytest.fixture(scope="module")
+def exported(source, completed):
+    store, spec, _, grant, _, _ = source
+    return export_evidence(store, spec["study_id"], grant)
+
+
+def paper_validate(tmp_path, bundle):
+    from pathlib import Path
+    import subprocess
+    import sys
+    paper = Path(__file__).resolve().parents[2]/"TSDE-SDE"
+    path = tmp_path/"mixture-bundle.json"
+    path.write_bytes(encode(bundle))
+    return subprocess.run([sys.executable, "-B", str(paper/"scripts/pirc25/validate_mixture.py"), str(path),
+        "--expected-hash", bundle["bundle_hash"]], cwd=paper, capture_output=True, text=True, timeout=30)
+
+
+def independent_reader():
+    from pathlib import Path
+    import importlib.util
+    import sys
+    path = Path(__file__).resolve().parents[2]/"TSDE-SDE/scripts/pirc25/mixture_qualification.py"
+    sys.path.insert(0, str(path.parent))
+    try:
+        entry = importlib.util.spec_from_file_location("independent_mixture_reader", path)
+        reader = importlib.util.module_from_spec(entry)
+        entry.loader.exec_module(reader)
+    finally:
+        sys.path.pop(0)
+    return reader
+
+
+def test_real_mixture_owner_export_passes_independent_reader_and_cli(exported, tmp_path):
+    row = exported["cells"][0]
+    independent_reader().validate_mixture_qualification(row["admission"], row)
+    checked = paper_validate(tmp_path, exported)
+    assert checked.returncode == 0, checked.stderr
+    verified = json.loads(checked.stdout)
+    assert verified["source_bundle_hash"] == exported["bundle_hash"]
+    assert verified["verified_mixture_cells"] == verified["expected_cells"] == 1
+    assert "no statistical adjudication, full-distribution or scientific model qualification" in verified["scope"]
+
+
+def reseal_transport(bundle):
+    """Alter only disposable exported copies, never actual owner journal/grants."""
+    row = bundle["cells"][0]
+    receipt = row["admission"]
+    evidence = receipt["documents"].get("propagation_qualification")
+    if evidence:
+        source = evidence["source_result"]
+        analysis = source["forecast"]["mixture_qualification_analysis"]
+        for key in ("continuous", "target"):
+            analysis[key+"_certificate_hash"] = digest(analysis[key+"_certificate"])
+        analysis["analysis_hash"] = digest({k: v for k, v in analysis.items() if k != "analysis_hash"})
+        source["output_hash"] = digest({k: source[k] for k in ("metrics", "forecast", "fit", "source_schema")})
+        metadata = evidence["source_artifact"]
+        metadata.update(artifact_id=digest(source), sha256=digest(source), size_bytes=len(encode(source)))
+        evidence["source_attempt"].update(artifact_id=metadata["artifact_id"], artifact_manifest_hash=digest(metadata))
+        receipt["documents"]["package"]["payload"][PAYLOAD_KEY]["source_artifact_id"] = metadata["artifact_id"]
+        for key in ("reservation_event", "worker_event", "stop_event", "settlement_event", "admission_event", "completion_event"):
+            if key == "completion_event":
+                evidence[key]["payload"] = deepcopy(evidence["source_attempt"])
+            evidence[key]["hash"] = digest({k: v for k, v in evidence[key].items() if k != "hash"})
+        evidence["evidence_hash"] = digest({k: v for k, v in evidence.items() if k != "evidence_hash"})
+    receipt["admission_hash"] = digest({k: v for k, v in receipt.items() if k != "admission_hash"})
+    row["admission_hash"] = receipt["admission_hash"]
+    result = row["result"]
+    result["admission_hash"] = receipt["admission_hash"]
+    if evidence:
+        result["forecast"]["qualified_error_components"]["qualification_evidence_hash"] = evidence["evidence_hash"]
+    result["output_hash"] = digest({k: result[k] for k in ("metrics", "forecast", "fit", "source_schema")})
+    row["result_artifact"].update(artifact_id=digest(result), sha256=digest(result), size_bytes=len(encode(result)))
+    row["artifact_id"] = digest(result)
+    bundle["bundle_hash"] = digest({k: v for k, v in bundle.items() if k != "bundle_hash"})
+
+
+@pytest.mark.parametrize("fault", ["width", "retained", "total", "bias", "norm", "operations", "grid", "scope", "scientific",
+    "checks", "zero-closure", "zero-roundoff", "zero-model", "gaussian-schema", "source-cost", "native-stop",
+    "completion-order", "source-heldout", "source-grant", "source-root", "target-scalar", "target-inbounds-scalar",
+    "target-lineage", "target-metric", "target-unit", "target-reference-unit", "target-reference-definition", "target-time-definition"])
+def test_independent_reader_refuses_resealed_numeric_cost_permission_and_current_output_substitutions(exported, fault):
+    bundle = deepcopy(exported)
+    row = bundle["cells"][0]
+    evidence = row["admission"]["documents"]["propagation_qualification"]
+    analysis = evidence["source_result"]["forecast"]["mixture_qualification_analysis"]
+    numeric = {"width": "reference_width_upper", "retained": "retained_functional_error_upper",
+        "total": "total_functional_error_upper", "bias": "absolute_time_bias_upper", "norm": "scaled_transition_norm_upper",
+        "operations": "reference_operations"}
+    if fault in numeric:
+        analysis[numeric[fault]] += 1
+    elif fault == "grid":
+        analysis["target_certificate"]["grid"]["steps"] *= 2
+    elif fault == "scope":
+        analysis["scope"] = "qualified-entire-distribution"
+    elif fault == "scientific":
+        analysis["scientific_qualification"] = True
+    elif fault == "checks":
+        analysis["checks"]["retained_functional_error"] = 1
+    elif fault.startswith("zero-"):
+        key = {"zero-closure": "propagation_approximation", "zero-roundoff": "implementation_roundoff", "zero-model": "model_error"}[fault]
+        analysis[key] = {"value": 0, "status": "BOUNDED"}
+    elif fault == "gaussian-schema":
+        analysis["schema_version"] = "affine-analytic-qualification-analysis-v1"
+    elif fault == "source-cost":
+        evidence["settlement_event"]["payload"]["charged_ms"] = 0
+    elif fault == "native-stop":
+        evidence["stop_event"]["payload"]["confirmation"] = "not-stopped"
+    elif fault == "completion-order":
+        evidence["completion_event"]["sequence"] = row["admission"]["input_evidence"][0]["sequence"]+1
+    elif fault == "source-heldout":
+        evidence["source_admission"]["documents"]["protocol"]["blocks"][0]["split_role"] = "test"
+    elif fault == "source-grant":
+        evidence["authorization"]["consumer_study_ids"] = []
+    elif fault == "source-root":
+        evidence["source_admission"]["spec"]["runtime_binding"]["store_id"] = "another-root"
+    elif fault in {"target-scalar", "target-inbounds-scalar"}:
+        row["result"]["forecast"]["functional"]["estimate"] += 2 if fault == "target-scalar" else .001
+    elif fault == "target-lineage":
+        functional = row["result"]["forecast"]["functional"]
+        functional["diagnostics"] = [[k, "0"*64 if k == "lineage_digest" else v] for k, v in functional["diagnostics"]]
+    elif fault == "target-metric":
+        row["result"]["metrics"][METRIC] += 1
+        row["metrics"] = deepcopy(row["result"]["metrics"])
+    elif fault == "target-unit":
+        row["metric_units"][METRIC] = row["result"]["metric_units"][METRIC] = "other"
+    else:
+        budget = row["result"]["forecast"]["functional"]["error_budget"]
+        key = "time_discretization" if fault == "target-time-definition" else "reference"
+        field = "units" if fault == "target-reference-unit" else "estimated_by"
+        budget[key][field] = "other"
+    reseal_transport(bundle)
+    with pytest.raises(ValueError):
+        independent_reader().validate_mixture_qualification(row["admission"], row)
+
+
+@pytest.mark.parametrize("fault", ["missing-numeric", "missing-pointer", "target-false-metric"])
+def test_mixture_cli_has_no_generic_operator_pass_fallback(exported, tmp_path, fault):
+    bundle = deepcopy(exported)
+    row = bundle["cells"][0]
+    if fault in {"missing-numeric", "missing-pointer"}:
+        row["admission"]["documents"].pop("propagation_qualification")
+        if fault == "missing-pointer":
+            row["admission"]["documents"]["package"]["payload"].pop(PAYLOAD_KEY)
+    else:
+        row["result"]["metrics"][METRIC] += 1
+        row["metrics"] = deepcopy(row["result"]["metrics"])
+    reseal_transport(bundle)
+    assert paper_validate(tmp_path, bundle).returncode != 0
