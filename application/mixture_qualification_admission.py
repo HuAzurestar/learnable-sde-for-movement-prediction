@@ -217,6 +217,8 @@ def validate_formal_mixture_result(receipt, spec, cell, result):
     require(result["metrics"] == {METRIC: error} and result["metric_units"] == {METRIC: unit}
         and result["forecast"]["model_package_hash"] == package.package_hash and result["forecast"]["request_hash"] == request.request_hash
         and result["forecast"]["qualified_error_components"] == components, "current scalar metrics/provenance differ")
-    require(budget["reference"]["status"] == budget["time_discretization"]["status"] == "BOUNDED"
-        and budget["reference"]["value"] == components["reference_width_upper"]
-        and budget["time_discretization"]["value"] == components["time_bias_absolute_upper"], "qualified separated components differ")
+    require(budget["reference"] == {"value": components["reference_width_upper"], "units": unit,
+            "estimated_by": "outward max of continuous and Euler functional interval widths", "status": "BOUNDED"}
+        and budget["time_discretization"] == {"value": components["time_bias_absolute_upper"], "units": unit,
+            "estimated_by": "outward absolute signed grid-minus-continuous expectation bound", "status": "BOUNDED"},
+        "qualified separated component values/units/definitions differ")

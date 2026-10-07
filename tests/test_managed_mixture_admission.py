@@ -189,7 +189,8 @@ def test_resealed_saved_numeric_substitutions_cannot_pass(completed, source, fau
             request_from_manifest(cell["propagation_request"]), functional)
 
 
-@pytest.mark.parametrize("fault", ["scalar-outside-target", "scalar-within-target", "lineage", "metric", "zero-model", "reference"])
+@pytest.mark.parametrize("fault", ["scalar-outside-target", "scalar-within-target", "lineage", "metric", "zero-model",
+    "reference", "reference-unit", "reference-definition", "time-unit", "time-definition"])
 def test_formal_current_result_rejects_scalar_lineage_and_error_substitution(completed, source, fault):
     original, receipt = completed
     _, spec, _, _, _, _ = source
@@ -206,6 +207,9 @@ def test_formal_current_result_rejects_scalar_lineage_and_error_substitution(com
         result["metrics"][METRIC] += 1
     elif fault == "zero-model":
         result["forecast"]["functional"]["error_budget"]["model"]["value"] = 0
+    elif fault in {"reference-unit", "reference-definition", "time-unit", "time-definition"}:
+        key = "reference" if fault.startswith("reference-") else "time_discretization"
+        result["forecast"]["functional"]["error_budget"][key]["units" if fault.endswith("unit") else "estimated_by"] = "substituted"
     else:
         result["forecast"]["functional"]["error_budget"]["reference"]["value"] += 1
     with pytest.raises(ResearchError):
@@ -223,14 +227,69 @@ def test_actual_failed_tail_pilot_is_not_promoted_before_heldout_read(tmp_path):
 
 
 def test_formal_job_cap_rejects_before_reservation_or_input(source):
-    store, spec, _, _, _, _ = source
+    store, original_spec, registry, _, _, _ = source
+    # Separate invalid engineering control, SAME original cumulative arm.
+    # Never try to reopen/reset the completed positive cell.
+    spec = deepcopy(original_spec)
+    spec.update(study_id=spec["study_id"]+"-over-cap", experiment_id="mixture-over-cap-control")
+    store.register(spec, digest(spec))
     cell = spec["cells"][0]
-    attempt = store.new_attempt(store.register_run(spec["study_id"], cell))
     sequence = len(store.events())
     with pytest.raises(ResearchError, match="frozen qualification job budget"):
-        AdmissionGate(store).run(attempt, spec, cell, mixture_production_plugin(),
-            lambda output: pytest.fail("invalid job reached command builder"), BudgetSpec(61))
+        SharedRunner(store, registry).run_cell(spec["study_id"], digest(cell), budget=BudgetSpec(61))
     assert not any(e["event_kind"] in {"RESERVE", "READ_COMPLETED", "WORKER_STARTED"} for e in store.events()[sequence:])
+    assert any(e["event_kind"] == "ATTEMPT" and e["payload"]["state"] == "PREFLIGHT_FAILED" for e in store.events()[sequence:])
+
+
+@pytest.mark.parametrize("fault", ["missing-stop", "unconfirmed-stop", "wrong-stop-reservation", "wrong-stop-cost",
+    "zero-charge", "over-cap-charge", "stop-after-settle", "missing-worker", "missing-admission", "missing-completion"])
+def test_actual_source_native_stop_cost_and_order_cannot_be_substituted(source, monkeypatch, fault):
+    store, spec, _, _, package, prereg = source
+    source_attempt = package["payload"][PAYLOAD_KEY]["source_attempt_id"]
+    events = deepcopy(store.events())
+    source_events = {e["event_kind"]: e for e in events if e["payload"].get("attempt_id") == source_attempt}
+    if fault.startswith("missing-"):
+        kind = {"missing-stop": "WORKER_TREE_STOPPED", "missing-worker": "WORKER_STARTED",
+            "missing-admission": "ADMISSION", "missing-completion": "ATTEMPT"}[fault]
+        events = [e for e in events if not (e["event_kind"] == kind and e["payload"].get("attempt_id") == source_attempt)]
+    elif fault == "unconfirmed-stop":
+        source_events["WORKER_TREE_STOPPED"]["payload"]["confirmation"] = "unverified"
+    elif fault == "wrong-stop-reservation":
+        source_events["WORKER_TREE_STOPPED"]["payload"]["reservation_id"] = "0"*64
+    elif fault == "wrong-stop-cost":
+        source_events["WORKER_TREE_STOPPED"]["payload"]["observed_elapsed_ms"] += 1
+    elif fault == "zero-charge":
+        source_events["SETTLE"]["payload"]["charged_ms"] = 0
+    elif fault == "over-cap-charge":
+        source_events["SETTLE"]["payload"].update(charged_ms=60001, reserved_ms=60001)
+    else:
+        source_events["WORKER_TREE_STOPPED"]["sequence"] = source_events["SETTLE"]["sequence"]+1
+    # Transient read view only; never rewrite the actual owner journal/grants.
+    monkeypatch.setattr(store, "events", lambda: events)
+    with pytest.raises(ResearchError):
+        prepare_managed_mixture(store, spec, spec["cells"][0], package, prereg)
+
+
+@pytest.mark.parametrize("fault", ["expired", "wrong-consumer", "missing-evaluate", "wrong-protocol"])
+def test_source_consumer_permission_is_not_inferred_from_target_grant(source, monkeypatch, fault):
+    store, spec, _, _, package, prereg = source
+    source_id = package["payload"][PAYLOAD_KEY]["source_authorization_id"]
+    original = store.authorization
+    def substituted(authorization_id, *, version=None):
+        grant = deepcopy(original(authorization_id, version=version))
+        if authorization_id == source_id:
+            if fault == "expired":
+                grant["expires_at"] = "2000-01-01T00:00:00+00:00"
+            elif fault == "wrong-consumer":
+                grant["consumer_study_ids"] = []
+            elif fault == "missing-evaluate":
+                grant["purposes"] = ["export"]
+            else:
+                grant["protocol_hash"] = "0"*64
+        return grant
+    monkeypatch.setattr(store, "authorization", substituted)
+    with pytest.raises(ResearchError, match="source grant does not authorize consumer"):
+        prepare_managed_mixture(store, spec, spec["cells"][0], package, prereg)
 
 
 def test_production_registry_preserves_physical_dimensions_saved_proof_and_chunk_limits(source):

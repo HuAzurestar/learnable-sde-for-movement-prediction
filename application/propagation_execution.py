@@ -191,7 +191,8 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
         output["forecast"]["qualified_error_components"] = qualified_components
         budget = output["forecast"]["functional"]["error_budget"]
         budget["reference"] = {"value": qualified_components["reference_width_upper"], "units": unit,
-            "estimated_by": "outward declared-affine continuous functional interval width", "status": "BOUNDED"}
+            "estimated_by": "outward max of continuous and Euler functional interval widths" if mixture_production
+                else "outward declared-affine continuous functional interval width", "status": "BOUNDED"}
         budget["time_discretization"] = {"value": qualified_components["time_bias_absolute_upper"], "units": unit,
             "estimated_by": "outward absolute signed grid-minus-continuous expectation bound", "status": "BOUNDED"}
     if config["method"] == "mlmc-pilot":
