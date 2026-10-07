@@ -13,7 +13,7 @@ from experiments.pirc28.evidence import collect_qualification
 from experiments.pirc28.failure_artifacts import failure_result, validate_cell_failure
 from experiments.pirc28.pipeline import execute_recipe
 from experiments.pirc28.runtime import switching_plugin
-from infrastructure.research_store import ResearchError, digest
+from infrastructure.research_store import ResearchError, digest, encode
 from models.switching import SwitchingError
 from tests import test_pirc28_evidence as evidence_tests
 from tests.test_pirc28_approximation import v2_recipe
@@ -165,7 +165,33 @@ def test_actual_managed_failed_reference_retains_original_cost_and_all_batches(t
     collected = collect_qualification(store, definition, [study['study_id']],
         {study['study_id']: grant}, check_budget=fixture_poll, allow_fixture=True)
     lineage = next(item for item in collected['lineage'] if item['selected_attempt_id'] == result['attempt_id'])
-    assert lineage['attempts'][0]['failure'] == payload['failure']
+    summary = lineage['attempts'][0]['failure']
+    # V2 aggregate disclosure is bounded; the complete failed reference and
+    # every original batch remain in the authorized canonical source artifact.
+    assert summary['schema_version'] == 'pirc28-bounded-failure-disclosure-v1'
+    assert summary['source_artifact_id'] == result['artifact_id'] == digest(payload)
+    assert summary['source_schema'] == payload['source_schema']
+    assert summary['complete_failure_hash'] == digest(payload['failure'])
+    for name in ('stage', 'error_code', 'recipe_hash', 'generated_inputs'):
+        assert summary[name] == payload['failure'][name]
+    assert summary['selection_hash'] == digest(payload['failure']['selection'])
+    assert summary['native_execution_hashes']['reference_execution'] == digest(
+        payload['failure']['reference_execution'])
+    disclosed = summary['reports']['approximation_checks']
+    assert disclosed['report_hash'] == digest(report)
+    assert disclosed['state'] == report['state'] == 'INFERENCE_INAPPLICABLE'
+    assert len(disclosed['paths']) == len(report['paths'])
+    omitted = {'coarse_summary', 'fine_summary', 'reference_summary', 'reference_batch_summaries'}
+    for compact, original in zip(disclosed['paths'], report['paths']):
+        assert compact['complete_source_path_hash'] == digest(original)
+        assert compact['reference_batches'] == original['reference_batches'] == 8
+        assert not omitted.intersection(compact)
+        assert {key: item for key, item in compact.items() if key != 'complete_source_path_hash'} == {
+            key: item for key, item in original.items() if key not in omitted}
+    assert len(encode(summary)) <= 64 * 1024
+    assert summary['successful_metrics_available'] is False
+    assert summary['qualified_identifiability'] is summary['real_data_authorized'] is False
+    assert json.loads(store.read_artifact(result['artifact_id'], purpose='evaluate', authorization=grant)) == payload
     assert collected['state'] == 'FIXTURE_ONLY'
 
 
