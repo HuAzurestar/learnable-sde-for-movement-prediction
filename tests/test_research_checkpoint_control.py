@@ -88,6 +88,33 @@ def test_owner_cannot_acknowledge_without_request(tmp_path):
     assert not exchange.accepted and not (tmp_path / "checkpoint-ack.json").exists()
 
 
+def test_response_presence_is_uncached_metadata_without_read_or_authority(tmp_path, monkeypatch):
+    exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", time.monotonic() + 3, 4096)
+    monkeypatch.setattr(control, "read_frame", lambda *a, **k: pytest.fail("presence hint read a frame"))
+    path = tmp_path / "checkpoint-response.json"
+    assert exchange.response_present() is False
+    path.write_bytes(b"")
+    assert exchange.response_present() is True
+    assert exchange.request_id is None and exchange.accepted is False
+    path.unlink()
+    assert exchange.response_present() is False
+
+
+@pytest.mark.parametrize("entry", ["invalid-json", "directory"])
+def test_response_presence_does_not_validate_invalid_entries(tmp_path, entry):
+    exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", time.monotonic() + 3, 4096)
+    exchange.request()
+    path = tmp_path / "checkpoint-response.json"
+    if entry == "directory":
+        path.mkdir()
+    else:
+        path.write_bytes(b"{not-json")
+    assert exchange.response_present() is True
+    with pytest.raises(control.ControlError):
+        exchange.response()
+    assert exchange.accepted is False and not (tmp_path / "checkpoint-ack.json").exists()
+
+
 def test_failed_ack_publication_is_not_accepted(tmp_path, monkeypatch):
     exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", time.monotonic() + 3, 4096)
     exchange.request()

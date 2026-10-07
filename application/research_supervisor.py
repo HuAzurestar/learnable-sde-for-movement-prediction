@@ -182,6 +182,14 @@ class ResearchSupervisor:
                 raise soft_errors[0]
             if soft_started is None:
                 return False
+            # A missing frame has nothing to publish. Keep its request durable
+            # and return to the ordinary fresh budget poll, not an empty save
+            # transaction with an expensive final publication verification.
+            # Presence is only an uncached hint: present/replaced/invalid frames
+            # still need every original physical, budget and response check.
+            if not channel.response_present():
+                record_checkpoint_request()
+                return False
             # REQUEST, fresh budget and ready-response/save share one short
             # initial/final physical scope, never an idle/poll approval. Ordinary
             # REQUEST keeps its immediate durable head. The checkpoint-only
