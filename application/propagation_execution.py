@@ -41,9 +41,10 @@ def validate_propagation_cell(spec, cell):
     qualification = cell["plugin_id"] == "affine-propagation-qualification"
     mlmc_reference = cell["plugin_id"] == "affine-mlmc-qualification-chunk"
     mlmc_production = cell["plugin_id"] == "affine-mlmc-production-chunk"
+    mixture_qualification = cell["plugin_id"] == "affine-mixture-qualification"
     from experiments.pirc27.mixture_plugin import PLUGIN_IDS, mixture_plugin, mixture_policy, mixture_config
     mixture = cell["plugin_id"] in PLUGIN_IDS
-    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk"}|PLUGIN_IDS:
+    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk", "affine-mixture-qualification"}|PLUGIN_IDS:
         raise ResearchError("CONTRACT_MISMATCH", "unknown explicit propagation adapter")
     recovery = cell["plugin_id"].endswith("-chunk")
     synthetic = cell["plugin_id"].startswith("synthetic-")
@@ -59,6 +60,9 @@ def validate_propagation_cell(spec, cell):
         plugin = mlmc_production_plugin()
     if mixture:
         plugin = mixture_plugin(synthetic=synthetic)
+    if mixture_qualification:
+        from experiments.pirc27.mixture_qualification_plugin import mixture_qualification_plugin
+        plugin = mixture_qualification_plugin()
     execution_plan(spec, cell, plugin)
     request = request_from_manifest(cell["propagation_request"])
     package_type = FrozenNonlinearPackage if synthetic else FrozenDynamicsPackage
@@ -71,6 +75,10 @@ def validate_propagation_cell(spec, cell):
     if mixture:
         policy = mixture_policy(spec, cell, package, request, config)
         expected = mixture_config(request, policy, synthetic=synthetic)
+    elif mixture_qualification:
+        from experiments.pirc27.mixture_qualification_plugin import mixture_qualification_policies, mixture_qualification_config
+        mixture_bound, policy = mixture_qualification_policies(spec, cell, package, request, config)
+        expected = mixture_qualification_config(request, mixture_bound, policy)
     else:
         expected = execution_config(request, config["method"], level_samples=tuple(config["level_samples"]), proposal=tuple(config["proposal"]), recovery=recovery, synthetic=synthetic)
     if qualification:
@@ -136,7 +144,14 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
         "cubature": lambda: cubature_estimate(package, request),
         "mixture": lambda: mixture_estimate(package, request,
             mixture_policy(spec, cell, package, request, config), **continuation)}
-    result = methods[config["method"]]()
+    mixture_analysis = None
+    if plugin.plugin_id == "affine-mixture-qualification":
+        from experiments.pirc27.mixture_qualification_plugin import mixture_qualification_policies
+        from inference.mixture_qualification import qualify_affine_mixture
+        mixture_bound, policy = mixture_qualification_policies(spec, cell, package, request, config)
+        result, mixture_analysis = qualify_affine_mixture(package, request, mixture_bound, policy)
+    else:
+        result = methods[config["method"]]()
     synthetic = isinstance(package, FrozenNonlinearPackage)
     mlmc_production = plugin.plugin_id == "affine-mlmc-production-chunk"
     metrics = ({"functional_estimate": result.estimate} if synthetic else
@@ -178,6 +193,8 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
         policy = qualification_policy(spec, cell, package, request, config)
         output["forecast"]["qualification_analysis"] = analyze_affine_qualification(package, request,
             config["method"], policy, result)
+    if mixture_analysis is not None:
+        output["forecast"]["mixture_qualification_analysis"] = mixture_analysis
     # Computational completion keeps low-ESS/unresolved estimates as artifacts;
     # estimator status remains visible and cannot be scientific qualification.
     return {"schema_version": "pirc25-result-v1", "status": "SUCCEEDED", "qualification": "qualified" if formal else "fixture",

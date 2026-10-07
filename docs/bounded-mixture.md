@@ -98,3 +98,9 @@ moment limit, distinct nonlinear component centres, pruning accounting and
 cap failure, strict PSD refusal, complete policy bindings and exact bounded
 kernel replay. They do not establish long-horizon accuracy, tail calibration,
 cost superiority, real-model validity or formal admission.
+
+A dedicated [affine functional evidence producer](affine-mixture-qualification.md)
+now compares actual retained mixture outputs with saved continuous and Euler
+enclosures in a charged pilot. It does not borrow Gaussian approval, identify
+closure and roundoff separately, or remove the formal/held-out refusal. Settled
+owner target admission and an independent saved-proof reader remain required.

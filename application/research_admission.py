@@ -178,6 +178,11 @@ class AdmissionGate:
                     raise ResearchError("UNAUTHORIZED_DATA", "analytic qualification cannot consume test/final-eval inputs")
                 from .propagation_execution import validate_propagation_cell
                 validate_propagation_cell(spec, cell)
+            if plugin.plugin_id == "affine-mixture-qualification":
+                if mode != "pilot" or block["split_role"] not in {"train", "validation"}:
+                    raise ResearchError("UNAUTHORIZED_DATA", "mixture qualification cannot consume test/final-eval inputs")
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
             if (plugin.plugin_id in {"affine-propagation-chunk", "synthetic-propagation-chunk", "affine-mlmc-qualification-chunk"}
                     and cell.get("execution", {}).get("config", {}).get("method") == "mlmc-pilot"):
                 # BEFORE qualification artifacts or input exposure, including
@@ -332,6 +337,17 @@ class AdmissionGate:
         return validate
 
     def run(self, attempt_id, spec, cell, plugin, command_builder, budget, *, builtin_fixture=False, recovery_builder=None, checkpoint_handler=None):
+        if plugin.plugin_id == "affine-mixture-qualification":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.mixture_qualification_plugin import mixture_qualification_policies
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                _, policy = mixture_qualification_policies(spec, cell, package, request, config)
+                if budget.category != "pilot" or budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "mixture qualification requires the frozen pilot job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
         if plugin.plugin_id in {"affine-mixture-chunk", "synthetic-mixture-chunk"}:
             from .propagation_execution import validate_propagation_cell
             from experiments.pirc27.mixture_plugin import mixture_policy
