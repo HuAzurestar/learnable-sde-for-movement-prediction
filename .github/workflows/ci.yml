@@ -43,8 +43,10 @@ jobs:
     name: test (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     # Covers dependency installation plus the complete version-specific suite.
+    # The preceding matrix's test steps alone took 24-25 minutes, before the
+    # additional source-owner, independent-reader and formal-restore controls.
     # Shared research/fixture worker budgets and watchdog deadlines are separate.
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: PSDE-SDE

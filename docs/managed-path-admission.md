@@ -69,6 +69,15 @@ or numerical-engine replay. Its no-fallback CLI reports PASSED and FAILED
 counts separately. Completed numeric failures/unresolved outputs do not enter
 complete paired aggregation or adjudication; execution status, metrics, costs,
 expected-cell denominators and CSV numeric dispositions are preserved.
-Actual supervised formal interruption/restore, complete method
-and physical-axis qualification, study and paper delivery remain required.
+Disposable engineering controls exercise all four path families through actual
+supervised formal 80% save/ACK, native tree stop, reopened linked restoration,
+exact current final statistics and functional identity, original-arm costs,
+authorized export, and the independent saved-proof reader/CLI. Completed-state
+controls also refuse any new paths, unused analytic metric or bounded-reference
+producer replay. These checks use one fixed affine law and coarse frozen
+tolerances; they are not complete method or physical-axis qualification,
+independent research blocks, a scientific study, or paper delivery. Those full
+qualification and delivery steps remain required. The CI job wrapper allows
+45 minutes for dependency installation and the complete mandatory test suite;
+this does not change any worker deadline or original cumulative research arm.
 Disposable unit-test stores/grants are not the official shared research root.
