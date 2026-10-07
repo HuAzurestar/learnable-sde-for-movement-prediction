@@ -10,13 +10,13 @@ protected input reads. Generic operator reports do not promote this producer.
 
 The immutable `PathQualificationPolicy` binds the complete request, affine
 package, current code, method, two-dimensional proposal, four positive SI state
-scales, every numerical threshold and pilot job cap (at most1800seconds). It
+scales, every numerical threshold and pilot job cap (at most 1800 seconds). It
 must be registered before sampling. The total observed scalar error cap cannot
 exceed request tolerance. No negative result changes the frozen grid, sample
 count, proposal, tolerance, arm or job budget.
 
 One actual sampler invocation captures detached final sufficient statistics,
-never raw paths, in at most16KiB. The analysis binds that final state, RNG scheme,
+never raw paths, in at most 16 KiB. The analysis binds that final state, RNG scheme,
 seed, coupling identity, phase, complete functional output and policy by hashes.
 The unmodified sampler output is checked against these saved statistics; there
 is no second sampler run to obtain an agreeing value. The shared owner must
@@ -41,7 +41,7 @@ summed confidence guarantees. The original kernel error budget is retained;
 the dedicated analysis explicitly leaves implementation roundoff, separate
 propagation approximation and model error unidentified.
 
-Ordinary MC uncertainty uses its saved moment standard error and a normal95
+Ordinary MC uncertainty uses its saved moment standard error and a normal 95%
 approximation. Zero-hit Bernoulli MC retains a missing standard error and a
 positive one-sided exact-binomial-formula upper limit. All-hit Bernoulli MC also
 gets positive one-sided uncertainty instead of interpreting zero observed
@@ -53,14 +53,15 @@ IS uncertainty uses its own weighted log-moment variance and ESS. It never
 borrows the independent-binomial MC formula, self-normalizes, clips weights or
 claims guaranteed normal-interval coverage. No weighted hits, low ESS, a frozen
 ESS-threshold failure or zero estimated weighted variance remains negative
-evidence. Numerical failure does not remove the charged cell from the matrix
-denominator.
+evidence. A zero-proposal all-hit event is also unresolved even when log-moment
+rounding produces tiny positive variance; that artifact cannot make it pass.
+Numerical failure does not remove the charged cell from the matrix denominator.
 
 Allocation retains the existing `samples*steps` kernel work proxy and adds a
-fixed400001 reference-work allowance (two200000-operation hard caps plus one
-signed subtraction), with total at most1000000. A stricter observed reference
+fixed 400001 reference-work allowance (two 200000-operation hard caps plus one
+signed subtraction), with total at most 1000000. A stricter observed reference
 operation threshold does not reduce this proxy. Two bounded rational and
-serialization pools reserve64MiB; physical resource dimension stays four.
+serialization pools reserve 64 MiB; physical resource dimension stays four.
 The kernel proxy is not a claim that all solvers use identical FLOPs or drift
 evaluations. Native elapsed cost remains independently charged.
 

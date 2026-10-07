@@ -47,9 +47,16 @@ def _sampling_evidence(request, method, result, state):
                 or diagnostics.get("log_sum_squared_weights") != stat["log_w2"]
                 or diagnostics.get("max_log_weight") != stat["max_log_w"]):
             raise DataValidationError("actual unnormalized IS diagnostics differ from saved statistics")
-        radius = 1.959963984540054*se if se is not None and se > 0 else None
+        # With zero proposal every likelihood is exactly one by construction.
+        # Log-sum rounding can nevertheless produce tiny positive variance for
+        # an all-hit event. Never treat that artifact as identified uncertainty.
+        degenerate = hits == n and tuple(state["_proposal"]) == (0., 0.)
+        radius = 1.959963984540054*se if se is not None and se > 0 and not degenerate else None
         evidence_interval, evidence_kind = interval, interval_kind
         coverage = "estimated-only; finite-variance iid weighted normal approximation; no guaranteed coverage"
+        if hits and radius is None:
+            evidence_interval, evidence_kind = None, "unavailable-degenerate-weighted-event-statistics"
+            coverage = "no sampling uncertainty identified from degenerate weighted event statistics; no coverage guarantee"
     else:
         diagnostics = dict(result.diagnostics)
         if (diagnostics.get("hits") != hits or diagnostics.get("coupling_id") != request.coupling_id

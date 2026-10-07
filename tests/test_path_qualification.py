@@ -100,14 +100,18 @@ def test_zero_weighted_hits_do_not_borrow_binomial_mc_bound():
     assert analysis["sampling_error"]["self_normalized"] is False
 
 
-def test_weighted_zero_variance_is_not_a_zero_sampling_error_proof():
+@pytest.mark.parametrize("samples", [2, 5, 64])
+def test_weighted_zero_variance_is_not_a_zero_sampling_error_proof(samples):
     package, request, policy = policies("importance", changes={"proposal": (0., 0.)},
-        request_changes={"threshold": -100.})
+        request_changes={"threshold": -100., "samples": samples})
     result, analysis = qualify_affine_paths(package, request, policy)
-    assert result.status == "SUCCEEDED" and result.standard_error == 0.
+    # Log-sum roundoff can be platform-sensitive; actual output stays untouched.
+    assert result.status == "SUCCEEDED" and 0. <= result.standard_error < 1e-6
     assert analysis["status"] == "FAILED" and analysis["checks"]["sampling_uncertainty"] is False
     assert analysis["sampling_error"]["status"] == "NOT_IDENTIFIABLE"
     assert analysis["sampling_error"]["uncertainty_radius"] is None
+    assert analysis["sampling_error"]["interval"] is None
+    assert analysis["sampling_error"]["interval_kind"] == "unavailable-degenerate-weighted-event-statistics"
 
 
 def test_frozen_ess_threshold_rejects_completed_is_without_reallocation():
@@ -289,8 +293,10 @@ def test_wrong_budget_refused_before_reservation_or_inputs(tmp_path, budget):
 
 
 @pytest.mark.parametrize("method", METHODS)
-def test_generic_operator_report_cannot_make_source_formal_or_heldout(tmp_path, method):
+@pytest.mark.parametrize("mode", ["formal", "pilot"])
+def test_generic_operator_report_cannot_make_source_formal_or_heldout(tmp_path, method, mode):
     store, spec, _ = prepared(tmp_path, method=method, formal=True)
+    spec["admission"]["mode"] = mode
     store.register(spec, digest(spec))
     cell = spec["cells"][0]
     attempt = store.new_attempt(store.register_run(spec["study_id"], cell))
