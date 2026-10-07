@@ -43,9 +43,10 @@ def validate_propagation_cell(spec, cell):
     mlmc_production = cell["plugin_id"] == "affine-mlmc-production-chunk"
     mixture_qualification = cell["plugin_id"] == "affine-mixture-qualification"
     mixture_production = cell["plugin_id"] == "affine-mixture-production-chunk"
+    path_qualification = cell["plugin_id"] == "affine-path-qualification"
     from experiments.pirc27.mixture_plugin import PLUGIN_IDS, mixture_plugin, mixture_policy, mixture_config
     mixture = cell["plugin_id"] in PLUGIN_IDS
-    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk", "affine-mixture-qualification", "affine-mixture-production-chunk"}|PLUGIN_IDS:
+    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk", "affine-mixture-qualification", "affine-mixture-production-chunk", "affine-path-qualification"}|PLUGIN_IDS:
         raise ResearchError("CONTRACT_MISMATCH", "unknown explicit propagation adapter")
     recovery = cell["plugin_id"].endswith("-chunk")
     synthetic = cell["plugin_id"].startswith("synthetic-")
@@ -67,6 +68,9 @@ def validate_propagation_cell(spec, cell):
     if mixture_production:
         from experiments.pirc27.mixture_production_plugin import mixture_production_plugin
         plugin = mixture_production_plugin()
+    if path_qualification:
+        from experiments.pirc27.path_qualification_plugin import path_qualification_plugin
+        plugin = path_qualification_plugin()
     execution_plan(spec, cell, plugin)
     request = request_from_manifest(cell["propagation_request"])
     package_type = FrozenNonlinearPackage if synthetic else FrozenDynamicsPackage
@@ -76,7 +80,11 @@ def validate_propagation_cell(spec, cell):
     except DataValidationError as exc:
         raise ResearchError("CONTRACT_MISMATCH", "frozen propagation package schema/content/code differs") from exc
     config = cell["execution"]["config"]
-    if mixture_production:
+    if path_qualification:
+        from experiments.pirc27.path_qualification_plugin import path_qualification_policy, path_qualification_config
+        policy = path_qualification_policy(spec, cell, package, request, config)
+        expected = path_qualification_config(request, policy)
+    elif mixture_production:
         from experiments.pirc27.mixture_production_plugin import production_policies, mixture_production_config
         mixture_bound, policy = production_policies(spec, cell, package, request, config)
         expected = mixture_production_config(request, mixture_bound, policy)
@@ -157,7 +165,13 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
         "mixture": lambda: mixture_estimate(package, request,
             production_mixture if mixture_production else mixture_policy(spec, cell, package, request, config), **continuation)}
     mixture_analysis = None
-    if plugin.plugin_id == "affine-mixture-qualification":
+    path_analysis = None
+    if plugin.plugin_id == "affine-path-qualification":
+        from experiments.pirc27.path_qualification_plugin import path_qualification_policy
+        from inference.path_qualification import qualify_affine_paths
+        policy = path_qualification_policy(spec, cell, package, request, config)
+        result, path_analysis = qualify_affine_paths(package, request, policy)
+    elif plugin.plugin_id == "affine-mixture-qualification":
         from experiments.pirc27.mixture_qualification_plugin import mixture_qualification_policies
         from inference.mixture_qualification import qualify_affine_mixture
         mixture_bound, policy = mixture_qualification_policies(spec, cell, package, request, config)
@@ -211,6 +225,8 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
             config["method"], policy, result)
     if mixture_analysis is not None:
         output["forecast"]["mixture_qualification_analysis"] = mixture_analysis
+    if path_analysis is not None:
+        output["forecast"]["path_qualification_analysis"] = path_analysis
     # Computational completion keeps low-ESS/unresolved estimates as artifacts;
     # estimator status remains visible and cannot be scientific qualification.
     return {"schema_version": "pirc25-result-v1", "status": "SUCCEEDED", "qualification": "qualified" if formal else "fixture",

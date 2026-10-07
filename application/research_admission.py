@@ -183,6 +183,11 @@ class AdmissionGate:
                     raise ResearchError("UNAUTHORIZED_DATA", "mixture qualification cannot consume test/final-eval inputs")
                 from .propagation_execution import validate_propagation_cell
                 validate_propagation_cell(spec, cell)
+            if plugin.plugin_id == "affine-path-qualification":
+                if mode != "pilot" or block["split_role"] not in {"train", "validation"}:
+                    raise ResearchError("UNAUTHORIZED_DATA", "path qualification cannot consume test/final-eval inputs")
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
             if plugin.plugin_id == "affine-mixture-production-chunk":
                 # Dedicated producer does not make generic/fixture mixtures
                 # eligible; validate its frozen formal registration pre-read.
@@ -357,6 +362,17 @@ class AdmissionGate:
                 _, policy = production_policies(spec, cell, package, request, config)
                 if budget.job_seconds > policy.maximum_job_seconds:
                     raise ResearchError("CONTRACT_MISMATCH", "mixture target exceeds the frozen qualification job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
+        if plugin.plugin_id == "affine-path-qualification":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.path_qualification_plugin import path_qualification_policy
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                policy = path_qualification_policy(spec, cell, package, request, config)
+                if budget.category != "pilot" or budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "path qualification requires the frozen pilot job budget")
             except ResearchError as exc:
                 self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
                 raise
