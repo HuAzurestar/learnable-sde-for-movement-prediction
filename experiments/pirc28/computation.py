@@ -17,8 +17,9 @@ from infrastructure.research_store import ResearchError, atomic_write, digest, e
 from infrastructure.research_visibility import combine_visibility, study_visibility
 from .evidence import (MAXIMUM_RESULT_BYTES, _cost_history, source_attempts_hash,
                        source_run_ids, study_definition_binding)
-from .qualification import IdentifiabilitySpec, METRICS
-from .approximation import pending_qualification
+from .qualification import (IdentifiabilitySpec, METRICS, qualification_disposition,
+                            disposition_projection)
+from .approximation import pending_qualification, withhold_scientific_pass
 
 MAXIMUM_REQUEST_BYTES = 4*1024*1024
 MAXIMUM_BOOTSTRAP_ELEMENTS = 50_000_000
@@ -138,6 +139,16 @@ def validate_computation_result(store, value, request):
     from .managed_evidence import validate_collected_prefix_bindings
     validate_collected_prefix_bindings(store, studies, report, frozen['authorizations'],
                                       frozen['resource_plan']['maximum_total_source_bytes'])
+    expected_gate = qualification_disposition(definition, report['rows'], report['aggregate_hash'])
+    fixture = frozen['source_stage'] == 'fixture'
+    if not fixture and expected_gate['state'] == 'PASSED' and reference is None:
+        expected_gate['state'] = 'NEEDS_PREREGISTRATION'
+        expected_gate['missing_fields'].append('pirc28_study_definition_hash')
+        if 'applicable_ranges' in expected_gate:
+            expected_gate['applicable_scenarios'], expected_gate['applicable_ranges'] = [], []
+    withhold_scientific_pass(expected_gate, studies, fixture=fixture)
+    if digest(disposition_projection(report['gate'])) != digest(expected_gate):
+        raise ResearchError('CONTRACT_MISMATCH', 'owner deterministic qualification disposition differs')
     _final_clock(store, frozen)
 
 

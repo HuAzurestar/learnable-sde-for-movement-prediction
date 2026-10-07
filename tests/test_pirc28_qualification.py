@@ -7,7 +7,8 @@ import numpy as np
 import pytest
 
 from experiments.pirc28.qualification import (AXES, METRICS, PARAMETERS, IdentifiabilitySpec,
-    forecast_coverage, jump_diagnostics, mode_diagnostics, parameter_recovery, phase_scenarios, qualify)
+    forecast_coverage, jump_diagnostics, mode_diagnostics, parameter_recovery, phase_scenarios, qualify,
+    qualification_disposition, disposition_projection)
 from infrastructure.research_store import digest
 from models.switching import SwitchingError, SwitchingSDEModel
 from tests.test_pirc28_synthetic import fixture_poll, model, scenario
@@ -129,6 +130,27 @@ def test_recovery_intervals_use_registered_replicates_and_replay():
     assert 0.5 < point['recovery_fraction_interval'][0] < 1
     assert result['real_data_authorized'] is False
     assert run(spec(2), rows(spec(2)))['state'] == 'UNIDENTIFIABLE'
+
+
+@pytest.mark.parametrize('state', ['SUCCEEDED', 'FAILED', 'TIMEOUT', 'BUDGET_EXHAUSTED',
+                                  'INFERENCE_INAPPLICABLE', 'NOT_RUN', 'collapse', 'missing'])
+def test_owner_disposition_matches_funded_gate_without_bootstrap_or_rng(monkeypatch, state):
+    from experiments.pirc28 import qualification
+    value, data = spec(), rows(spec())
+    if state == 'collapse':
+        for row in data:
+            if row['K'] == 2:
+                row['collapsed'] = True
+    elif state == 'missing':
+        data.pop()
+    elif state != 'SUCCEEDED':
+        data[-1].update(state=state, metrics=None, posterior_occupancy=None, collapsed=None)
+    expected = disposition_projection(run(value, data))
+    def forbidden(*args, **kwargs):
+        pytest.fail('owner performed bootstrap or created a sampling RNG')
+    monkeypatch.setattr(qualification, '_interval', forbidden)
+    monkeypatch.setattr(qualification.np.random, 'default_rng', forbidden)
+    assert qualification_disposition(value, data, digest(data)) == expected
 
 
 def test_missing_and_budget_exhausted_rows_remain_distinct():
@@ -274,6 +296,24 @@ def scoped_rows(value):
                 'artifact_hash': digest([name, row['replicate_id'], row['K']]),
                 'collapsed': name != 'qualified-range' and row['K'] == 2})
     return result
+
+
+@pytest.mark.parametrize('role', ['qualified-range', 'negative', 'exploratory'])
+@pytest.mark.parametrize('state', ['SUCCEEDED', 'FAILED', 'INFERENCE_INAPPLICABLE',
+                                  'NOT_RUN', 'TIMEOUT', 'BUDGET_EXHAUSTED'])
+def test_owner_scoped_disposition_retains_registered_roles_and_failures(monkeypatch, role, state):
+    from experiments.pirc28 import qualification
+    value, data = scoped_spec(), scoped_rows(scoped_spec())
+    if state != 'SUCCEEDED':
+        row = next(row for row in data if row['scenario_id'] == role and row['K'] == 1)
+        row.update(state=state, metrics=None, posterior_occupancy=None, collapsed=None)
+    expected = disposition_projection(run(value, data))
+    monkeypatch.setattr(qualification, '_interval', lambda *a, **k: pytest.fail('unfunded bootstrap'))
+    observed = qualification_disposition(value, data, digest(data))
+    assert observed == expected
+    assert observed['scenario_roles'] == value.scenario_roles
+    assert observed['scenarios'][role]['registered_replicates'] == len(value.replicate_ids)
+    assert observed['real_data_authorized'] is False
 
 
 def test_preregistered_negative_controls_allow_only_frozen_qualified_range():

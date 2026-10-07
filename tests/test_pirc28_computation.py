@@ -63,6 +63,65 @@ def test_successful_computation_reuse_has_no_new_reservation(computed):
     assert [event for event in store.events() if event['event_kind'] == 'RESERVE'] == reserves
 
 
+@pytest.mark.parametrize('damage', ['row-metric', 'row-input', 'row-artifact', 'row-state',
+    'row-order', 'lineage-omitted', 'lineage-cost', 'lineage-selection', 'snapshot',
+    'balance', 'read-bytes', 'gate-count', 'gate-reasons', 'gate-recovery', 'gate-state'])
+def test_owner_refuses_rehashed_rows_lineage_and_gate_dispositions(computed, damage):
+    data, result, _ = computed
+    store = data[0]
+    with store.lock():
+        value = json.loads(store._verified_artifact_content(store._manifest('artifact-'+result['artifact_id'])))
+    request = store.manifest('pirc28-qualification-request-'+result['attempt_id'])
+    report = value['report']
+    row = next(row for row in report['rows'] if row['state'] == 'SUCCEEDED')
+    lineage = next(entry for entry in report['lineage'] if entry['selected_attempt_id'])
+    point = next(iter(report['gate']['scenarios'].values()))
+    if damage == 'row-metric':
+        row['metrics']['position_energy_score_d2'] += 0.01
+    elif damage in ('row-input', 'row-artifact'):
+        row['input_hash' if damage == 'row-input' else 'artifact_hash'] = digest('substituted')
+    elif damage == 'row-state':
+        row.update(state='FAILED', metrics=None, posterior_occupancy=None, collapsed=None)
+    elif damage == 'row-order':
+        report['rows'].reverse()
+    elif damage == 'lineage-omitted':
+        report['lineage'].pop()
+    elif damage == 'lineage-cost':
+        lineage['attempts'][0]['cost']['charged_ms'] += 1
+    elif damage == 'lineage-selection':
+        lineage['selected_attempt_id'] = None
+    elif damage == 'snapshot':
+        report['source_snapshot_event_hash'] = digest('missing-event')
+    elif damage == 'balance':
+        report['arm_balances']['2']['closed'] = True
+    elif damage == 'read-bytes':
+        report['read_bytes'] += 1
+    elif damage == 'gate-count':
+        point['recovering_replicates'] += 1
+    elif damage == 'gate-reasons':
+        point['reasons'] = []
+    elif damage == 'gate-recovery':
+        point['recovery_fraction_interval'] = [1.0, 1.0]
+    else:
+        point['state'] = 'PASSED'
+    report['aggregate_hash'] = digest(report['rows'])
+    report['gate']['aggregate_hash'] = report['aggregate_hash']
+    value['report_hash'] = digest(report)
+    with pytest.raises(ResearchError):
+        validate_computation_result(store, value, request)
+
+
+def test_owner_disposition_does_not_repeat_bootstrap(computed, monkeypatch):
+    from experiments.pirc28 import qualification
+    data, result, _ = computed
+    store = data[0]
+    with store.lock():
+        value = json.loads(store._verified_artifact_content(store._manifest('artifact-'+result['artifact_id'])))
+    request = store.manifest('pirc28-qualification-request-'+result['attempt_id'])
+    monkeypatch.setattr(qualification, '_interval', lambda *a, **k: pytest.fail('unfunded bootstrap'))
+    validate_computation_result(store, value, request)
+
+
 @pytest.mark.parametrize('damage', ['gate', 'report-hash', 'source-snapshot', 'request', 'real-authorization',
     'fixture-promotion', 'master-hash', 'master-bound', 'master-bound-type', 'missing-master-hash', 'missing-master-bound',
     'missing-approximation', 'approximation-promotion', 'approximation-hash', 'approximation-boolean-type'])

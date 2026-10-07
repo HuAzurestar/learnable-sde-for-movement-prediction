@@ -202,14 +202,21 @@ def check_cell_prefix(store, study, cell, attempt, result, metadata, grant, hist
 def validate_collected_prefix_bindings(store, studies, report, authorizations, maximum_total_bytes):
     """Owner-side bounded authorized metadata checks; NEVER repeat numerics here."""
     from application.research_reuse import verified_failure, verified_reuse
-    from .evidence import MAXIMUM_RESULT_BYTES, _cost_history, _run_id
+    from .evidence import (MAXIMUM_RESULT_BYTES, _cost_history, _run_id,
+        _success_row, _non_success_row, _initialization_diagnostics, _snapshot_balances)
+    from .qualification import IdentifiabilitySpec
     from .runtime import switching_plugin
     claimed = report.get('cell_approximation_evidence')
     _require(type(claimed) is list and report.get('cell_approximation_evidence_hash') == digest(claimed),
              'complete prefix evidence roster/hash missing')
     study_hashes = {study['study_id']: digest(study) for study in studies}
     events_by_attempt, by_run = {}, {}
-    for event in store.events():
+    events = store.events()
+    snapshot = next((index for index, event in enumerate(events)
+                     if event['hash'] == report.get('source_snapshot_event_hash')), None)
+    _require(snapshot is not None, 'owner source event snapshot is missing')
+    snapshot_events = events[:snapshot+1]
+    for event in events:
         identifier = event['payload'].get('attempt_id')
         if identifier is not None:
             events_by_attempt.setdefault(identifier, []).append(event)
@@ -217,13 +224,31 @@ def validate_collected_prefix_bindings(store, studies, report, authorizations, m
         by_run.setdefault(attempt['run_id'], []).append(attempt)
     cells = sorted((study['switching_recipe']['scenario']['scenario_id'], cell['replicate_id'], cell['fit_K'], study, cell)
                    for study in studies for cell in study['cells'])
-    expected, consumed = [], 0
-    plugin = switching_plugin()
+    expected, rows, lineage, consumed = [], [], [], 0
+    definition = IdentifiabilitySpec.from_dict(studies[0]['switching_recipe']['identifiability_spec'])
+    arms = {}
     for _, _, k, study, cell in cells:
-        if study['switching_recipe']['schema_version'] != RECIPE_SCHEMA:
-            continue
-        related = by_run.get(_run_id(study, cell, study_hashes[study['study_id']]), [])
+        _require(k not in arms or arms[k] == cell['arm_id'], 'owner source arm family changed')
+        arms[k] = cell['arm_id']
+    balances = _snapshot_balances(snapshot_events, arms)
+    _require(digest(report.get('arm_balances')) == digest(balances), 'owner source snapshot balances differ')
+    plugin = switching_plugin()
+    for scenario, replicate, k, study, cell in cells:
+        run_id = _run_id(study, cell, study_hashes[study['study_id']])
+        related = by_run.get(run_id, [])
+        _require(all(event['sequence'] <= events[snapshot]['sequence']
+            for attempt in related for event in events_by_attempt.get(attempt['attempt_id'], [])
+            if event['event_kind'] in ('ATTEMPT', 'RESERVE', 'SETTLE', 'WORKER_TREE_STOPPED')),
+            'owner source attempts occurred after the claimed snapshot')
         history = _cost_history(store, study, cell, related, events_by_attempt)
+        successful = [item for item in related if item['state'] == 'SUCCEEDED']
+        _require(len(successful) <= 1, 'owner cell has multiple successful outcomes')
+        selected = successful[0] if successful else related[-1] if related else None
+        entry = {'scenario_id': scenario, 'replicate_id': replicate, 'K': k,
+            'study_id': study['study_id'], 'cell_hash': digest(cell), 'run_id': run_id,
+            'selected_attempt_id': None if selected is None else selected['attempt_id'], 'attempts': history}
+        lineage.append(entry)
+        failures, success_result = {}, None
         # Match collector order: every failed reference artifact, then success.
         ordered = [item for item in related if item['state'] == 'FAILED' and item.get('artifact_id')]
         ordered += [item for item in related if item['state'] == 'SUCCEEDED']
@@ -243,8 +268,21 @@ def validate_collected_prefix_bindings(store, studies, report, authorizations, m
                 verified_reuse(store, attempt, study, cell, plugin)
             else:
                 verified_failure(store, attempt, study, cell, plugin)
+                failures[attempt['attempt_id']] = result['failure']
+                next(value for value in history if value['attempt_id'] == attempt['attempt_id'])['failure'] = result['failure']
+            if attempt['state'] == 'SUCCEEDED':
+                success_result = result
             projection = _projection(result, study, cell)
             if projection is not None:
                 expected.append(_receipt(store, study, cell, attempt, metadata, grant, history, projection,
                                          events_by_attempt.get(attempt['attempt_id'], [])))
+        if successful:
+            rows.append(_success_row(definition, study, cell, success_result, selected['artifact_id']))
+            entry['initialization_diagnostics'] = _initialization_diagnostics(success_result)
+        else:
+            rows.append(_non_success_row(store, (scenario, replicate, k), selected, failures, balances[k]))
     _require(digest(claimed) == digest(expected), 'prefix source/artifact/grant/all-cost roster differs')
+    _require(digest(report.get('rows')) == digest(rows), 'owner canonical source rows differ')
+    _require(digest(report.get('lineage')) == digest(lineage), 'owner complete source/failure/cost lineage differs')
+    _require(report.get('read_bytes') == consumed and type(report.get('read_bytes')) is int,
+             'owner complete source read byte count differs')

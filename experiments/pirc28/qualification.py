@@ -332,6 +332,28 @@ def qualify(spec, rows, aggregate_hash, *, check_budget):
     successes. K=1 and K=2 must share input hashes. Unknown/missing metrics cannot
     pass. Source/attempt/admission binding is a separate shared-store obligation.
     """
+    return _qualify(spec, rows, aggregate_hash, check_budget=check_budget, intervals=True)
+
+
+def qualification_disposition(spec, rows, aggregate_hash):
+    """Bounded gate arithmetic only: no fitting, simulation or bootstrap draws.
+
+    Bootstrap intervals describe successful fits; they never decide this gate.
+    This separate owner entry point deliberately omits those worker-only fields.
+    Source/artifact authority must be established before calling it.
+    """
+    return disposition_projection(_qualify(spec, rows, aggregate_hash,
+        check_budget=lambda: None, intervals=False))
+
+
+def disposition_projection(report):
+    """Remove only descriptive bootstrap values, retaining every decision field."""
+    return {**report, 'scenarios': {name: {key: value for key, value in point.items()
+        if key not in ('successful_fit_metric_mean_intervals', 'paired_energy_difference_interval')}
+        for name, point in report['scenarios'].items()}}
+
+
+def _qualify(spec, rows, aggregate_hash, *, check_budget, intervals):
     spec.validate()
     if type(rows) is not list or len(rows) > 10_000 or digest(rows) != aggregate_hash:
         raise SwitchingError('IDENTITY_CONFLICT', 'bounded aggregate hash differs')
@@ -380,7 +402,7 @@ def qualify(spec, rows, aggregate_hash, *, check_budget):
             'registered_replicates': len(spec.replicate_ids), 'effective_replicates': None}
             for name, axes in spec.scenario_axes.items()}
         return {**report, 'state': 'NEEDS_PREREGISTRATION'}
-    rng = np.random.default_rng(spec.bootstrap_seed)
+    rng = np.random.default_rng(spec.bootstrap_seed) if intervals else None
     for scenario in sorted(spec.scenario_axes):
         check_budget()
         candidates, paired, missing, failures, successful_k2 = [], [], [], [], []
@@ -409,8 +431,8 @@ def qualify(spec, rows, aggregate_hash, *, check_budget):
                    and all(value['metrics'][name] <= limit for name, limit in spec.thresholds.items()) for value in candidates)
         total = len(spec.replicate_ids)
         metric_candidates = [value for value in successful_k2 if not set(METRICS)-set(value['metrics'])]
-        intervals = {name: _interval(np.asarray([value['metrics'][name] for value in metric_candidates]), spec, rng, check_budget)
-                     for name in METRICS} if len(metric_candidates) >= 2 else {}
+        metric_intervals = {name: _interval(np.asarray([value['metrics'][name] for value in metric_candidates]), spec, rng, check_budget)
+                     for name in METRICS} if intervals and len(metric_candidates) >= 2 else {}
         # Failure-inclusive fractions use all registered replicates. Bootstrap
         # confidence intervals for successful fits are separately conditioned.
         recovery_interval = _wilson(good, total, spec.confidence)
@@ -435,8 +457,8 @@ def qualify(spec, rows, aggregate_hash, *, check_budget):
             'unknown_K2_collapse_replicates': [replicate for replicate in spec.replicate_ids
                 if not any(value['replicate_id'] == replicate for value in successful_k2)],
             'metric_effective_replicates': len(metric_candidates),
-            'failures': failures, 'missing_replicates': missing, 'successful_fit_metric_mean_intervals': intervals,
-            'paired_energy_difference_interval': _interval(np.asarray(paired), spec, rng, check_budget) if len(paired) >= 2 else None,
+            'failures': failures, 'missing_replicates': missing, 'successful_fit_metric_mean_intervals': metric_intervals,
+            'paired_energy_difference_interval': _interval(np.asarray(paired), spec, rng, check_budget) if intervals and len(paired) >= 2 else None,
             'interval_sampling_unit': 'independent-synthetic-replicate', 'interval_method': 'bounded-percentile-bootstrap',
             'recovery_fraction_interval_method': 'Wilson-binomial-with-failure-inclusive-denominator',
             'within_path_samples_are_not_replicates': True}

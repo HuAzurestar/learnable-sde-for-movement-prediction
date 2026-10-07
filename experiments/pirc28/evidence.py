@@ -12,7 +12,6 @@ import math
 
 import numpy as np
 
-from application.research_budget import BudgetLedger
 from application.research_evidence import authorize_study, require_unexpired_disclosure
 from application.research_preregistration import hash_reference, validate_preregistration
 from application.research_reuse import verified_reuse, verified_failure
@@ -294,6 +293,55 @@ def _success_row(definition, study, cell, result, artifact_hash):
         'metrics': metrics, 'posterior_occupancy': chosen['posterior_occupancy'], 'collapsed': chosen['collapsed']}
 
 
+def _initialization_diagnostics(result):
+    """Canonical bounded disclosure, without repeating fit or selection numerics."""
+    return [
+        {'initialization_id': fit['initialization_id'], 'fit_state': fit['state'],
+         'selection_state': selection['state'], 'fit_error_code': fit.get('error_code'),
+         'selection_error_code': selection.get('error_code'), 'selection_score': selection['score'],
+         'collapsed': fit.get('collapsed'), 'stopping_reason': fit.get('stopping_reason'),
+         'last_accepted_state_hash': None if fit.get('last_accepted_state') is None
+             else digest(fit['last_accepted_state'])}
+        for fit, selection in zip(result['fit']['initializations'], result['fit']['selection']['candidates'])]
+
+
+def _non_success_row(store, key, selected, failures, balance):
+    state = 'NOT_RUN'
+    if selected is None and balance['closed']:
+        state = 'BUDGET_EXHAUSTED'
+    elif selected is not None:
+        if selected['state'] in ('BUDGET_EXHAUSTED', 'TIMEOUT'):
+            state = selected['state']
+        elif selected['state'] in store.TERMINAL:
+            state = 'INFERENCE_INAPPLICABLE' if selected.get('error_code') == 'INFERENCE_INAPPLICABLE' else 'FAILED'
+    failure = None if selected is None else failures.get(selected['attempt_id'])
+    return {'scenario_id': key[0], 'replicate_id': key[1], 'K': key[2], 'state': state,
+        'input_hash': None if failure is None else digest(failure['generated_inputs']),
+        'artifact_hash': None if failure is None else selected['artifact_id'],
+        'metrics': None, 'posterior_occupancy': None, 'collapsed': None}
+
+
+def _snapshot_balances(events, arms):
+    """Original ledger arithmetic at the source snapshot, not after settlement."""
+    reservations, closed = {}, set()
+    for event in events:
+        data, kind = event['payload'], event['event_kind']
+        if kind in ('RESERVE', 'SETTLE'):
+            reservations[data['reservation_id']] = data
+            if kind == 'SETTLE' and (data['monotonic_elapsed_ms'] is None
+                    or data['outcome'] in ('TIMEOUT', 'BUDGET_EXHAUSTED', 'INTERRUPTED')):
+                closed.add(data['arm_id'])
+        elif kind == 'ARM_CLOSED':
+            closed.add(data['arm_id'])
+    result = {}
+    for k, arm in arms.items():
+        used = sum(value['charged_ms'] if value['settled'] else value['reserved_ms']
+                   for value in reservations.values() if value['arm_id'] == arm)
+        result[k] = {'arm_id': arm, 'remaining_ms': max(0, 86400000-used),
+                     'committed_ms': used, 'closed': arm in closed}
+    return result
+
+
 def collect_qualification(store, definition, study_ids, authorizations, *, check_budget,
                           allow_fixture=False, maximum_total_bytes=512*1024*1024,
                           expected_attempts_hash=None):
@@ -401,7 +449,9 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
     rows, lineage, disclosed, prefix_evidence = [], [], [], []
     consumed = 0
     plugin = switching_plugin()
-    balances = {k: BudgetLedger(store).balance(family[0]) for k, family in families.items()}
+    if (store.path/'recovery-hold.json').exists():
+        raise ResearchError('RECOVERY_REQUIRED', 'source snapshot is held for budget reconciliation')
+    balances = _snapshot_balances(events, {k: family[0] for k, family in families.items()})
     for key in sorted(cells):
         check_budget()
         study, cell = cells[key]
@@ -465,32 +515,11 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
             if prefix is not None:
                 prefix_evidence.append(prefix)
             row = _success_row(definition, study, cell, result, artifact_id)
-            lineage[-1]['initialization_diagnostics'] = [
-                {'initialization_id': fit['initialization_id'], 'fit_state': fit['state'],
-                 'selection_state': selection['state'], 'fit_error_code': fit.get('error_code'),
-                 'selection_error_code': selection.get('error_code'), 'selection_score': selection['score'],
-                 'collapsed': fit.get('collapsed'), 'stopping_reason': fit.get('stopping_reason'),
-                 'last_accepted_state_hash': None if fit.get('last_accepted_state') is None
-                     else digest(fit['last_accepted_state'])}
-                for fit, selection in zip(result['fit']['initializations'], result['fit']['selection']['candidates'])]
+            lineage[-1]['initialization_diagnostics'] = _initialization_diagnostics(result)
             rows.append(row)
             disclosed.append((artifact_id, grant))
         else:
-            state = 'NOT_RUN'
-            if selected is None and balances[key[2]]['closed']:
-                state = 'BUDGET_EXHAUSTED'
-            elif selected is not None:
-                if selected['state'] == 'BUDGET_EXHAUSTED':
-                    state = 'BUDGET_EXHAUSTED'
-                elif selected['state'] == 'TIMEOUT':
-                    state = 'TIMEOUT'
-                elif selected['state'] in store.TERMINAL:
-                    state = 'INFERENCE_INAPPLICABLE' if selected.get('error_code') == 'INFERENCE_INAPPLICABLE' else 'FAILED'
-            rows.append({'scenario_id': key[0], 'replicate_id': key[1], 'K': key[2], 'state': state,
-                'input_hash': None if selected is None or selected['attempt_id'] not in failures
-                    else digest(failures[selected['attempt_id']]['generated_inputs']),
-                'artifact_hash': None if selected is None or selected['attempt_id'] not in failures else selected['artifact_id'],
-                'metrics': None, 'posterior_occupancy': None, 'collapsed': None})
+            rows.append(_non_success_row(store, key, selected, failures, balances[key[2]]))
     report = qualify(definition, rows, digest(rows), check_budget=check_budget)
     if not fixture and report['state'] == 'PASSED' and study_definition_hash is None:
         report['state'] = 'NEEDS_PREREGISTRATION'
