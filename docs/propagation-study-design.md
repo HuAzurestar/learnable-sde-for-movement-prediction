@@ -33,6 +33,26 @@ not method, chunk size or allocation. This declares the pairing identity; it doe
 not assert identical paths across distinct solvers or independent MLMC levels.
 One registered cell has one horizon. This is not first-passage inference.
 
+Multiple grid/path-count configurations of one method can be frozen together
+using `StudyMethod.configuration_id`. When any method supplies that field,
+every method entry must supply a valid explicit label, and each
+`(method, configuration_id)` pair must be unique. Repeating the same numerical
+configuration under another label is refused. There is no automatic Cartesian
+grid/count search: supply the exact configurations before exposure. The bounded
+method axis and 10,000-cell/32 MiB limits include all of them.
+
+Labels are frozen comparison strata, not method-family or budget identities.
+Matching labels across methods declare the intended configuration comparison;
+the actual grid, allocation and proposal remain fully request-bound and need
+not be identical across different algorithms. The cell's comparison dimensions
+include `numerical_configuration`, so distinct configurations under one arm
+cannot collapse into duplicate block/seed rows in runtime export or the
+independent paper aggregate. The common coupling root remains based on shared
+physical/request inputs; it does not promise nested Brownian increments between
+arbitrary grids. Original family arms cover every configuration and horizon.
+Legacy single-configuration designs without labels keep their original method
+manifest/request-ID shape and comparison dimensions, without an inferred label.
+
 Arms must be supplied explicitly for exactly the model-family/method/objective
 triples. Horizon, seed, region threshold, study ID, package version and numerical
 configuration never create extra budget identities. Multiple regions within one

@@ -46,6 +46,7 @@ class StudyMethod:
     proposal: tuple[float, float] = (0.0, 0.0)
     recovery: bool = False
     mixture_settings: MixtureSettings | None = None
+    configuration_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -135,13 +136,20 @@ def _state_vector(value):
     return type(value) is tuple and len(value) == 4 and all(_finite(x) for x in value)
 
 
+def _method_manifest(method):
+    value = asdict(method)
+    if method.configuration_id is None:
+        del value["configuration_id"]
+    return value
+
+
 def _request(design, model, method, functional, horizon, seed, arm_id):
     paired = {"model_package_hash": model.package.package_hash,
               "initial_mean": model.initial_mean, "initial_covariance": model.initial_covariance,
               "origin": design.origin, "history_cutoff": design.history_cutoff,
               "horizon": horizon, "functional": asdict(functional), "seed": seed}
     coupling_id = "paired-" + content_hash(paired)
-    request_id = "cell-" + content_hash({"paired": paired, "method": asdict(method), "arm": arm_id})
+    request_id = "cell-" + content_hash({"paired": paired, "method": _method_manifest(method), "arm": arm_id})
     return PropagationRequest(request_id, model.package.package_hash, model.initial_mean, model.initial_covariance,
         design.origin, design.history_cutoff, (horizon,), functional.kind, seed, coupling_id, arm_id,
         steps=method.steps, samples=method.samples, chunk_size=method.chunk_size, normal=functional.normal,
@@ -202,13 +210,23 @@ def freeze_design(design):
             or len(set(design.seeds)) != len(design.seeds)
             or len(set(design.primary_metrics)) != len(design.primary_metrics)):
         raise DataValidationError("duplicate or invalid horizon/seed/metric axis")
-    for values in ((m.family_id for m in design.models), (m.method for m in design.methods),
+    for values in ((m.family_id for m in design.models),
                    (f.functional_id for f in design.functionals)):
         values = tuple(values)
         for value in values:
             identifier(value)
         if len(set(values)) != len(values):
-            raise DataValidationError("duplicate family/method/functional axis; declare configuration once")
+            raise DataValidationError("duplicate family/functional axis")
+    configured = any(method.configuration_id is not None for method in design.methods)
+    identities = set()
+    for method in design.methods:
+        identifier(method.method)
+        if configured:
+            identifier(method.configuration_id)
+        identity = (method.method, method.configuration_id)
+        if identity in identities:
+            raise DataValidationError("duplicate method/configuration axis; declare configuration once")
+        identities.add(identity)
     # Bound primitive shape/type before any dataclass copying, package evaluation
     # or numeric allocation. PSD/symmetry and per-method work checks still run
     # below; these are the existing request constraints, not new numeric policy.
@@ -261,6 +279,16 @@ def freeze_design(design):
                          for method in design.methods for f in design.functionals}
     if set(arms) != expected_families:
         raise DataValidationError("arm bindings must cover exactly the model/method/objective families")
+    # Different labels cannot disguise duplicate numerical configurations as
+    # independent cells. All primitive and mixture settings checks precede copy.
+    numerical_configs = set()
+    for method in design.methods:
+        numerical = _method_manifest(method)
+        numerical.pop("configuration_id", None)
+        key = content_hash(numerical)
+        if key in numerical_configs:
+            raise DataValidationError("duplicate numerical configuration under different labels")
+        numerical_configs.add(key)
     # Validate each model and each small configuration combination first. No
     # estimator is evaluated, and no horizon/seed matrix is materialized here.
     from inference.affine_oracle import _covariance
@@ -321,6 +349,9 @@ def freeze_design(design):
                                  "closed": functional.closed},
                       "initialization": content_hash({"mean": model.initial_mean, "covariance": model.initial_covariance}),
                       "prediction_origin": design.origin}
+        if configured:
+            row["configuration_id"] = method.configuration_id
+            dimensions["numerical_configuration"] = method.configuration_id
         row["cell"] = {"arm_id": arm_id, "block_id": model.family_id, "seed": seed, "horizon": horizon,
                        "visibility": "synthetic", "frozen_dynamics": model.package.manifest(),
                        "propagation_request": json.loads(_encode(asdict(request))), "resource_class": "cpu",
@@ -349,7 +380,7 @@ def freeze_design(design):
         "qualification": "preparation-only-not-scientific", "expected_cells": count,
         "axis_manifest": {"models": [{"family_id": model.family_id, "package": model.package.manifest(),
             "initial_mean": model.initial_mean, "initial_covariance": model.initial_covariance} for model in design.models],
-            "methods": [asdict(method) for method in design.methods], "functionals": [asdict(f) for f in design.functionals],
+            "methods": [_method_manifest(method) for method in design.methods], "functionals": [asdict(f) for f in design.functionals],
             "horizons": design.horizons, "seeds": design.seeds, "origin": design.origin, "history_cutoff": design.history_cutoff,
             "state_names": ("x", "y", "vx", "vy"), "time_unit": "s", "coordinate_system": "local-cartesian"},
         "arms": [{**asdict(arm), "budget_seconds": 86400} for arm in design.arms], "matrix": rows}
