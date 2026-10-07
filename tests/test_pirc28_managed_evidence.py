@@ -45,7 +45,9 @@ def test_real_funded_collection_recomputes_and_binds_prefix_without_promotion(co
     assert proof['authorization_hash'] == digest(grant)
     assert proof['selection_scores_recomputed'] is proof['prefix_inputs_replayed'] is True
     assert proof['prefix_diagnostics_consistent'] is proof['authorized_native_source_and_cost_bound'] is True
-    for name in ('full_generated_input_hashes_verified', 'reference_sampling_verified',
+    assert proof['full_generated_input_hashes_verified'] is True
+    assert len(proof['generated_input_replay_hash']) == 64
+    for name in ('reference_sampling_verified',
                  'managed_evidence_bound', 'qualified_identifiability', 'real_data_authorized'):
         assert proof[name] is False
     assert value['report']['state'] == 'FIXTURE_ONLY'
@@ -60,14 +62,15 @@ def test_owner_never_repeats_numerical_replay(computed_prefix, monkeypatch):
     store, *_, value, request, _ = computed_prefix
     def forbidden(*args, **kwargs):
         pytest.fail('owner performed numerical replay outside qualification worker')
-    for name in ('validate_selected_fit', 'replay_test_prefix', 'validate_prefix_numbers'):
+    for name in ('validate_selected_fit', 'replay_test_prefix', 'validate_prefix_numbers', 'validate_generated_inputs'):
         monkeypatch.setattr(managed_evidence, name, forbidden)
     validate_computation_result(store, value, request)
 
 
 @pytest.mark.parametrize('damage', ['missing-list', 'missing-hash', 'missing-cell', 'duplicate-cell',
     'state', 'recipe', 'attempt', 'cost', 'admission', 'grant', 'model', 'prefix', 'report', 'seed',
-    'sampling', 'qualified', 'native-source', 'selection', 'prefix-type', 'unknown', 'runtime-root'])
+    'sampling', 'qualified', 'native-source', 'selection', 'prefix-type', 'unknown', 'runtime-root',
+    'generated-hash', 'generated-type'])
 def test_owner_refuses_rehashed_prefix_roster_or_identity_forgery(computed_prefix, damage):
     store, *_, original, request, _ = computed_prefix
     value = copy.deepcopy(original)
@@ -92,8 +95,9 @@ def test_owner_refuses_rehashed_prefix_roster_or_identity_forgery(computed_prefi
             'model': 'selected_model_hash', 'prefix': 'observation_prefix_hash', 'report': 'reference_report_hash',
             'seed': 'reference_seed', 'sampling': 'reference_sampling_verified', 'qualified': 'qualified_identifiability',
             'native-source': 'authorized_native_source_and_cost_bound', 'selection': 'selection_scores_recomputed',
-            'prefix-type': 'prefix_inputs_replayed'}[damage]
-        proof[field] = 0 if damage == 'prefix-type' else False if damage in ('native-source', 'selection') \
+            'prefix-type': 'prefix_inputs_replayed', 'generated-hash': 'generated_input_replay_hash',
+            'generated-type': 'full_generated_input_hashes_verified'}[damage]
+        proof[field] = 0 if damage in ('prefix-type', 'generated-type') else False if damage in ('native-source', 'selection') \
             else True if damage in ('sampling', 'qualified') else 0 if damage == 'seed' else 'forged'
     if damage != 'missing-hash':
         report['cell_approximation_evidence_hash'] = digest(report.get('cell_approximation_evidence'))

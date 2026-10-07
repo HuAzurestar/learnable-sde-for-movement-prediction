@@ -16,6 +16,7 @@ from .approximation import ApproximationSpec, RECIPE_SCHEMA
 from .approximation_evidence import reference_seed, replay_test_prefix, validate_prefix_numbers
 from .pipeline import validate_recipe
 from .selection_evidence import validate_selected_fit
+from .input_evidence import expected_input_receipt, validate_generated_inputs
 
 SCHEMA = 'pirc28-authorized-prefix-evidence-v1'
 
@@ -95,6 +96,8 @@ def _receipt(store, study, cell, attempt, metadata, grant, history, projection, 
         'recipe_cell_hash': fit['recipe_hash'], 'selection_projection_hash': digest(view),
         'selection_input_hash': fit['generated_inputs'][1]['observations_hash'],
         'selected_model_hash': digest(fit['model']),
+        'generated_input_replay_hash': digest(expected_input_receipt(
+            fit['generated_inputs'], study['switching_recipe'], cell['seed'], k=2)),
         'reference_report_hash': None if report is None else digest(report),
         'observation_prefix_hash': None if report is None else report['observation_prefix_hash'],
         'reference_seed': reference_seed(study['switching_recipe'], cell['seed']),
@@ -102,7 +105,7 @@ def _receipt(store, study, cell, attempt, metadata, grant, history, projection, 
         'selection_scores_recomputed': True, 'prefix_inputs_replayed': report is not None,
         'prefix_diagnostics_consistent': report is not None,
         'authorized_native_source_and_cost_bound': True,
-        'full_generated_input_hashes_verified': False, 'reference_sampling_verified': False,
+        'full_generated_input_hashes_verified': True, 'reference_sampling_verified': False,
         'managed_evidence_bound': False, 'qualified_identifiability': False, 'real_data_authorized': False}
 
 
@@ -127,6 +130,8 @@ def check_cell_prefix(store, study, cell, attempt, result, metadata, grant, hist
     if projection is None:
         return None
     fit, report, _ = projection
+    validate_generated_inputs(fit['generated_inputs'], study['switching_recipe'], cell['seed'], k=2,
+                              check_budget=check_budget)
     model, _ = validate_selected_fit(fit, study['switching_recipe'], cell['seed'], k=2,
                                      check_budget=check_budget)
     if report is not None:
@@ -153,6 +158,7 @@ def validate_collected_prefix_bindings(store, studies, report, authorizations, m
     claimed = report.get('cell_approximation_evidence')
     _require(type(claimed) is list and report.get('cell_approximation_evidence_hash') == digest(claimed),
              'complete prefix evidence roster/hash missing')
+    study_hashes = {study['study_id']: digest(study) for study in studies}
     events_by_attempt, by_run = {}, {}
     for event in store.events():
         identifier = event['payload'].get('attempt_id')
@@ -167,7 +173,7 @@ def validate_collected_prefix_bindings(store, studies, report, authorizations, m
     for _, _, k, study, cell in cells:
         if k != 2 or study['switching_recipe']['schema_version'] != RECIPE_SCHEMA:
             continue
-        related = by_run.get(_run_id(study, cell), [])
+        related = by_run.get(_run_id(study, cell, study_hashes[study['study_id']]), [])
         history = _cost_history(store, study, cell, related, events_by_attempt)
         # Match collector order: every failed reference artifact, then success.
         ordered = [item for item in related if item['state'] == 'FAILED' and item.get('artifact_id')]

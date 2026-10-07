@@ -877,10 +877,15 @@ python -m pytest tests/test_pirc28_reference_checkpoint.py -q
 ## Authorized prefix collection and independent owner binding
 
 The qualification worker now independently recomputes every V2 K2 source
-artifact's selected-fit scores and held-out prefix diagnostics after the actual
+artifact's complete generated inputs, selected-fit scores and held-out prefix diagnostics after the actual
 evaluate-purpose read, canonical byte/hash checks and native reuse/failure
-verification. It replays only selection inputs and test prefixes, never future
-observations as filtering inputs or another particle reference. Failed prefix
+verification. Complete train/selection/test role streams are regenerated
+sequentially from the original cell seed, and both observation and evaluator-only
+truth hashes are recomputed from returned arrays rather than trusting the
+generator manifest. Complete test futures and truth are used only for identity
+hashes, freed after each role, and never become fitting/filtering/reference inputs.
+Selection and prefix checks retain their separate observation-only boundaries;
+no additional particle reference is executed. Failed prefix
 reports are checked without dropping failed batches; typed numerical exceptions
 with no report keep `NO_REFERENCE_REPORT`, not invented precision or success.
 
@@ -906,13 +911,19 @@ bootstrap/read/result quotas and original K2 shared budget still apply. These
 numeric declarations are not measured RSS or full interpreter/native heap proofs.
 
 `authorized_native_source_and_cost_bound` records this specific engineering
-provenance; it is not scientific qualification. Full generated training/test
-hash replay and independent reference-sampling verification remain false, along
-with `managed_evidence_bound`, `qualified_identifiability` and `real_data_authorized`.
+provenance; it is not scientific qualification. The funded collector's
+`full_generated_input_hashes_verified` now records complete deterministic role
+hash replay; its `generated_input_replay_hash` binds the bounded expected receipt
+at the owner. Expected metadata alone is not a standalone execution proof. This
+uses the frozen generator, not an independent verification of its scientific
+model, and does not establish that training or reference sampling executed.
+Independent reference-sampling verification remains false, along with
+`managed_evidence_bound`, `qualified_identifiability` and `real_data_authorized`.
 Default/pilot/formal V2 execution and scientific withholding remain unchanged
 until the complete scientific execution/evidence path is verified. No scientific
 qualification group is passed by the disposable control stores.
 
 ```console
 python -m pytest tests/test_pirc28_managed_evidence.py -q
+python -m pytest tests/test_pirc28_input_evidence.py -q
 ```
