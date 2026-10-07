@@ -25,6 +25,7 @@ from experiments.pirc27.plugin import execution_inputs, propagation_resume_comma
 from infrastructure.research_store import ResearchError, digest
 from tests.research_admission_fixtures import admit_fixture
 from tests.test_path_qualification import policies, prepared
+from tests.path_paper_helpers import independent_reader, independent_aggregate, paper_validate
 
 
 def prepare_target(root, method, *, changes=None, target_changes=None):
@@ -132,6 +133,19 @@ def test_source_pass_does_not_promote_failed_current_sampling_or_ess(tmp_path, m
     validate_formal_path_result(receipt, spec, spec["cells"][0], result)
     bundle = export_evidence(store, spec["study_id"], grant)
     assert len(bundle["cells"]) == 1 and bundle["cells"][0]["result"]["forecast"]["current_output_qualification"] == "FAILED"
+    row = bundle["cells"][0]
+    assert independent_reader().validate_path_qualification(row["admission"], row) == "FAILED"
+    checked = paper_validate(tmp_path, bundle)
+    assert checked.returncode == 0, checked.stderr
+    verified = json.loads(checked.stdout)
+    assert verified["verified_path_cells"] == verified["current_failed_cells"] == 1
+    assert verified["current_passed_cells"] == 0
+    aggregated = independent_aggregate().aggregate(bundle)
+    assert aggregated["expected_cell_count"] == aggregated["successful_cell_count"] == 1
+    assert aggregated["comparison_eligible_cell_count"] == 0
+    assert aggregated["path_output_dispositions"] == {"FAILED": 1}
+    assert aggregated["arms"][0]["independent_n"] == 0
+    assert aggregated["arms"][0]["cost"]["charged_ms"] == bundle["cells"][0]["cost"]["charged_ms"]
 
 
 @pytest.mark.parametrize("fault", ["pointer", "borrowed", "policy", "duplicate", "metric", "artifact", "grant", "arm"])
