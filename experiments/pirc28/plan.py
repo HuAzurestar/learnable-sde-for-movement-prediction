@@ -226,7 +226,8 @@ def describe_plan(plan):
             len(qualification.replicate_ids), qualification.confidence)[0],
         'thresholds': qualification.thresholds, 'prepared_only': True, 'registered_studies': False,
         'approximation_spec_hash': digest(value['approximation_spec']),
-        'approximation_executor_implemented': False, 'approximation_resource_admitted': False,
+        'approximation_executor_implemented': True, 'approximation_resource_admitted': False,
+        'aggregate_release_implemented': True, 'native_release_evidence_bound': False,
         'reference_design_sanity': {'balanced_iid_nominal_half_width_benchmark':
             max(check['balanced_iid_nominal_half_width_benchmark'] for check in checks.values()),
             'maximum_core_tensor_elements': max(check['core_plan']['tensor_elements'] for check in checks.values()),

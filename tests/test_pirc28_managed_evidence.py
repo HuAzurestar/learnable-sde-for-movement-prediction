@@ -67,6 +67,32 @@ def test_owner_never_repeats_numerical_replay(computed_prefix, monkeypatch):
     validate_computation_result(store, value, request)
 
 
+@pytest.mark.parametrize('damage', ['approved-master', 'check-count', 'check-state', 'check-hash',
+                                  'lineage-hash', 'roster-hash', 'qualified-type'])
+def test_owner_refuses_rehashed_aggregate_qualification_forgery(computed_prefix, damage):
+    store, *_, original, request, _ = computed_prefix
+    value = copy.deepcopy(original)
+    approximation = value['report']['approximation_qualification']
+    if damage == 'approved-master':
+        approximation['approved_master_binding']['state'] = 'REGISTERED_MASTER_MATCHED'
+    elif damage == 'check-count':
+        approximation['selected_check_counts']['NUMERICAL_CHECKS_PASSED'] = 2048
+    elif damage == 'check-state':
+        approximation['cell_dispositions'][0]['check_state'] = 'NUMERICAL_CHECKS_PASSED'
+    elif damage == 'check-hash':
+        approximation['cell_dispositions'][0]['selected_check_hash'] = digest('borrowed-proof')
+    elif damage == 'lineage-hash':
+        approximation['complete_lineage_hash'] = digest('omit-failed-costs')
+    elif damage == 'roster-hash':
+        approximation['all_attempt_proof_roster_hash'] = digest('omit-missing-checks')
+    else:
+        approximation['qualified'] = 0
+    assert digest(approximation) != digest(original['report']['approximation_qualification'])
+    value['report_hash'] = digest(value['report'])
+    with pytest.raises(ResearchError, match='CONTRACT_MISMATCH'):
+        validate_computation_result(store, value, request)
+
+
 @pytest.mark.parametrize('damage', ['missing-list', 'missing-hash', 'missing-cell', 'duplicate-cell',
     'state', 'recipe', 'attempt', 'cost', 'admission', 'grant', 'model', 'prefix', 'report', 'seed',
     'sampling', 'qualified', 'native-source', 'selection', 'prefix-type', 'unknown', 'runtime-root',

@@ -205,6 +205,7 @@ def validate_collected_prefix_bindings(store, studies, report, authorizations, m
     from .evidence import (MAXIMUM_RESULT_BYTES, _cost_history, _run_id,
         _success_row, _non_success_row, _initialization_diagnostics, _snapshot_balances)
     from .qualification import IdentifiabilitySpec
+    from .failure_disclosure import disclose_failure
     from .runtime import switching_plugin
     claimed = report.get('cell_approximation_evidence')
     _require(type(claimed) is list and report.get('cell_approximation_evidence_hash') == digest(claimed),
@@ -269,7 +270,8 @@ def validate_collected_prefix_bindings(store, studies, report, authorizations, m
             else:
                 verified_failure(store, attempt, study, cell, plugin)
                 failures[attempt['attempt_id']] = result['failure']
-                next(value for value in history if value['attempt_id'] == attempt['attempt_id'])['failure'] = result['failure']
+                next(value for value in history if value['attempt_id'] == attempt['attempt_id'])['failure'] = disclose_failure(
+                    result, study, artifact_id)
             if attempt['state'] == 'SUCCEEDED':
                 success_result = result
             projection = _projection(result, study, cell)
@@ -286,3 +288,4 @@ def validate_collected_prefix_bindings(store, studies, report, authorizations, m
     _require(digest(report.get('lineage')) == digest(lineage), 'owner complete source/failure/cost lineage differs')
     _require(report.get('read_bytes') == consumed and type(report.get('read_bytes')) is int,
              'owner complete source read byte count differs')
+    return {'rows': rows, 'lineage': lineage, 'proofs': expected}

@@ -19,7 +19,7 @@ from .evidence import (MAXIMUM_RESULT_BYTES, _cost_history, source_attempts_hash
                        source_run_ids, study_definition_binding)
 from .qualification import (IdentifiabilitySpec, METRICS, qualification_disposition,
                             disposition_projection)
-from .approximation import pending_qualification, withhold_scientific_pass
+from .scientific_release import approved_master_binding, aggregate_approximation, apply_disposition
 
 MAXIMUM_REQUEST_BYTES = 4*1024*1024
 MAXIMUM_BOOTSTRAP_ELEMENTS = 50_000_000
@@ -119,16 +119,12 @@ def validate_computation_result(store, value, request):
             or report['gate'].get('spec_hash') != digest(frozen['definition'])
             or report['gate'].get('real_data_authorized') is not False
             or report['state'] != ('FIXTURE_ONLY' if frozen['source_stage'] == 'fixture' else report['gate'].get('state'))
-            or report['qualified_identifiability'] is not False
             or (report['state'] == 'FIXTURE_ONLY' and not frozen['allow_fixture'])):
         raise ResearchError('CONTRACT_MISMATCH', 'qualification gate/fixture disposition differs')
     studies, _ = _sources(store, frozen)
     if computation_plan(definition, frozen['resource_plan']['maximum_total_source_bytes'],
             source_recipes=[study['switching_recipe'] for study in studies]) != frozen['resource_plan']:
         raise ResearchError('RESOURCE_PLAN_REJECTED', 'owner qualification replay allocation differs')
-    if (digest(report.get('approximation_qualification')) != digest(pending_qualification(studies))
-            or (frozen['source_stage'] != 'fixture' and report['state'] == 'PASSED')):
-        raise ResearchError('CONTRACT_MISMATCH', 'managed approximation proof is missing; scientific promotion refused')
     reference = study_definition_binding(store, studies, definition)
     if ('study_definition_hash' not in report
             or report['study_definition_hash'] != reference
@@ -137,16 +133,23 @@ def validate_computation_result(store, value, request):
             or (report['qualified_identifiability'] and reference is None)):
         raise ResearchError('CONTRACT_MISMATCH', 'qualification master-definition binding differs')
     from .managed_evidence import validate_collected_prefix_bindings
-    validate_collected_prefix_bindings(store, studies, report, frozen['authorizations'],
-                                      frozen['resource_plan']['maximum_total_source_bytes'])
-    expected_gate = qualification_disposition(definition, report['rows'], report['aggregate_hash'])
+    canonical = validate_collected_prefix_bindings(store, studies, report, frozen['authorizations'],
+                                                 frozen['resource_plan']['maximum_total_source_bytes'])
+    approved = approved_master_binding(store, studies, reference)
+    expected_approximation = aggregate_approximation(studies, canonical['rows'], canonical['lineage'],
+        canonical['proofs'], approved, fixture=frozen['source_stage'] == 'fixture')
+    if digest(report.get('approximation_qualification')) != digest(expected_approximation):
+        raise ResearchError('CONTRACT_MISMATCH', 'owner aggregate approximation disposition differs')
+    expected_gate = qualification_disposition(definition, canonical['rows'], report['aggregate_hash'])
     fixture = frozen['source_stage'] == 'fixture'
     if not fixture and expected_gate['state'] == 'PASSED' and reference is None:
         expected_gate['state'] = 'NEEDS_PREREGISTRATION'
         expected_gate['missing_fields'].append('pirc28_study_definition_hash')
         if 'applicable_ranges' in expected_gate:
             expected_gate['applicable_scenarios'], expected_gate['applicable_ranges'] = [], []
-    withhold_scientific_pass(expected_gate, studies, fixture=fixture)
+    scientific = apply_disposition(expected_gate, expected_approximation, fixture=fixture)
+    if report['qualified_identifiability'] is not scientific:
+        raise ResearchError('CONTRACT_MISMATCH', 'owner scientific release disposition differs')
     if digest(disposition_projection(report['gate'])) != digest(expected_gate):
         raise ResearchError('CONTRACT_MISMATCH', 'owner deterministic qualification disposition differs')
     _final_clock(store, frozen)

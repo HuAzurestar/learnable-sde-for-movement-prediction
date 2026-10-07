@@ -1,8 +1,9 @@
 """Frozen approximation requirements, not numerical or managed proof.
 
-The diagnostic executor/evidence adapter is deliberately not implemented here.
-Consequently no current shared qualification may promote identifiability to
-scientific qualification. Legacy recipes remain useful software diagnostics.
+No diagnostic executor or source authority is implemented in this specification
+module. Its legacy pending helpers are not aggregate proof. Managed publication
+uses scientific_release after funded checks and independent canonical bindings;
+legacy recipes remain engineering diagnostics, never scientific authorization.
 """
 
 from dataclasses import dataclass, replace

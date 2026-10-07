@@ -20,7 +20,8 @@ from .pipeline import validate_recipe, validate_failed_fit
 from .failures import valid_numerical_diagnostic
 from models.switching import SwitchingError
 from .qualification import METRICS, IdentifiabilitySpec, phase_manifest, qualify
-from .approximation import withhold_scientific_pass
+from .scientific_release import approved_master_binding, aggregate_approximation, apply_disposition
+from .failure_disclosure import disclose_failure
 from .runtime import PLUGIN_ID, switching_plugin
 from .synthetic import ScenarioSpec
 
@@ -485,7 +486,8 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
             if prefix is not None:
                 prefix_evidence.append(prefix)
             failures[attempt['attempt_id']] = result['failure']
-            next(value for value in history if value['attempt_id'] == attempt['attempt_id'])['failure'] = result['failure']
+            next(value for value in history if value['attempt_id'] == attempt['attempt_id'])['failure'] = disclose_failure(
+                result, study, artifact_id)
             disclosed.append((artifact_id, grant))
         successful = [attempt for attempt in related if attempt['state'] == 'SUCCEEDED']
         if len(successful) > 1:
@@ -526,9 +528,11 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
         report['missing_fields'].append('pirc28_study_definition_hash')
         if 'applicable_ranges' in report:
             report['applicable_scenarios'], report['applicable_ranges'] = [], []
-    approximation = withhold_scientific_pass(report, studies, fixture=fixture)
+    approved = approved_master_binding(store, studies, study_definition_hash)
+    approximation = aggregate_approximation(studies, rows, lineage, prefix_evidence, approved, fixture=fixture)
+    scientific = apply_disposition(report, approximation, fixture=fixture)
     if len(encode({'rows': rows, 'lineage': lineage, 'gate': report,
-                   'prefix_evidence': prefix_evidence})) > MAXIMUM_RESULT_BYTES:
+                   'prefix_evidence': prefix_evidence, 'approximation_qualification': approximation})) > MAXIMUM_RESULT_BYTES:
         raise ResearchError('RESOURCE_LIMIT', 'qualification aggregate exceeds its bounded byte quota')
     # Integrity reuse and interval computation occur after the actual read;
     # purpose grants must still be valid at this final disclosure boundary.
@@ -541,7 +545,6 @@ def collect_qualification(store, definition, study_ids, authorizations, *, check
             raise ResearchError('INDEX_STALE', 'source attempts changed during qualification')
     for study_id in study_ids:
         require_unexpired_disclosure(store, study_id, authorizations[study_id], 'evaluate')
-    scientific = False  # No implemented, managed approximation proof adapter yet.
     return {'schema_version': 'pirc28-shared-qualification-v1', 'store_id': store.store_id,
         'definition_hash': digest(definition.to_dict()), 'aggregate_hash': digest(rows), 'rows': rows,
         'lineage': lineage, 'gate': report, 'state': 'FIXTURE_ONLY' if fixture else report['state'],

@@ -122,6 +122,14 @@ def test_actual_funded_collector_binds_complete_k1_inputs_selection_boundary_and
         assert row['state'] == 'INFERENCE_INAPPLICABLE' and row['metrics'] is None
         assert any(history['failure']['stage'] == 'k1-boundary'
                    for lineage in report['lineage'] for history in lineage['attempts'] if 'failure' in history)
+        summary = next(history['failure'] for lineage in report['lineage']
+                       for history in lineage['attempts'] if 'failure' in history)
+        assert summary['schema_version'] == 'pirc28-bounded-failure-disclosure-v1'
+        assert summary['source_artifact_id'] == attempt['artifact_id']
+        assert summary['complete_failure_hash'] == digest(body)
+        assert summary['reports']['k1_boundary_checks']['report_hash'] == digest(body['k1_boundary_checks'])
+        assert summary['reports']['k1_boundary_checks']['paths'][0]['boundary'] == body['k1_boundary_checks']['paths'][0]['boundary']
+        assert summary['native_execution_hashes']['k1_boundary_execution'] == digest(body['k1_boundary_execution'])
     cost = store.manifest(outcome['receipt_id'])['cost']
     assert cost['arm_id'] == 'pirc28-k2' and cost['charged_ms'] > 0
     assert BudgetLedger(store).balance('pirc28-k2')['committed_ms'] == before+cost['charged_ms']
