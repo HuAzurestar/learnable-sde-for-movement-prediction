@@ -134,6 +134,32 @@ remains descriptive and never creates managed computation proof. Engineering
 exports do not qualify any method/model or permit research without the existing
 shared store and grants.
 
+Model scale and initial-law axes can likewise use `StudyModel.configuration_id`:
+all model entries must be explicitly labelled when any is labelled, and each
+`(family_id, configuration_id)` pair must be unique. Each entry still supplies
+its actual immutable package, mean and covariance; labels do not generate or
+rescale a model. Repeating the same package and numerically identical initial
+distribution under a new label is refused, including int/float/signed-zero
+initial-value aliases. This is not a theorem that different package hashes or
+labels imply statistically independent models or different physical laws.
+
+Rows bind the explicit `model_configuration` comparison stratum, while retaining
+the original model family as `block_id` and the original model/method/objective
+arm identity. Configurations, initializations and seeds are **not independent
+blocks** and cannot create a new 24-hour budget. Numerical-method strata remain
+separate. Unlabelled legacy manifests and request/coupling identities are
+unchanged; all missing/refused rows and matrix/byte/work limits are preserved.
+Current packages still have exactly four physical states; length/diffusion scale
+variants or reversible auxiliary variables do not implement arbitrary physical
+dimensions. No compilation initializes a research root, creates an authorization,
+launches a worker or changes scientific qualification.
+
+`tests/test_propagation_model_configuration_axis.py` checks same-family affine
+and nonlinear scale/initial-distribution matrices with numerical configurations,
+original block/arm identity, legacy shapes, bounded label/duplicate/cell-cap
+refusals, closed-arm non-reset and actual authorized missing/refused exports
+through the independent paired Paper CLI with zero successful independent blocks.
+
 `tests/test_propagation_study_design.py` covers immutability, deterministic content
 hashing, exact owner preflight compatibility, paired inputs, stable budget arms,
 cap-before-expansion, invalid metadata/configuration, retained missing methods,

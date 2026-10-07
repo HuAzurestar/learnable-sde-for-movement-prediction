@@ -34,6 +34,7 @@ class StudyModel:
     package: FrozenDynamicsPackage | FrozenNonlinearPackage
     initial_mean: tuple[float, ...]
     initial_covariance: tuple[tuple[float, ...], ...]
+    configuration_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -143,6 +144,14 @@ def _method_manifest(method):
     return value
 
 
+def _model_manifest(model):
+    value = {"family_id": model.family_id, "package": model.package.manifest(),
+             "initial_mean": model.initial_mean, "initial_covariance": model.initial_covariance}
+    if model.configuration_id is not None:
+        value["configuration_id"] = model.configuration_id
+    return value
+
+
 def _request(design, model, method, functional, horizon, seed, arm_id):
     paired = {"model_package_hash": model.package.package_hash,
               "initial_mean": model.initial_mean, "initial_covariance": model.initial_covariance,
@@ -210,13 +219,21 @@ def freeze_design(design):
             or len(set(design.seeds)) != len(design.seeds)
             or len(set(design.primary_metrics)) != len(design.primary_metrics)):
         raise DataValidationError("duplicate or invalid horizon/seed/metric axis")
-    for values in ((m.family_id for m in design.models),
-                   (f.functional_id for f in design.functionals)):
-        values = tuple(values)
-        for value in values:
-            identifier(value)
-        if len(set(values)) != len(values):
-            raise DataValidationError("duplicate family/functional axis")
+    functional_ids = tuple(f.functional_id for f in design.functionals)
+    for value in functional_ids:
+        identifier(value)
+    if len(set(functional_ids)) != len(functional_ids):
+        raise DataValidationError("duplicate family/functional axis")
+    configured_models = any(model.configuration_id is not None for model in design.models)
+    model_identities = set()
+    for model in design.models:
+        identifier(model.family_id)
+        if configured_models:
+            identifier(model.configuration_id)
+        identity = (model.family_id, model.configuration_id)
+        if identity in model_identities:
+            raise DataValidationError("duplicate model family/configuration axis; declare configuration once")
+        model_identities.add(identity)
     configured = any(method.configuration_id is not None for method in design.methods)
     identities = set()
     for method in design.methods:
@@ -295,12 +312,21 @@ def freeze_design(design):
     from inference.affine_oracle import _covariance
     import numpy as np
     plugins = {}
+    model_configs = []
     for model in design.models:
         validator = validate_nonlinear_input if isinstance(model.package, FrozenNonlinearPackage) else validate_oracle_input
         validator(model.package, expected_package_hash=model.package.package_hash)
         covariance = _covariance(model.initial_covariance, "frozen initial covariance").numpy()
         if np.linalg.eigvalsh(covariance).min() < 0:
             raise DataValidationError("initial covariance requires projection; design refuses it")
+        # Labels are comparison strata, not extra independent samples. Compare
+        # bounded validated inputs numerically so initial scalar aliases cannot
+        # disguise repeated configurations of the exact same frozen package.
+        model_config = (model.family_id, model.package.package_hash,
+                        model.initial_mean, model.initial_covariance)
+        if model_config in model_configs:
+            raise DataValidationError("duplicate model configuration under different labels")
+        model_configs.append(model_config)
         for method, functional in product(design.methods, design.functionals):
             arm_id = arms[(model.family_id, method.method, functional.kind)]
             request = _request(design, model, method, functional, design.horizons[0], design.seeds[0], arm_id)
@@ -353,6 +379,9 @@ def freeze_design(design):
         if configured:
             row["configuration_id"] = method.configuration_id
             dimensions["numerical_configuration"] = method.configuration_id
+        if configured_models:
+            row["model_configuration_id"] = model.configuration_id
+            dimensions["model_configuration"] = model.configuration_id
         row["cell"] = {"arm_id": arm_id, "block_id": model.family_id, "seed": seed, "horizon": horizon,
                        "visibility": "synthetic", "frozen_dynamics": model.package.manifest(),
                        "propagation_request": json.loads(_encode(asdict(request))), "resource_class": "cpu",
@@ -379,8 +408,7 @@ def freeze_design(design):
         "code_hash": code_hash(), **{key: getattr(design, key) for key in
             ("protocol_hash", "data_hash", "feature_hash", "selection_hash", "stopping_rule", "primary_metrics")},
         "qualification": "preparation-only-not-scientific", "expected_cells": count,
-        "axis_manifest": {"models": [{"family_id": model.family_id, "package": model.package.manifest(),
-            "initial_mean": model.initial_mean, "initial_covariance": model.initial_covariance} for model in design.models],
+        "axis_manifest": {"models": [_model_manifest(model) for model in design.models],
             "methods": [_method_manifest(method) for method in design.methods], "functionals": [asdict(f) for f in design.functionals],
             "horizons": design.horizons, "seeds": design.seeds, "origin": design.origin, "history_cutoff": design.history_cutoff,
             "state_names": ("x", "y", "vx", "vy"), "time_unit": "s", "coordinate_system": "local-cartesian"},
