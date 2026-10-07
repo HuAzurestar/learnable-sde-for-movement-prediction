@@ -105,7 +105,13 @@ def recipe_allocation(recipe, k):
             inference, scenario.times, recipe['forecast_origin_index'], recipe['test_paths'],
             max(model.rate_bounds[1] for model in models), d)['core_plan']
     reference_elements = core['tensor_elements'] if core is not None else 0
-    pool_elements = source_data+fit_metadata+forecast_retained+reference_elements
+    boundary = None
+    if recipe['schema_version'] == RECIPE_SCHEMA and k == 1:
+        from .k1_boundary import boundary_plan
+        boundary = boundary_plan(inference, scenario.times, recipe['forecast_origin_index'],
+                                 recipe['test_paths'], d)
+    boundary_elements = boundary['tensor_elements'] if boundary is not None else 0
+    pool_elements = source_data+fit_metadata+forecast_retained+reference_elements+boundary_elements
     inputs = {'observations': source_paths*n, 'workspace_vectors': (pool_elements+3)//4, 'state_dim': 4}
     fit_elements = 24*config['components']*steps*k*k*16
     forecast_elements = paths*steps*4
@@ -113,6 +119,7 @@ def recipe_allocation(recipe, k):
     return {'schema_version': 'pirc28-recipe-allocation-v1', 'config': config, 'inputs': inputs,
         'source_data_elements': source_data, 'fit_metadata_elements': fit_metadata,
         'retained_forecast_elements': forecast_retained, 'reference_core_plan': core,
+        'k1_boundary_plan': boundary, 'k1_boundary_elements': boundary_elements,
         'reference_elements': reference_elements, 'padded_pool_elements': 4*inputs['workspace_vectors'],
         'fit_workspace_elements': fit_elements, 'forecast_workspace_elements': forecast_elements,
         'combined_tensor_elements': elements, 'combined_tensor_bytes': elements*8,

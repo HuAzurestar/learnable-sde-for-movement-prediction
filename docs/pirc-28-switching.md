@@ -1052,6 +1052,19 @@ K1 fitting remains its original analytic affine path; independently qualified
 K1 input/limit evidence and aggregate scientific release remain open. No extra
 K1 MC sampler allocation is introduced outside its registered resource plan.
 
+The standalone `k1_boundary` diagnostic now compares every held-out prefix path
+against the one-mode conditional-affine Kalman limit at the frozen tolerances.
+Its independent verifier uses a Cholesky-based update rather than the producer's
+update helper; neither path samples Monte Carlo particles or reads future/truth
+values. It shares the model's transition primitive, so it is not an independent
+proof of the transition implementation. Reports bind the selected model, prefix,
+prior, inference and specification and retain an inapplicable boundary outcome.
+All authority flags remain false. V2 K1 recipe resources add its filter workspace,
+retained report and owner-copy envelope to existing source/fit/forecast allocations;
+legacy resources and K2 reference allocations are unchanged. The actual K1 worker
+artifact/failure lifecycle and funded collector/owner adapter are still pending:
+this standalone receipt must never substitute for original native provenance.
+
 ```console
 python -m pytest tests/test_pirc28_source_preflight.py -q
 ```

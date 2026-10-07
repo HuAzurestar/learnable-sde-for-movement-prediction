@@ -38,7 +38,7 @@ def test_full_master_registered_pool_covers_additive_fit_forecast_source_and_ref
             assert allocation['resource_admitted'] is allocation['managed_executor_implemented'] is False
             assert allocation['combination_rule'] == 'additive-concurrent-envelope; no-phase-reuse'
             raw = sum(allocation[name] for name in ('source_data_elements', 'fit_metadata_elements',
-                'retained_forecast_elements', 'reference_elements'))
+                'retained_forecast_elements', 'reference_elements', 'k1_boundary_elements'))
             assert 0 <= allocation['padded_pool_elements']-raw <= 3
             assert registered['tensor_elements'] == (allocation['fit_workspace_elements']
                 +allocation['forecast_workspace_elements']+allocation['padded_pool_elements'])
@@ -50,6 +50,8 @@ def test_full_master_registered_pool_covers_additive_fit_forecast_source_and_ref
                 assert core['owner_trace_copy_elements'] == 2*core['completed_batch_trace_elements']
             else:
                 assert allocation['reference_elements'] == 0 and allocation['reference_core_plan'] is None
+                assert allocation['k1_boundary_elements'] == allocation['k1_boundary_plan']['tensor_elements'] > 0
+                assert allocation['k1_boundary_plan']['reference_particles'] == 0
             assert registered['limits'] == {**dict(GLOBAL_LIMITS), 'matrix_cells': 10000,
                                            'result_bytes': 64*1024*1024}
             maximum = max(maximum, registered['tensor_elements'])
