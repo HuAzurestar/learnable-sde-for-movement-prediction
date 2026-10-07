@@ -17,6 +17,7 @@ from .approximation_evidence import reference_seed, replay_test_prefix, validate
 from .pipeline import validate_recipe
 from .selection_evidence import validate_selected_fit
 from .input_evidence import expected_input_receipt, validate_generated_inputs
+from .reference_execution import validate_reference_execution
 
 SCHEMA = 'pirc28-authorized-prefix-evidence-v1'
 
@@ -38,7 +39,7 @@ def _projection(result, study, cell):
         report = fit.get('approximation_checks')
         _require(type(report) is dict and report.get('state') == 'NUMERICAL_CHECKS_PASSED',
                  'successful V2 K2 artifact lacks complete passed prefix report')
-    elif result['status'] == 'FAILED' and result.get('source_schema') == 'pirc28-synthetic-failure-v2':
+    elif result['status'] == 'FAILED' and result.get('source_schema') in ('pirc28-synthetic-failure-v2', 'pirc28-synthetic-failure-v3'):
         from .evidence import validate_initialization_history
         body = result['failure']
         chosen = validate_initialization_history(study, cell, body, body['generated_inputs'])
@@ -46,6 +47,7 @@ def _projection(result, study, cell):
         fit = {name: body[name] for name in ('recipe_hash', 'generated_inputs', 'initializations', 'selection')}
         fit.update(model=chosen['model'], interpretation_level='synthetic-statistical-only',
                    qualified_identifiability=False)
+        fit['reference_execution'] = body.get('reference_execution')
         report = body['approximation_checks']
         _require(report is None or type(report) is dict and report.get('state') == 'INFERENCE_INAPPLICABLE',
                  'failed reference report disposition differs')
@@ -61,6 +63,8 @@ def _projection(result, study, cell):
 
 def _receipt(store, study, cell, attempt, metadata, grant, history, projection, native_events):
     fit, report, admission_hash = projection
+    execution = fit.get('reference_execution')
+    reference_complete = validate_reference_execution(execution, study, cell, attempt, fit['model'], report)
     _, _, inference, mean, covariance = validate_recipe(study['switching_recipe'], 2)
     view = {name: fit[name] for name in ('recipe_hash', 'model', 'selection', 'initializations', 'generated_inputs')}
     if report is not None:
@@ -105,7 +109,8 @@ def _receipt(store, study, cell, attempt, metadata, grant, history, projection, 
         'selection_scores_recomputed': True, 'prefix_inputs_replayed': report is not None,
         'prefix_diagnostics_consistent': report is not None,
         'authorized_native_source_and_cost_bound': True,
-        'full_generated_input_hashes_verified': True, 'reference_sampling_verified': False,
+        'reference_execution_hash': digest(execution),
+        'full_generated_input_hashes_verified': True, 'reference_sampling_verified': reference_complete,
         'managed_evidence_bound': False, 'qualified_identifiability': False, 'real_data_authorized': False}
 
 

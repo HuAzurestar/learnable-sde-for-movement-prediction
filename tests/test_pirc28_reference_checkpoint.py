@@ -71,8 +71,14 @@ def test_reference_phase_checkpoint_reopened_resume_matches_actual_continuous_wo
     if resumed['state'] != 'SUCCEEDED':
         fail_with_logs(reopened, resumed)
     actual = json.loads(reopened.read_artifact(resumed['artifact_id'], purpose='evaluate', authorization=grant))
-    for field in ('metrics', 'fit', 'forecast'):
+    for field in ('metrics', 'forecast'):
         assert actual[field] == expected[field]
+    assert {key: value for key, value in actual['fit'].items() if key != 'reference_execution'} == {
+        key: value for key, value in expected['fit'].items() if key != 'reference_execution'}
+    native = actual['fit']['reference_execution']
+    assert native['complete'] is True and native['attempt_id'] == resumed['attempt_id']
+    assert native['runtime_binding'] == study['runtime_binding']
+    assert native != expected['fit']['reference_execution']
     report = actual['fit']['approximation_checks']
     assert report['reference_seed'] == reference_seed(study['switching_recipe'], cell['seed'])
     assert all(path['reference_batches'] == 8 for path in report['paths'])

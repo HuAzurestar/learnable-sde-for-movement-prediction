@@ -917,8 +917,10 @@ hash replay; its `generated_input_replay_hash` binds the bounded expected receip
 at the owner. Expected metadata alone is not a standalone execution proof. This
 uses the frozen generator, not an independent verification of its scientific
 model, and does not establish that training or reference sampling executed.
-Independent reference-sampling verification remains false, along with
-`managed_evidence_bound`, `qualified_identifiability` and `real_data_authorized`.
+Standalone input/prefix/selection receipts still keep reference sampling false.
+The authorized native completion binding described below can verify execution of
+the frozen sampler, not its statistical accuracy. `managed_evidence_bound`,
+`qualified_identifiability` and `real_data_authorized` remain false.
 Default/pilot/formal V2 execution and scientific withholding remain unchanged
 until the complete scientific execution/evidence path is verified. No scientific
 qualification group is passed by the disposable control stores.
@@ -926,4 +928,50 @@ qualification group is passed by the disposable control stores.
 ```console
 python -m pytest tests/test_pirc28_managed_evidence.py -q
 python -m pytest tests/test_pirc28_input_evidence.py -q
+```
+
+## Native fixed-reference batch completion binding
+
+The core optionally notifies a completion sink only after an actual fixed
+particle batch returns and its original budget poll succeeds. Each notification
+binds path/batch indices, original seed entropy and the exact published batch
+summary hash. Sink/deadline/unknown errors propagate; failed batches are never
+reported as complete or retried. Full fixed rosters remain mandatory, including
+all batches when the numerical precision/discrepancy gate fails. The declared
+core/source envelope adds the completion metadata and two copies under unchanged
+20-million-element, 512-MiB and result-byte ceilings; no particles, batches,
+thresholds, arms or cumulative budgets are changed.
+
+Only the canonical admitted fixture worker attaches `reference_execution` to
+successful selected fits and reference-stage failures. It binds original
+study/cell/code/runtime/attempt/run, recipe/model/specification, original reference
+seed, complete report and the actual ordered batch-completion roster. Reference
+failure artifacts use `pirc28-synthetic-failure-v3`; ordinary V1 failures and
+standalone V2 library failure diagnostics keep their prior contracts. A missing
+complete report retains only a bounded contiguous partial roster and cannot
+claim complete sampling. Numerical outputs of continuous/recovered attempts
+remain equal; their native receipts deliberately retain distinct run/attempt/
+store provenance. Recovery never reuses partial reference batches or budgets.
+
+The authorized collector and separate publication owner rederive expected
+metadata, bind exact complete batch hashes to the actual immutable source report,
+and require admission/command/current source, original native start/whole-tree
+stop/settlement and EVERY original-arm attempt cost. Neither owner checker runs
+another sampler. Metadata helper output alone, or a self-rehashed completion
+flag, is not proof of execution. Missing/reordered/duplicated batches, substituted
+seed/summary/model/report/code/attempt/store, unknown fields or bool/int changes
+refuse. `reference_execution_hash` records this source-bound evidence; only a
+complete verified native roster yields `reference_sampling_verified=true`.
+
+That flag means the frozen sampler executed, not independent verification of its
+scientific model, finite-particle bias, simultaneous coverage or statistical
+accuracy. Raw reports and standalone numerical receipts remain non-authority.
+Fixture artifacts cannot become scientific data by flipping a flag; all science
+and real-data authorization flags and default/pilot/formal V2 withholding remain
+closed. Preservation/binding of later post-reference cell failures and complete
+scientific owner/preregistration prerequisites still require verification before
+production release. No scientific qualification group is passed by these controls.
+
+```console
+python -m pytest tests/test_pirc28_reference_execution.py -q
 ```

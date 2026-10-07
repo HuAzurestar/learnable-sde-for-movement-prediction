@@ -46,9 +46,9 @@ def test_real_funded_collection_recomputes_and_binds_prefix_without_promotion(co
     assert proof['selection_scores_recomputed'] is proof['prefix_inputs_replayed'] is True
     assert proof['prefix_diagnostics_consistent'] is proof['authorized_native_source_and_cost_bound'] is True
     assert proof['full_generated_input_hashes_verified'] is True
+    assert proof['reference_sampling_verified'] is True
     assert len(proof['generated_input_replay_hash']) == 64
-    for name in ('reference_sampling_verified',
-                 'managed_evidence_bound', 'qualified_identifiability', 'real_data_authorized'):
+    for name in ('managed_evidence_bound', 'qualified_identifiability', 'real_data_authorized'):
         assert proof[name] is False
     assert value['report']['state'] == 'FIXTURE_ONLY'
     assert value['report']['qualified_identifiability'] is False
@@ -97,7 +97,7 @@ def test_owner_refuses_rehashed_prefix_roster_or_identity_forgery(computed_prefi
             'native-source': 'authorized_native_source_and_cost_bound', 'selection': 'selection_scores_recomputed',
             'prefix-type': 'prefix_inputs_replayed', 'generated-hash': 'generated_input_replay_hash',
             'generated-type': 'full_generated_input_hashes_verified'}[damage]
-        proof[field] = 0 if damage in ('prefix-type', 'generated-type') else False if damage in ('native-source', 'selection') \
+        proof[field] = 0 if damage in ('prefix-type', 'generated-type') else False if damage in ('native-source', 'selection', 'sampling') \
             else True if damage in ('sampling', 'qualified') else 0 if damage == 'seed' else 'forged'
     if damage != 'missing-hash':
         report['cell_approximation_evidence_hash'] = digest(report.get('cell_approximation_evidence'))

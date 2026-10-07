@@ -85,9 +85,10 @@ def schedule_plan(spec, inference, times, origin_index, paths, k, rate_upper, ob
     # do not quietly charge live report copies against a discarded phase.
     report_elements = 32+paths*(19+3*n*(k+4)+ref['independent_batches']*(n*(k+5)+6)+5*k)
     copy_elements = 2*report_elements
+    trace_elements = 32+16*paths*ref['independent_batches']
     elements = (max(coarse_steps, fine['maximum_prefix_substeps'])*k*k*16*24
         + ref['particles']*96 + paths*ref['independent_batches']*n*(k+5)
-        + paths*n*(k+4+16)*4 + paths*n*observation_dimension+report_elements+copy_elements)
+        + paths*n*(k+4+16)*4 + paths*n*observation_dimension+report_elements+copy_elements+3*trace_elements)
     segments = paths*ref['independent_batches']*ref['particles']*(n-1)*(ref['maximum_jumps_per_particle_interval']+1)
     if elements > MAXIMUM_ELEMENTS or segments > MAXIMUM_SEGMENTS:
         raise SwitchingError('RESOURCE_LIMIT', 'reference allocation or worst-case segment work exceeds the core quota')
@@ -96,6 +97,7 @@ def schedule_plan(spec, inference, times, origin_index, paths, k, rate_upper, ob
         'coarse_prefix_substeps': coarse_steps, 'fine_prefix_substeps': fine['maximum_prefix_substeps'],
         'reference_particles': ref['particles'], 'independent_batches': ref['independent_batches'],
         'retained_report_numeric_elements': report_elements, 'owner_report_copy_elements': copy_elements,
+        'completed_batch_trace_elements': trace_elements, 'owner_trace_copy_elements': 2*trace_elements,
         'reference_storage': 'sequential-path-and-batch; no-particle-or-jump-history',
         'resource_admitted': False, 'managed_executor_implemented': False}
 
@@ -363,11 +365,20 @@ def _known_mode_checks(prefix, model, means, covariances, inference, settings, p
     return results
 
 
+def _published_batch(value, index, seed, path):
+    return {'batch_index': index, 'seed_entropy': [seed, path, index],
+        'probabilities': value['probabilities'].tolist(), 'means': value['means'].tolist(),
+        'log_likelihood_trace': value['log_likelihood'].tolist(),
+        'minimum_ess_fraction': value['minimum_ess_fraction'], 'jump_count': value['jump_count']}
+
+
 def check_prefix_approximation(observations, model, probability, means, covariances, inference, spec,
-                               *, origin_index, seed, check_budget):
+                               *, origin_index, seed, check_budget, execution_callback=None):
     """Check every prefix path without fitting/selecting or granting qualification."""
     if not callable(check_budget) or type(seed) is not int or not 0 <= seed < 2**64:
         raise SwitchingError('CONTRACT_MISMATCH', 'explicit budget poll and unsigned reference seed required')
+    if execution_callback is not None and not callable(execution_callback):
+        raise SwitchingError('CONTRACT_MISMATCH', 'explicit callable batch completion sink required')
     prefix = observation_prefix(observations, origin_index)
     plan = numerical_plan(spec, inference, prefix, model)
     p, m, c = _initial(model, probability, means, covariances)
@@ -378,8 +389,15 @@ def check_prefix_approximation(observations, model, probability, means, covarian
         fine = _summary(filter_switching(prefix, model, p, m, c, spec.fine_inference(inference),
                                         path_index=path_index, check_budget=check_budget))
         halving = _errors(coarse, fine, len(prefix.times))
-        batches = [_reference_batch(prefix, model, p, m, c, settings['event_driven_reference'],
-            seed, batch, path_index, check_budget) for batch in range(settings['event_driven_reference']['independent_batches'])]
+        batches = []
+        for batch in range(settings['event_driven_reference']['independent_batches']):
+            value = _reference_batch(prefix, model, p, m, c, settings['event_driven_reference'],
+                                     seed, batch, path_index, check_budget)
+            check_budget()
+            if execution_callback is not None:
+                from .reference_execution import batch_completion_record
+                execution_callback(batch_completion_record(path_index, _published_batch(value, batch, seed, path_index)))
+            batches.append(value)
         reference = reference_summary(batches, settings['event_driven_reference']['confidence'], check_budget=check_budget)
         differences = _errors(coarse, reference, len(prefix.times))
         limits = settings['event_driven_reference']['thresholds']
@@ -403,11 +421,7 @@ def check_prefix_approximation(observations, model, probability, means, covarian
             'step_halving_errors': halving, 'reference_errors': differences, 'reference_half_widths': widths,
             'coarse_summary': _compact(coarse), 'fine_summary': _compact(fine),
             'reference_summary': _compact(reference),
-            'reference_batch_summaries': [{'batch_index': index,
-                'seed_entropy': [seed, path_index, index],
-                'probabilities': value['probabilities'].tolist(), 'means': value['means'].tolist(),
-                'log_likelihood_trace': value['log_likelihood'].tolist(),
-                'minimum_ess_fraction': value['minimum_ess_fraction'], 'jump_count': value['jump_count']}
+            'reference_batch_summaries': [_published_batch(value, index, seed, path_index)
                 for index, value in enumerate(batches)],
             'reference_minimum_ess_fraction': reference['minimum_ess_fraction'],
             'reference_jump_count': reference['total_jump_count'], 'reference_batches': len(batches),

@@ -154,7 +154,8 @@ def test_actual_managed_failed_reference_retains_original_cost_and_all_batches(t
     result = runner.run_cell(study['study_id'], digest(cell), budget=BudgetSpec(120))
     assert result['state'] == 'FAILED' and result.get('artifact_id') is not None
     payload = json.loads(store.read_artifact(result['artifact_id'], purpose='evaluate', authorization=grant))
-    assert payload['source_schema'] == 'pirc28-synthetic-failure-v2'
+    assert payload['source_schema'] == 'pirc28-synthetic-failure-v3'
+    assert payload['failure']['reference_execution']['complete'] is True
     assert 'metrics' not in payload and 'forecast' not in payload
     report = payload['failure']['approximation_checks']
     assert report['state'] == 'INFERENCE_INAPPLICABLE'

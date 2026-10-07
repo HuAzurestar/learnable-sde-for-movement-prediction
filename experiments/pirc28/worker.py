@@ -67,11 +67,12 @@ def main():
     engineering_reference = (spec['admission']['mode'] == 'fixture'
         and spec['switching_recipe']['schema_version'] == RECIPE_SCHEMA)
     reference_phase = 'not-started'
+    completed_batches = []
     def fixture_reference(*args, **kwargs):
         nonlocal reference_phase
         from .approximation_checks import check_prefix_approximation
         reference_phase = 'running; whole-fixed-reference-restart'
-        value = check_prefix_approximation(*args, **kwargs)
+        value = check_prefix_approximation(*args, execution_callback=completed_batches.append, **kwargs)
         reference_phase = 'computed; independently-checking'
         return value
     total = len(spec['switching_recipe']['initializations'][str(cell['fit_K'])]) * (spec['switching_recipe']['inference'].get('max_iterations', 30)+1) + 3
@@ -102,6 +103,13 @@ def main():
             check_budget=poll, progress_callback=progress, resume_state=saved,
             fixture_approximation_executor=fixture_reference if engineering_reference else None)
     except NumericalCellFailure as error:
+        if engineering_reference and error.diagnostic['stage'] == 'approximation':
+            from .evidence import validate_initialization_history
+            from .reference_execution import execution_record
+            diagnostic = error.diagnostic
+            chosen = validate_initialization_history(spec, cell, diagnostic, diagnostic['generated_inputs'])
+            diagnostic['reference_execution'] = execution_record(spec, cell, attempt, chosen['model'],
+                diagnostic['approximation_checks'], completed_batches)
         content = encode(failure_result(error.diagnostic, spec, cell, plugin))
         if len(content) > plan['maximum_result_bytes']:
             raise ResearchError('RESOURCE_LIMIT', 'failure exceeds its frozen byte quota')
@@ -109,6 +117,10 @@ def main():
         poll()
         atomic_write(Path(output), content)
         os._exit(86)
+    if engineering_reference and cell['fit_K'] == 2:
+        from .reference_execution import execution_record
+        payload['fit']['reference_execution'] = execution_record(spec, cell, attempt, payload['fit']['model'],
+            payload['fit']['approximation_checks'], completed_batches)
     units = payload.pop('metric_units')
     result = {'schema_version': 'pirc25-result-v1', 'status': 'SUCCEEDED',
         'spec_hash': digest(spec), 'cell_hash': digest(cell), 'protocol_hash': spec['protocol_hash'],

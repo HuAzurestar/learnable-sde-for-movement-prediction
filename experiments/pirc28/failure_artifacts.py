@@ -11,7 +11,8 @@ from .pipeline import validate_recipe
 
 
 def failure_result(diagnostic, spec, cell, plugin):
-    payload = {'failure': diagnostic, 'source_schema': 'pirc28-synthetic-failure-v2'
+    payload = {'failure': diagnostic, 'source_schema': 'pirc28-synthetic-failure-v3' if 'reference_execution' in diagnostic
+               else 'pirc28-synthetic-failure-v2'
                if 'approximation_checks' in diagnostic else 'pirc28-synthetic-failure-v1'}
     return {'schema_version': 'pirc25-failure-v1', 'status': 'FAILED', 'qualification': 'failed',
         'spec_hash': digest(spec), 'cell_hash': digest(cell), 'protocol_hash': spec['protocol_hash'],
@@ -28,11 +29,14 @@ def validate_cell_failure(result, spec, cell):
     keys = {'schema_version', 'stage', 'error_code', 'initializations', 'selection', 'cause',
             'recipe_hash', 'generated_inputs'}
     stages = {'generation', 'fit', 'selection', 'test-inference', 'forecast', 'evaluation'}
-    approximation = result.get('source_schema') == 'pirc28-synthetic-failure-v2'
+    native_reference = result.get('source_schema') == 'pirc28-synthetic-failure-v3'
+    approximation = native_reference or result.get('source_schema') == 'pirc28-synthetic-failure-v2'
     if approximation:
         keys |= {'approximation_checks'}
         stages |= {'approximation'}
-    if (result.get('source_schema') not in {'pirc28-synthetic-failure-v1', 'pirc28-synthetic-failure-v2'} or type(value) is not dict
+    if native_reference:
+        keys |= {'reference_execution'}
+    if (result.get('source_schema') not in {'pirc28-synthetic-failure-v1', 'pirc28-synthetic-failure-v2', 'pirc28-synthetic-failure-v3'} or type(value) is not dict
             or set(value) != keys or value['schema_version'] != 'pirc28-numerical-cell-failure-v1'
             or type(value['stage']) is not str or value['stage'] not in stages
             or type(value['error_code']) is not str or value['error_code'] not in NUMERICAL_CODES
@@ -93,6 +97,15 @@ def validate_cell_failure(result, spec, cell):
                     or report.get('initial_state_hash') != digest({'probability': probability.tolist(),
                         'means': means.tolist(), 'covariances': covariances.tolist()})):
                 raise ResearchError('CONTRACT_MISMATCH', 'failed prefix selected-model/prior identity differs')
+        if native_reference:
+            from .reference_execution import validate_reference_execution
+            record = value['reference_execution']
+            # Actual attempt/command/cost provenance is checked by reuse/collector;
+            # this handler binds the bounded source/report metadata only.
+            attempt = {'attempt_id': record.get('attempt_id'), 'run_id': record.get('run_id')} if type(record) is dict else {}
+            if chosen is None:
+                raise ResearchError('CONTRACT_MISMATCH', 'native reference has no selected fit')
+            validate_reference_execution(record, spec, cell, attempt, chosen['model'], report)
     cause = value['cause']
     if value['stage'] in {'fit', 'selection'}:
         if cause is not None or value['error_code'] != 'INFERENCE_INAPPLICABLE':
