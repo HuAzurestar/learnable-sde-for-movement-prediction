@@ -18,6 +18,7 @@ from .pipeline import validate_recipe
 from .selection_evidence import validate_selected_fit
 from .input_evidence import expected_input_receipt, validate_generated_inputs
 from .reference_execution import validate_reference_execution
+from .failures import POST_REFERENCE_STAGES
 
 SCHEMA = 'pirc28-authorized-prefix-evidence-v1'
 
@@ -49,7 +50,9 @@ def _projection(result, study, cell):
                    qualified_identifiability=False)
         fit['reference_execution'] = body.get('reference_execution')
         report = body['approximation_checks']
-        _require(report is None or type(report) is dict and report.get('state') == 'INFERENCE_INAPPLICABLE',
+        post_reference = body['stage'] in POST_REFERENCE_STAGES
+        expected_state = 'NUMERICAL_CHECKS_PASSED' if post_reference else 'INFERENCE_INAPPLICABLE'
+        _require(not post_reference and report is None or type(report) is dict and report.get('state') == expected_state,
                  'failed reference report disposition differs')
     else:
         return None

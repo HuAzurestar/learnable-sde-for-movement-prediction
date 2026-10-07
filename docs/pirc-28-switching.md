@@ -943,7 +943,7 @@ core/source envelope adds the completion metadata and two copies under unchanged
 thresholds, arms or cumulative budgets are changed.
 
 Only the canonical admitted fixture worker attaches `reference_execution` to
-successful selected fits and reference-stage failures. It binds original
+successful selected fits and reference-stage or later numerical failures. It binds original
 study/cell/code/runtime/attempt/run, recipe/model/specification, original reference
 seed, complete report and the actual ordered batch-completion roster. Reference
 failure artifacts use `pirc28-synthetic-failure-v3`; ordinary V1 failures and
@@ -968,10 +968,42 @@ scientific model, finite-particle bias, simultaneous coverage or statistical
 accuracy. Raw reports and standalone numerical receipts remain non-authority.
 Fixture artifacts cannot become scientific data by flipping a flag; all science
 and real-data authorization flags and default/pilot/formal V2 withholding remain
-closed. Preservation/binding of later post-reference cell failures and complete
-scientific owner/preregistration prerequisites still require verification before
+closed. Complete scientific owner/preregistration prerequisites still require verification before
 production release. No scientific qualification group is passed by these controls.
 
 ```console
 python -m pytest tests/test_pirc28_reference_execution.py -q
+```
+
+## Later cell failures retain the completed reference
+
+Once a prefix passes the independent numerical check, the pipeline retains that
+exact complete report if later test inference, forecasting or evaluation raises
+a typed numerical failure. It does not publish successful metrics/forecasts,
+change the cell's FAILED disposition, censor it from the planned denominator, or
+convert deadline/authority/unknown errors into numerical artifacts. A later
+failure requires a complete passed report; missing or inapplicable reports cannot
+be relabeled as completed earlier work. Reference-stage inapplicability still
+retains its failed report, and interrupted reference work remains partial.
+
+The worker uses the same native attachment handler for all such retained reports,
+binding the original selected model and actual ordered completion records. The
+authorized collector can recompute the passed prefix without pretending the
+whole cell succeeded. A pure library failure uses V2 diagnostic metadata without
+native authority; a genuine admitted native artifact uses V3. Standalone handler
+tests deliberately do not publish fabricated failed attempts or reclassify an
+actual success. Canonical source-byte/native provenance checks reject borrowed
+valid execution metadata attached to a fabricated failure.
+
+Native metadata now additionally requires the original 32-hex attempt identity,
+64-hex run/source hashes, bounded absolute runtime path and nonempty store ID.
+These typed checks do not replace binding to actual attempts, grants, command,
+native stop and every original cost. All scientific withholding and original
+budget/specification/resource ceilings remain unchanged. The full frozen matrix
+numeric maximum is now 19,719,396 elements, including 3,168 newly declared
+completion/copy elements, still below the unchanged 20,000,000-element ceiling;
+this is a declaration, not measured RSS or full interpreter heap proof.
+
+```console
+python -m pytest tests/test_pirc28_post_reference_failures.py tests/test_pirc28_resources.py -q
 ```

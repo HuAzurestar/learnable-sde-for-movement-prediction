@@ -6,7 +6,7 @@ import numpy as np
 
 from application.research_preregistration import hash_reference
 from infrastructure.research_store import ResearchError, digest
-from .failures import NUMERICAL_CODES, valid_numerical_diagnostic
+from .failures import NUMERICAL_CODES, valid_numerical_diagnostic, POST_REFERENCE_STAGES
 from .pipeline import validate_recipe
 
 
@@ -47,13 +47,17 @@ def validate_cell_failure(result, spec, cell):
     if approximation:
         from .approximation import ApproximationSpec, RECIPE_SCHEMA
         from .approximation_evidence import reference_seed
-        if (value['stage'] != 'approximation' or cell['fit_K'] != 2
+        post_reference = value['stage'] in POST_REFERENCE_STAGES
+        if (value['stage'] != 'approximation' and not post_reference or cell['fit_K'] != 2
                 or spec['switching_recipe']['schema_version'] != RECIPE_SCHEMA
                 or spec.get('admission', {}).get('mode') != 'fixture'):
             raise ResearchError('CONTRACT_MISMATCH', 'engineering approximation failure scope differs')
         report = value['approximation_checks']
+        if post_reference and (type(report) is not dict or report.get('state') != 'NUMERICAL_CHECKS_PASSED'):
+            raise ResearchError('CONTRACT_MISMATCH', 'later cell failure requires complete passed prefix evidence')
         if report is not None:
-            if (type(report) is not dict or report.get('state') != 'INFERENCE_INAPPLICABLE'
+            if (type(report) is not dict or report.get('state') != (
+                    'NUMERICAL_CHECKS_PASSED' if post_reference else 'INFERENCE_INAPPLICABLE')
                     or report.get('spec_hash') != ApproximationSpec.from_dict(spec['switching_recipe']['approximation_spec']).spec_hash
                     or report.get('reference_seed') != reference_seed(spec['switching_recipe'], cell['seed'])
                     or report.get('origin_index') != spec['switching_recipe']['forecast_origin_index']

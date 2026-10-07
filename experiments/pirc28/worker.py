@@ -103,13 +103,9 @@ def main():
             check_budget=poll, progress_callback=progress, resume_state=saved,
             fixture_approximation_executor=fixture_reference if engineering_reference else None)
     except NumericalCellFailure as error:
-        if engineering_reference and error.diagnostic['stage'] == 'approximation':
-            from .evidence import validate_initialization_history
-            from .reference_execution import execution_record
-            diagnostic = error.diagnostic
-            chosen = validate_initialization_history(spec, cell, diagnostic, diagnostic['generated_inputs'])
-            diagnostic['reference_execution'] = execution_record(spec, cell, attempt, chosen['model'],
-                diagnostic['approximation_checks'], completed_batches)
+        if engineering_reference and 'approximation_checks' in error.diagnostic:
+            from .reference_execution import attach_reference_failure
+            attach_reference_failure(error.diagnostic, spec, cell, attempt, completed_batches)
         content = encode(failure_result(error.diagnostic, spec, cell, plugin))
         if len(content) > plan['maximum_result_bytes']:
             raise ResearchError('RESOURCE_LIMIT', 'failure exceeds its frozen byte quota')

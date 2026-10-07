@@ -5,6 +5,7 @@ import numpy as np
 from models.switching import SwitchingError
 
 NUMERICAL_CODES = frozenset({'INFERENCE_INAPPLICABLE', 'NONFINITE', 'NUMERICAL_FAILURE'})
+POST_REFERENCE_STAGES = frozenset({'test-inference', 'forecast', 'evaluation'})
 NUMERICAL_EXCEPTIONS = (SwitchingError, np.linalg.LinAlgError, FloatingPointError, OverflowError)
 EXCEPTION_TYPES = frozenset({'SwitchingError', 'LinAlgError', 'FloatingPointError', 'OverflowError'})
 

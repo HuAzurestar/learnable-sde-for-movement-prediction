@@ -7,6 +7,7 @@ No reference resampling or fitting is performed by the owner checker.
 """
 
 import re
+from pathlib import Path
 
 from infrastructure.research_store import digest, encode
 from .approximation import ApproximationSpec, RECIPE_SCHEMA
@@ -65,6 +66,18 @@ def _report_completions(report, recipe):
 def execution_record(study, cell, attempt, model, report, completed):
     """Build worker evidence / owner's expected metadata; not grant authority."""
     recipe = study['switching_recipe']
+    for name, size in (('attempt_id', 32), ('run_id', 64)):
+        value = attempt.get(name)
+        _require(type(value) is str and len(value) == size and re.fullmatch('[0-9a-f]+', value),
+                 'typed original native '+name+' required')
+    source = study.get('code_hash')
+    _require(type(source) is str and len(source) == 64 and re.fullmatch('[0-9a-f]{64}', source),
+             'typed original native source hash required')
+    binding = study.get('runtime_binding')
+    _keys(binding, {'root', 'store_id'}, 'original native runtime binding')
+    _require(type(binding['root']) is str and 0 < len(binding['root']) <= 4096
+        and Path(binding['root']).is_absolute() and type(binding['store_id']) is str
+        and 0 < len(binding['store_id']) <= 128, 'typed original native runtime identity required')
     _require(recipe['schema_version'] == RECIPE_SCHEMA and cell['fit_K'] == 2
         and study['admission']['mode'] == 'fixture', 'native reference engineering scope differs')
     spec = ApproximationSpec.from_dict(recipe['approximation_spec'])
@@ -101,3 +114,12 @@ def validate_reference_execution(record, study, cell, attempt, model, report):
     expected = execution_record(study, cell, attempt, model, report, record.get('completed_batches'))
     _require(digest(record) == digest(expected), 'native reference execution/source binding differs')
     return expected['complete']
+
+
+def attach_reference_failure(diagnostic, study, cell, attempt, completed):
+    """Worker-only metadata attachment; caller still needs actual native provenance."""
+    from .evidence import validate_initialization_history
+    chosen = validate_initialization_history(study, cell, diagnostic, diagnostic['generated_inputs'])
+    _require(chosen is not None, 'reference failure has no selected fit')
+    diagnostic['reference_execution'] = execution_record(study, cell, attempt, chosen['model'],
+        diagnostic['approximation_checks'], completed)

@@ -16,7 +16,7 @@ from infrastructure.research_store import ResearchError, digest
 from models.switching import SwitchingError, SwitchingSDEModel, finite_array, psd_array
 from .synthetic import ScenarioSpec, generate_scenario
 from .failures import (NUMERICAL_EXCEPTIONS, NumericalCellFailure, numerical_diagnostic,
-                       valid_numerical_diagnostic)
+                       valid_numerical_diagnostic, POST_REFERENCE_STAGES)
 from .qualification import IdentifiabilitySpec, forecast_coverage, jump_diagnostics, mode_diagnostics, parameter_recovery
 from .approximation import ApproximationSpec, RECIPE_SCHEMA
 from .approximation_checks import reference_design_preflight
@@ -183,6 +183,8 @@ def execute_recipe(recipe, k, seed, *, check_budget, progress_callback=None, res
         failure.diagnostic.update(recipe_hash=context['recipe_hash'], generated_inputs=context['generated_inputs'])
         if context['stage'] == 'approximation':
             failure.diagnostic['approximation_checks'] = None
+        elif context['stage'] in POST_REFERENCE_STAGES and 'approximation_checks' in context:
+            failure.diagnostic['approximation_checks'] = context['approximation_checks']
         raise failure from error
 
 
@@ -316,6 +318,9 @@ def _execute_recipe(recipe, k, seed, *, check_budget, progress_callback, resume_
             failure.diagnostic.update(recipe_hash=identity, generated_inputs=generated,
                                       approximation_checks=approximation_checks)
             raise failure
+        # Preserve the complete passed prefix when later cell work fails.
+        # This is diagnostic retention, not successful metrics or authority.
+        context['approximation_checks'] = approximation_checks
     forecasts, scores, test_objectives, posterior_probabilities, coverage = [], [], [], [], []
     origin_index, horizon_indices = recipe['forecast_origin_index'], recipe['horizon_indices']
     offsets = [float(batches[2].times[index] - batches[2].times[origin_index]) for index in horizon_indices]

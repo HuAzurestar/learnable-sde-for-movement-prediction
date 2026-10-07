@@ -44,12 +44,16 @@ def test_full_master_registered_pool_covers_additive_fit_forecast_source_and_ref
                 +allocation['forecast_workspace_elements']+allocation['padded_pool_elements'])
             if k == 2:
                 assert allocation['reference_elements'] == allocation['reference_core_plan']['tensor_elements'] > 0
+                core = allocation['reference_core_plan']
+                assert core['completed_batch_trace_elements'] == 32+16*value['test_paths']*value[
+                    'approximation_spec']['event_driven_reference']['independent_batches']
+                assert core['owner_trace_copy_elements'] == 2*core['completed_batch_trace_elements']
             else:
                 assert allocation['reference_elements'] == 0 and allocation['reference_core_plan'] is None
             assert registered['limits'] == {**dict(GLOBAL_LIMITS), 'matrix_cells': 10000,
                                            'result_bytes': 64*1024*1024}
             maximum = max(maximum, registered['tensor_elements'])
-    assert maximum == 19_716_228 < GLOBAL_LIMITS['tensor_elements']
+    assert maximum == 19_719_396 < GLOBAL_LIMITS['tensor_elements']
     assert plugin.registry_entry.version == '1.1.0'
 
 
