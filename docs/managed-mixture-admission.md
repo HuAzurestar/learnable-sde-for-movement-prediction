@@ -31,6 +31,14 @@ publishing the artifact, and charges native occupancy to the original arm.
 
 The adapter declares the existing chunk protocol and 64 KiB mixture state
 limit. Actual interrupted formal-target restoration must be separately verified.
-An independent paper-side saved-proof reader is still required; generic evidence
-export alone is not independent qualification. This is not a scientific study,
-full candidate qualification, manuscript result or delivery acceptance.
+The paired paper-side `scripts/pirc25/mixture_qualification.py` independently
+checks saved mixture-specific numerical evidence, owner/native-cost order and
+current full functional lineage. `validate_mixture.py bundle.json --expected-hash
+<authorized-bundle-hash>` verifies recorded admission only; the separately trusted
+export hash is required and does not authenticate an arbitrary rehashed journal.
+It never consumes Gaussian approval or replays a numerical engine. Actual cap=1
+and cap=4 pilot/formal/export chains and resealed semantic refusals are exercised
+in paired engineering tests. Generic export alone is not independent
+qualification. This is not a scientific study, full candidate qualification,
+manuscript result or delivery acceptance. Formal-target interrupted restoration
+still requires a separate actual owner test.
