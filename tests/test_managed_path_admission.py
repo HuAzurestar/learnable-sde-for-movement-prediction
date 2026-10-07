@@ -28,8 +28,9 @@ from tests.test_path_qualification import policies, prepared
 from tests.path_paper_helpers import independent_reader, independent_aggregate, paper_validate
 
 
-def prepare_target(root, method, *, changes=None, target_changes=None):
-    store, source_spec, source_registry = prepared(root, method=method, changes=changes)
+def prepare_target(root, method, *, changes=None, target_changes=None, source_request_changes=None):
+    store, source_spec, source_registry = prepared(root, method=method, changes=changes,
+        request_changes=source_request_changes)
     store.register(source_spec, digest(source_spec))
     pilot = SharedRunner(store, source_registry).run_cell(source_spec["study_id"], digest(source_spec["cells"][0]),
         budget=BudgetSpec(60, category="pilot"))
@@ -112,6 +113,23 @@ def test_actual_independent_formal_target_retains_own_statistics_and_original_ar
     assert reused["reused"] and BudgetLedger(store).balance(spec["arms"][0]["arm_id"])["committed_ms"] == after
     bundle = export_evidence(store, spec["study_id"], grant)
     assert bundle["cells"][0]["result"] == result
+
+
+def test_completed_target_finalization_uses_saved_paths_and_own_metric_not_generic_analytic_replay(source, completed, monkeypatch):
+    from application.propagation_execution import execute_propagation
+    import inference.propagation_methods as module
+    import inference.path_qualification as evidence_module
+    _, spec, _, _, _, _ = source
+    result, receipt, _, _ = completed
+    def forbidden(*args, **kwargs):
+        pytest.fail("completed target replayed paths or an unused analytic metric/reference producer")
+    monkeypatch.setattr(module, "endpoint_chunks", forbidden)
+    monkeypatch.setattr(module, "analytic_estimate", forbidden)
+    monkeypatch.setattr(evidence_module, "bound_affine_reference", forbidden)
+    monkeypatch.setattr(evidence_module, "bound_affine_discrete", forbidden)
+    current = execute_propagation(spec, spec["cells"][0],
+        resume_state=result["forecast"]["path_output_analysis"]["completed_statistics"], admission=receipt)
+    assert current["forecast"] == result["forecast"] and current["metrics"] == result["metrics"]
 
 
 @pytest.mark.parametrize("method", METHODS, ids=["euler", "heun", "rev", "is"])

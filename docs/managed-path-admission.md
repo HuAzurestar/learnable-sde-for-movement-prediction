@@ -33,8 +33,10 @@ the existing sampler's no-more-paths branch. No new ledger or stop protocol is
 created. All target attempts/resumes/retries retain the original arm's charges.
 
 The reference law is exactly the source's same declared physical/functional
-law, not its random estimate. The target does not pay for another reference
-engine invocation. It reserves its full kernel work proxy and bounded 64 MiB
+law, not its random estimate. The target does not re-run the hard-bounded
+dyadic reference producer. The original sampler still computes its existing
+float64 analytic/time-bias diagnostics; these are not certificates and their
+actual time remains charged. It reserves its full kernel work proxy and bounded 64 MiB
 saved-proof pools; physical resource dimension stays four. Source reference
 operation counts are labeled settled-source-only; actual target time is still
 natively charged under its separately frozen cap.
@@ -61,7 +63,12 @@ Intervals remain estimated-only (ideal-iid binomial formula for ordinary zero/
 all-hit MC, weighted normal/ESS diagnostics for IS). No float64/PRNG coverage,
 sampler-roundoff, global distribution, nonlinear-model or scientific-study
 approval is implied; `scientific_qualification` stays false. The independent
-paper saved-proof reader, its no-fallback dispatch/CLI and explicit negative-row
-classification, actual supervised formal interruption/restore, complete method
+paper saved-proof reader checks the settled source, same physical law, saved
+statistics and current classification independently, without runtime imports
+or numerical-engine replay. Its no-fallback CLI reports PASSED and FAILED
+counts separately. Completed numeric failures/unresolved outputs do not enter
+complete paired aggregation or adjudication; execution status, metrics, costs,
+expected-cell denominators and CSV numeric dispositions are preserved.
+Actual supervised formal interruption/restore, complete method
 and physical-axis qualification, study and paper delivery remain required.
 Disposable unit-test stores/grants are not the official shared research root.

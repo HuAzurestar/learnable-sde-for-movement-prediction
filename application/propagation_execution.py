@@ -199,8 +199,13 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
         result = methods[config["method"]]()
     synthetic = isinstance(package, FrozenNonlinearPackage)
     mlmc_production = plugin.plugin_id == "affine-mlmc-production-chunk"
-    metrics = ({"functional_estimate": result.estimate} if synthetic else
-               {"absolute_error_vs_float64_reference": abs(result.estimate-analytic_estimate(package, request).estimate)})
+    # Dedicated path targets derive their metric from owner-admitted saved
+    # enclosures below. Do not compute and discard another analytic metric.
+    # The original sampler's own float64 error-budget diagnostics are unchanged.
+    metrics = {}
+    if not path_production:
+        metrics = ({"functional_estimate": result.estimate} if synthetic else
+                   {"absolute_error_vs_float64_reference": abs(result.estimate-analytic_estimate(package, request).estimate)})
     qualified_components = None
     path_output = None
     if formal:
