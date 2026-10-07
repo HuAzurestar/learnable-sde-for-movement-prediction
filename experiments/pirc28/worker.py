@@ -39,6 +39,15 @@ def main():
         raise ResearchError('IDENTITY_CONFLICT', 'control channel has no admitted running attempt')
     if Path(output) != control.directory / 'result.json':
         raise ResearchError('IDENTITY_CONFLICT', 'worker output is outside the managed attempt')
+    from .approximation import RECIPE_SCHEMA
+    if spec['admission']['mode'] != 'fixture' and spec['switching_recipe']['schema_version'] == RECIPE_SCHEMA:
+        from .source_preflight import validate_scientific_source
+        def prefit_poll():
+            if time.monotonic() >= control.descriptor['deadline']:
+                raise ResearchError('TIMEOUT', 'shared supervisor pre-fit deadline reached')
+        validate_scientific_source(store, spec, cells[0], attempt, check_budget=prefit_poll)
+        # Preflight is not an implemented scientific approximation adapter.
+        # Default V2 execution remains refused before generation/fitting below.
     # Fixture admission is explicitly engineering-only. Scientific admission
     # must bind the actual canonical recipe in the source data protocol.
     if spec['admission']['mode'] != 'fixture':
@@ -63,7 +72,6 @@ def main():
         if value['rng_state'] != saved['rng_state']:
             raise ResearchError('IDENTITY_CONFLICT', 'restored RNG state differs')
     latest, started = {}, time.monotonic()
-    from .approximation import RECIPE_SCHEMA
     engineering_reference = (spec['admission']['mode'] == 'fixture'
         and spec['switching_recipe']['schema_version'] == RECIPE_SCHEMA)
     reference_phase = 'not-started'

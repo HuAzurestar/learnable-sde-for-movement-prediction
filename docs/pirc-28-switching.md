@@ -1007,3 +1007,35 @@ this is a declaration, not measured RSS or full interpreter heap proof.
 ```console
 python -m pytest tests/test_pirc28_post_reference_failures.py tests/test_pirc28_resources.py -q
 ```
+
+### Scientific source preflight (not execution release)
+
+The managed worker now revalidates V2 non-fixture sources before generating any
+role or fitting any initializer. Only the registered exploratory synthetic
+pilot is supported: the exact complete immutable master, every original source
+recipe/cell/seed/arm, source protocols, full preregistration/comparison/failure
+policy and publication-before-admission order must agree. The actual running
+attempt needs its own canonical admission receipt and outstanding original-arm
+reservation within the unchanged 1800-second pilot cap. Admitted command,
+registry, resources, package and current execute/fit permissions are checked
+again. Complete source/protocol/preregistration/admission metadata is bounded
+to 16 MiB; deadline and final disclosure-expiry checks remain authoritative.
+
+This metadata preflight is not native execution proof or a scientific grant.
+Passing it does NOT supply an approximation executor: default V2 execution
+still refuses before generation/fitting. Fixture/native engineering behavior
+is unchanged; legacy V1 diagnostics are not promoted. Formal V2 sources are
+refused because the current immutable synthetic master freezes an exploratory
+pilot, not a blind formal admission. Extending native sampling to validated
+scientific sources and deriving independent collector/owner release evidence
+are still required. Every scientific/real-data authority flag stays false.
+
+The preflight controls use disposable simulated operator metadata and an
+explicitly simulated RUNNING state, not production science or native worker
+proof. Self-consistent borrowed-receipt controls reach command/grant binding
+checks rather than relying only on byte-hash rejection. Worker-call controls
+verify preflight precedes the pipeline and does not enable V2 generation.
+
+```console
+python -m pytest tests/test_pirc28_source_preflight.py -q
+```

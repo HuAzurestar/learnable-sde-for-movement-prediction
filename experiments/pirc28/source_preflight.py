@@ -1,0 +1,140 @@
+"""Pre-fit scientific source checks, not execution or qualification authority.
+
+Only the registered exploratory synthetic pilot is supported here. Passing
+does not enable a V2 executor, waive ordinary admission or lift scientific
+withholding. All work is metadata-only within the original funded attempt.
+"""
+
+from application.research_admission import command_binding, data_binding, plugin_binding
+from application.research_evidence import authorize_study, require_unexpired_disclosure
+from application.research_execution import execution_plan
+from application.research_preregistration import hash_reference
+from experiments.pirc25.affine import code_hash
+from infrastructure.research_store import ResearchError, digest, encode
+from .approximation import RECIPE_SCHEMA
+from .evidence import _preregistration, _run_id, study_definition_binding
+from .qualification import IdentifiabilitySpec
+from .runtime import command, resume_command, switching_plugin
+from .study import MAXIMUM_DEFINITION_BYTES, SCHEMA_V2, SyntheticStudyDefinition
+
+
+def _require(condition, code, message):
+    if not condition:
+        raise ResearchError(code, message)
+
+
+def validate_scientific_source(store, study, cell, attempt, *, check_budget):
+    """Revalidate canonical original metadata before any generated/fitted data."""
+    _require(callable(check_budget), 'CONTRACT_MISMATCH', 'explicit pre-fit deadline poll required')
+    check_budget()
+    with store._read_transaction():
+        _require(study.get('admission', {}).get('mode') == 'pilot'
+            and study.get('admission', {}).get('purpose') == 'fit'
+            and study.get('switching_recipe', {}).get('schema_version') == RECIPE_SCHEMA,
+            'CONTRACT_MISMATCH', 'registered V2 exploratory synthetic pilot required')
+        _require(study.get('code_hash') == code_hash() and study.get('runtime_binding') ==
+            {'root': str(store.path.parent), 'store_id': store.store_id},
+            'IDENTITY_CONFLICT', 'pre-fit source code/original shared store differs')
+        canonical = store.manifest('study-'+study['study_id'])
+        _require(digest(canonical['spec']) == digest(study) and canonical['spec_hash'] == digest(study)
+            and sum(digest(value) == digest(cell) for value in study['cells']) == 1,
+            'IDENTITY_CONFLICT', 'pre-fit source/cell differs from canonical registration')
+        _require(attempt.get('state') == 'RUNNING'
+            and attempt.get('run_id') == _run_id(study, cell)
+            and store.attempts().get(attempt.get('attempt_id')) == attempt,
+            'IDENTITY_CONFLICT', 'pre-fit source has no original running attempt')
+        events = store.events()
+        admissions = [event for event in events if event['event_kind'] == 'ADMISSION'
+            and event['payload'].get('attempt_id') == attempt['attempt_id']]
+        _require(len(admissions) == 1 and admissions[0]['payload'].get('run_id') == attempt['run_id'],
+            'UNQUALIFIED', 'one original admission required before scientific work')
+        admission_hash = admissions[0]['payload'].get('admission_hash')
+        _require(hash_reference(admission_hash), 'UNQUALIFIED', 'canonical admission identity missing')
+        receipt = store.manifest('admission-'+admission_hash)
+        _require(receipt.get('admission_hash') == admission_hash
+            and digest({name: value for name, value in receipt.items() if name != 'admission_hash'}) == admission_hash
+            and all(receipt.get(name) == value for name, value in {
+                'attempt_id': attempt['attempt_id'], 'run_id': attempt['run_id'],
+                'spec_hash': digest(study), 'cell_hash': digest(cell), 'mode': 'pilot'}.items())
+            and digest(receipt.get('spec')) == digest(study) and digest(receipt.get('cell')) == digest(cell),
+            'IDENTITY_CONFLICT', 'pre-fit admission source/cell/stage differs')
+        plugin = switching_plugin()
+        _require(receipt.get('schema_version') == 'pirc25-admission-v1'
+            and receipt.get('execution_kind') in ('run', 'resume')
+            and receipt.get('plugin_hash') == plugin_binding(plugin)
+            and receipt.get('registry_entry') == plugin.registry_entry.manifest()
+            and receipt.get('resource_plan') == execution_plan(study, cell, plugin)
+            and receipt.get('command_hash') == command_binding(
+                resume_command if receipt.get('execution_kind') == 'resume' else command),
+            'IDENTITY_CONFLICT', 'pre-fit admitted command/registry/resources differ')
+        reserves = [event for event in events if event['event_kind'] == 'RESERVE'
+            and event['payload'].get('attempt_id') == attempt['attempt_id']]
+        _require(len(reserves) == 1 and not any(event['event_kind'] == 'SETTLE'
+            and event['payload'].get('attempt_id') == attempt['attempt_id'] for event in events),
+            'UNQUALIFIED', 'pre-fit work needs its original outstanding reservation')
+        reserve = reserves[0]
+        _require(admissions[0]['sequence'] < reserve['sequence']
+            and type(reserve['payload'].get('reserved_ms')) is int
+            and 0 < reserve['payload']['reserved_ms'] <= 1_800_000
+            and all(reserve['payload'].get(name) == value for name, value in {
+                'attempt_id': attempt['attempt_id'], 'run_id': attempt['run_id'],
+                'study_id': study['study_id'], 'arm_id': cell['arm_id'],
+                'reservation_id': digest([store.store_id, attempt['attempt_id']])}.items()),
+            'UNQUALIFIED', 'pre-fit funding belongs to a different source/arm/stage')
+        reference = study.get('pirc28_study_definition_hash')
+        _require(hash_reference(reference), 'NEEDS_PREREGISTRATION', 'complete pre-fit master required')
+        master = SyntheticStudyDefinition.from_dict(store.manifest('pirc28-study-definition-'+reference))
+        value = master.to_dict()
+        _require(master.definition_hash == reference and value['schema_version'] == SCHEMA_V2,
+            'IDENTITY_CONFLICT', 'pre-fit master identity/approximation schema differs')
+        definition = IdentifiabilitySpec.from_dict(value['identifiability_spec'])
+        studies, protocols, consumed = [], {}, len(master.content)+len(encode(receipt))
+        for study_id in master.study_ids:
+            check_budget()
+            source = store.manifest('study-'+study_id)['spec']
+            protocol = store.manifest('protocol-'+source['admission']['protocol_id'])
+            consumed += len(encode(source))+len(encode(protocol))
+            _require(consumed <= 4*MAXIMUM_DEFINITION_BYTES, 'RESOURCE_LIMIT',
+                'pre-fit complete source/protocol metadata exceeds quota')
+            _require(source['admission']['mode'] == 'pilot'
+                and digest(protocol) == source['protocol_hash']
+                and data_binding(protocol) == source['data_hash'],
+                'IDENTITY_CONFLICT', 'pre-fit source stage/protocol identities differ')
+            studies.append(source)
+            protocols[study_id] = protocol
+        _require(study_definition_binding(store, studies, definition, events=events) == reference,
+            'NEEDS_PREREGISTRATION', 'complete master must precede every original admission')
+        expected = master.preregistration_fields(protocols)
+        for source in studies:
+            check_budget()
+            preregistration = _preregistration(store, source, definition, source['cells'][0], events)
+            prereg = store.manifest('preregistration-'+preregistration)
+            consumed += len(encode(prereg))
+            _require(consumed <= 4*MAXIMUM_DEFINITION_BYTES, 'RESOURCE_LIMIT',
+                'pre-fit preregistration/admission metadata exceeds quota')
+            _require(all(prereg.get(name) == field for name, field in expected.items()),
+                'NEEDS_PREREGISTRATION', 'pre-fit preregistration does not freeze the complete matrix')
+            _require(source['admission'].get('purpose') == 'fit' and source.get('comparison_plan') == {
+                'reference_arm_id': value['arms']['1']['arm_id'],
+                'candidate_arm_ids': [value['arms']['2']['arm_id']],
+                'preregistration_hash': preregistration, 'failure_policy': 'retain-and-exclude-incomplete-blocks'},
+                'NEEDS_PREREGISTRATION', 'original paired comparison/failure policy differs')
+        settings = study['admission']
+        grant = store.authorization(settings['authorization_id'], version=settings.get('authorization_version'))
+        documents = receipt.get('documents', {})
+        _require(documents.get('authorization') == grant
+            and documents.get('protocol') == protocols[study['study_id']]
+            and digest(documents.get('package')) == settings['package_hash']
+            and grant.get('protocol_hash') == study['protocol_hash']
+            and cell['block_id'] in grant['block_ids'] and 'synthetic' in grant['visibilities'],
+            'UNAUTHORIZED_DATA', 'pre-fit admission grant/package/protocol differs')
+        authorize_study(store, study['study_id'], grant, 'execute')
+        authorize_study(store, study['study_id'], grant, 'fit')
+        check_budget()
+    # No metadata/journal I/O after the final immutable-grant clock guard.
+    check_budget()
+    require_unexpired_disclosure(store, study['study_id'], grant, 'execute')
+    require_unexpired_disclosure(store, study['study_id'], grant, 'fit')
+    return {'study_definition_hash': reference, 'attempt_id': attempt['attempt_id'],
+        'run_id': attempt['run_id'], 'admission_hash': admission_hash,
+        'qualified_identifiability': False, 'real_data_authorized': False}
