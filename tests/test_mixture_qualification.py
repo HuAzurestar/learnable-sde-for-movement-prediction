@@ -25,12 +25,13 @@ from tests.research_admission_fixtures import admit_fixture
 from tests.test_propagation_methods import inputs
 
 
-def policies(*, cap=1, functional="endpoint-halfspace", changes=None):
+def policies(*, cap=1, functional="endpoint-halfspace", changes=None, request_changes=None):
     # Explicit coarse engineering target for positive/negative mechanism checks;
     # never a scientific default or an approved study accuracy target.
-    package, request = inputs(samples=2, steps=1, tolerance=1., functional=functional,
-        initial_mean=(0.,)*4,
-        initial_covariance=((.25, 0., 0., 0.), (0.,)*4, (0.,)*4, (0.,)*4))
+    parameters = {"samples": 2, "steps": 1, "tolerance": 1., "functional": functional,
+        "initial_mean": (0.,)*4,
+        "initial_covariance": ((.25, 0., 0., 0.), (0.,)*4, (0.,)*4, (0.,)*4)}
+    package, request = inputs(**{**parameters, **(request_changes or {})})
     mixture = MixtureSettings(cap, 0., 0., (1.,)*4, 0., 1_000_000, 60.).bind(package, request, code_hash())
     policy = MixtureQualificationPolicy(request.request_hash, package.package_hash,
         code_hash(), mixture.policy_hash, 1e-20, 1., 1., 1., 10., 400_001, 60.)
@@ -126,8 +127,8 @@ def test_actual_tail_accuracy_target_is_not_inferred_from_preserved_moments(cap,
         replace(policy, maximum_total_functional_error=.1001).validate(package, request, mixture, code_hash())
 
 
-def prepared(root, *, cap=1, changes=None, formal=False):
-    package, request, mixture, policy = policies(cap=cap, changes=changes)
+def prepared(root, *, cap=1, changes=None, formal=False, request_changes=None):
+    package, request, mixture, policy = policies(cap=cap, changes=changes, request_changes=request_changes)
     plugin = mixture_qualification_plugin()
     config, parameters = mixture_qualification_config(request, mixture, policy), execution_inputs(request)
     store = ResearchStore(root, "mixture-qualification-unit", initialize=True)

@@ -26,8 +26,8 @@ from tests.research_admission_fixtures import admit_fixture
 from tests.test_mixture_qualification import prepared
 
 
-def prepare_target(root, cap, changes=None):
-    store, source_spec, source_registry = prepared(root, cap=cap, changes=changes)
+def prepare_target(root, cap, changes=None, request_changes=None):
+    store, source_spec, source_registry = prepared(root, cap=cap, changes=changes, request_changes=request_changes)
     store.register(source_spec, digest(source_spec))
     pilot = SharedRunner(store, source_registry).run_cell(source_spec["study_id"], digest(source_spec["cells"][0]),
         budget=BudgetSpec(60, category="pilot"))
@@ -306,6 +306,113 @@ def test_production_registry_preserves_physical_dimensions_saved_proof_and_chunk
 def exported(source, completed):
     store, spec, _, grant, _, _ = source
     return export_evidence(store, spec["study_id"], grant)
+
+
+def test_actual_formal_mixture_save_ack_reopened_resume_retains_current_receipt_lineage_and_all_costs(tmp_path):
+    import time
+    from application.propagation_execution import validate_propagation_cell
+    from application.research_recovery import RecoveryRegistry, SharedRecovery
+    from inference.mixture_propagation import mixture_estimate
+    from infrastructure.research_store import ResearchStore
+    from tests.test_mixture_shared_adapter import _mixture_checkpoint_job_seconds, _mixture_worker_startup_seconds
+
+    # Frozen engineering request/caps before the source reservation. The fixed
+    # worst-case reference allocation remains400001, not the pass threshold.
+    # At most two fixed60s linked continuations; never retry a hard fuse/failure.
+    maximum_resumes = 2
+    steps = (1_000_000-400001)//(8*(1+1+4**3))
+    startup = _mixture_worker_startup_seconds()
+    store, spec, registry, grant, _, _ = prepare_target(tmp_path, 1, request_changes={"steps": steps,
+        "chunk_size": 1, "initial_covariance": tuple(tuple(.25 if i == j else 0. for j in range(4)) for i in range(4))})
+    cell = spec["cells"][0]
+    model, request, config, _ = validate_propagation_cell(spec, cell)
+    mixture = MixturePolicy.from_manifest(cell["mixture_policy"])
+    # Unprotected pure-kernel unit control, not a formal result or extra grant.
+    # Size the first disposable job BEFORE its reservation, never a live deadline.
+    started = time.monotonic()
+    expected = mixture_estimate(model, request, mixture).manifest()
+    job_seconds = _mixture_checkpoint_job_seconds(time.monotonic()-started, startup)
+    arm = cell["arm_id"]
+    pilot_cost = BudgetLedger(store).balance(arm)["committed_ms"]
+    adapters = RecoveryRegistry()
+    adapters.register(mixture_production_recovery_plugin())
+    interrupted = SharedRunner(store, registry, recovery_registry=adapters).run_cell(
+        spec["study_id"], digest(cell), budget=BudgetSpec(job_seconds))
+    assert interrupted["state"] == "FAILED", {**interrupted,
+        "engineering_calibration_seconds": {"startup": startup, "job": job_seconds}}
+    parent = store.attempts()[interrupted["attempt_id"]]
+    assert parent["error_code"] == "CHECKPOINT_SAVED", interrupted
+    saved = interrupted["checkpoint"]
+    progress = saved["progress"]
+    assert 0 < progress["completed_steps"] < progress["total_steps"] == config["work_steps"]
+    assert progress["throughput_per_second"] > 0 and progress["eta_seconds"] > 0
+    assert progress["eta_seconds"] == pytest.approx((progress["total_steps"]-progress["completed_steps"])/progress["throughput_per_second"])
+    events = [e for e in store.events() if e["payload"].get("attempt_id") == parent["attempt_id"]]
+    kinds = [e["event_kind"] for e in events]
+    assert kinds.index("CHECKPOINT_REQUESTED") < kinds.index("CHECKPOINT") < kinds.index("CHECKPOINT_SAVED")
+    assert kinds.index("CHECKPOINT_SAVED") < kinds.index("WORKER_TREE_STOPPED") < kinds.index("SETTLE")
+    requested = next(e["payload"] for e in events if e["event_kind"] == "CHECKPOINT_REQUESTED")
+    assert 0 < requested["remaining_seconds"] <= .2*job_seconds and saved["elapsed_ms"] < job_seconds*1000
+    saved_value = json.loads((store.path/"artifacts"/saved["artifact_id"]).read_bytes())
+    state = saved_value["state"]
+    assert state["method_state"]["policy_hash"] == mixture.policy_hash
+    assert state["method_state"]["request_hash"] == request.request_hash
+    assert state["rng_state"]["scheme"] == "deterministic-cubature-no-sampled-rng-v1"
+    assert state["chunk_complete"] is True and "budget" not in state and "remaining_seconds" not in state
+    before = BudgetLedger(store).balance(arm)
+    assert before["committed_ms"] == pilot_cost+interrupted["elapsed_ms"] and not before["closed"]
+    reopened = ResearchStore(tmp_path, store.store_id)
+    with pytest.raises(ResearchError):
+        SharedRecovery(reopened, registry, adapters).prepare(parent["attempt_id"], saved["artifact_id"],
+            authorization={**grant, "purposes": ["evaluate"]})
+    assert BudgetLedger(reopened).balance(arm) == before
+    continuations, failed_ids = [], {parent["attempt_id"]}
+    previous, checkpoint, completed = parent["attempt_id"], saved["artifact_id"], progress["completed_steps"]
+    for _ in range(maximum_resumes):
+        reopened = ResearchStore(tmp_path, store.store_id)
+        resumed = SharedRecovery(reopened, registry, adapters).resume(previous, checkpoint,
+            authorization=grant, budget=BudgetSpec(60))
+        continuations.append(resumed)
+        current = reopened.attempts()[resumed["attempt_id"]]
+        assert current["parent_attempt_id"] == previous and not BudgetLedger(reopened).balance(arm)["closed"]
+        if resumed["state"] == "SUCCEEDED":
+            break
+        assert resumed["state"] == "FAILED" and current["error_code"] == "CHECKPOINT_SAVED", resumed
+        next_saved = resumed["checkpoint"]
+        assert completed < next_saved["progress"]["completed_steps"] < progress["total_steps"]
+        previous, checkpoint, completed = resumed["attempt_id"], next_saved["artifact_id"], next_saved["progress"]["completed_steps"]
+        failed_ids.add(previous)
+    assert resumed["state"] == "SUCCEEDED", resumed
+    actual = json.loads((reopened.path/"artifacts"/resumed["artifact_id"]).read_bytes())
+    receipt = reopened.manifest("admission-"+actual["admission_hash"])
+    assert actual["qualification"] == "qualified" and actual["forecast"]["functional"]["status"] == "APPROXIMATION_ONLY"
+    assert receipt["attempt_id"] == resumed["attempt_id"] and actual["admission_hash"] != saved_value["admission_hash"]
+    proof = receipt["documents"]["propagation_qualification"]
+    assert proof["policy"] == cell["mixture_qualification_policy"] and proof["mixture_policy"] == cell["mixture_policy"]
+    assert {k: v for k, v in actual["forecast"]["functional"].items() if k != "error_budget"} == json.loads(
+        encode({k: v for k, v in expected.items() if k != "error_budget"}))
+    validate_formal_mixture_result(receipt, spec, cell, actual)
+    assert BudgetLedger(reopened).balance(arm)["committed_ms"] == before["committed_ms"]+sum(c["elapsed_ms"] for c in continuations)
+    bundle = export_evidence(reopened, spec["study_id"], grant)
+    row, target_ids = bundle["cells"][0], failed_ids | {resumed["attempt_id"]}
+    assert {a["attempt_id"] for a in row["history"]} == target_ids
+    assert row["cost"]["charged_ms"] == interrupted["elapsed_ms"]+sum(c["elapsed_ms"] for c in continuations)
+    assert {e["payload"]["attempt_id"] for e in row["cost"]["sources"]} == target_ids
+    independent_reader().validate_mixture_qualification(row["admission"], row)
+    checked = paper_validate(tmp_path, bundle)
+    assert checked.returncode == 0, checked.stderr
+    assert json.loads(checked.stdout)["verified_mixture_cells"] == 1
+    for fault in ("missing-parent-charge", "zero-parent-charge"):
+        altered = deepcopy(bundle)
+        entries = altered["cells"][0]["cost"]["sources"]
+        if fault == "missing-parent-charge":
+            entries[:] = [e for e in entries if e["payload"]["attempt_id"] != parent["attempt_id"]]
+        else:
+            entry = next(e for e in entries if e["payload"]["attempt_id"] == parent["attempt_id"])
+            entry["payload"]["charged_ms"] = 0
+            entry["hash"] = digest({k: v for k, v in entry.items() if k != "hash"})
+        altered["bundle_hash"] = digest({k: v for k, v in altered.items() if k != "bundle_hash"})
+        assert paper_validate(tmp_path, altered).returncode != 0, fault
 
 
 def paper_validate(tmp_path, bundle):
