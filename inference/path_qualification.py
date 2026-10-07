@@ -11,7 +11,7 @@ import math
 from domain.errors import DataValidationError
 from domain.frozen_dynamics import content_hash
 from domain.path_qualification import PathQualificationPolicy
-from inference.affine_reference import Arithmetic, _interval_manifest, bound_affine_reference
+from inference.affine_reference import Arithmetic, _interval_manifest, _parse_interval, bound_affine_reference
 from inference.affine_discrete_reference import bound_affine_discrete
 from inference.affine_qualification import _outward_float, _scaled_norm
 from inference.propagation_methods import monte_carlo, importance_sampling
@@ -31,7 +31,7 @@ def _sampling_evidence(request, method, result, state):
     if weighted:
         estimate = math.exp(stat["log_event"]-math.log(n)) if hits else 0.
         second = math.exp(stat["log_event2"]-math.log(n)) if hits else 0.
-        variance = max(0., (second-estimate*estimate)*n/(n-1))
+        variance = max(0., (second-estimate**2)*n/(n-1))
         se = math.sqrt(variance/n) if hits else None
         ess = math.exp(2*stat["log_w"]-stat["log_w2"])
         expected_status = "INSUFFICIENT_EVENTS" if not hits else "LOW_ESS" if ess < 2 else "SUCCEEDED"
@@ -122,7 +122,23 @@ def qualify_affine_paths(package, request, policy):
     cm, tm = continuous.manifest(), target.manifest()
     if cm["code_hash"] != source or tm["code_hash"] != source or code_hash() != source:
         raise DataValidationError("source changed during path qualification")
-    cb, tb = continuous.functional_bounds(), target.functional_bounds()
+    return result, saved_path_analysis(package, request, policy, result, last, cm, tm)
+
+
+def saved_path_analysis(package, request, policy, result, last, cm, tm):
+    """Bounded saved-state arithmetic only; caller verifies certificate/law binding.
+
+    No sampler, matrix exponential or CDF/reference engine is invoked here.
+    The owner may use the same declared law for a separately frozen target.
+    """
+    method = "importance" if policy.method == "importance" else SOLVERS[policy.method]
+    proposal = policy.proposal if policy.method == "importance" else ()
+    if type(last) is not dict or last.get("data_position") != {"level": 1, "next_sample": 0}:
+        raise DataValidationError("completed final sampler statistics required")
+    ChunkState(request, method, (request.samples,), (request.steps,), proposal=proposal, restored=last)
+    sampling = _sampling_evidence(request, policy.method, result, {**last, "_proposal": proposal})
+    solver = "euler" if policy.method == "importance" else policy.method
+    cb, tb = _parse_interval(cm["functional_bounds"]), _parse_interval(tm["functional_bounds"])
     value = Fraction(result.estimate)
     grid_error = max(abs(value-tb.lo), abs(value-tb.hi))
     total_error = max(abs(value-cb.lo), abs(value-cb.hi))
@@ -148,7 +164,7 @@ def qualify_affine_paths(package, request, policy):
     analysis = {"schema_version": "affine-path-functional-qualification-analysis-v1",
         "scope": "one-realized-path-estimate-vs-declared-affine-continuous-and-finite-grid-functional",
         "status": "PASSED" if all(checks.values()) else "FAILED", "scientific_qualification": False,
-        "code_hash": source, "request_hash": request.request_hash, "model_package_hash": package.package_hash,
+        "code_hash": policy.code_hash, "request_hash": request.request_hash, "model_package_hash": package.package_hash,
         "policy_hash": policy.policy_hash, "method": policy.method, "proposal": list(policy.proposal),
         "proposal_hash": content_hash(policy.proposal),
         "actual_functional_hash": content_hash(result.manifest()), "actual_estimate": result.estimate,
@@ -170,8 +186,8 @@ def qualify_affine_paths(package, request, policy):
         "reference_operations": operations, "path_work_units": request.samples*request.steps,
         "sampling_error": sampling, "model_error": {"value": None, "status": "NOT_IDENTIFIABLE"},
         "cost_status": "OWNER_SETTLEMENT_REQUIRED", "maximum_job_seconds": policy.maximum_job_seconds,
-        "continuous_certificate_hash": continuous.certificate_hash,
-        "target_certificate_hash": target.certificate_hash,
+        "continuous_certificate_hash": content_hash(cm),
+        "target_certificate_hash": content_hash(tm),
         "continuous_certificate": cm, "target_certificate": tm}
     analysis["analysis_hash"] = content_hash(analysis)
-    return result, analysis
+    return analysis

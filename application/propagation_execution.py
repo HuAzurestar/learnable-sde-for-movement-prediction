@@ -44,9 +44,10 @@ def validate_propagation_cell(spec, cell):
     mixture_qualification = cell["plugin_id"] == "affine-mixture-qualification"
     mixture_production = cell["plugin_id"] == "affine-mixture-production-chunk"
     path_qualification = cell["plugin_id"] == "affine-path-qualification"
+    path_production = cell["plugin_id"] == "affine-path-production-chunk"
     from experiments.pirc27.mixture_plugin import PLUGIN_IDS, mixture_plugin, mixture_policy, mixture_config
     mixture = cell["plugin_id"] in PLUGIN_IDS
-    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk", "affine-mixture-qualification", "affine-mixture-production-chunk", "affine-path-qualification"}|PLUGIN_IDS:
+    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk", "affine-mixture-qualification", "affine-mixture-production-chunk", "affine-path-qualification", "affine-path-production-chunk"}|PLUGIN_IDS:
         raise ResearchError("CONTRACT_MISMATCH", "unknown explicit propagation adapter")
     recovery = cell["plugin_id"].endswith("-chunk")
     synthetic = cell["plugin_id"].startswith("synthetic-")
@@ -71,6 +72,9 @@ def validate_propagation_cell(spec, cell):
     if path_qualification:
         from experiments.pirc27.path_qualification_plugin import path_qualification_plugin
         plugin = path_qualification_plugin()
+    if path_production:
+        from experiments.pirc27.path_production_plugin import path_production_plugin
+        plugin = path_production_plugin()
     execution_plan(spec, cell, plugin)
     request = request_from_manifest(cell["propagation_request"])
     package_type = FrozenNonlinearPackage if synthetic else FrozenDynamicsPackage
@@ -84,6 +88,10 @@ def validate_propagation_cell(spec, cell):
         from experiments.pirc27.path_qualification_plugin import path_qualification_policy, path_qualification_config
         policy = path_qualification_policy(spec, cell, package, request, config)
         expected = path_qualification_config(request, policy)
+    elif path_production:
+        from experiments.pirc27.path_production_plugin import production_policies, path_production_config
+        qualification_bound, policy = production_policies(spec, cell, package, request, config)
+        expected = path_production_config(request, qualification_bound, policy)
     elif mixture_production:
         from experiments.pirc27.mixture_production_plugin import production_policies, mixture_production_config
         mixture_bound, policy = production_policies(spec, cell, package, request, config)
@@ -149,6 +157,17 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
     if not recovery and (resume_state is not None or checkpoint is not None):
         raise ResearchError("CONTRACT_MISMATCH", "restart-only methods cannot accept chunk state")
     continuation = {"resume_state": resume_state, "checkpoint": checkpoint}
+    path_production = plugin.plugin_id == "affine-path-production-chunk"
+    path_last = resume_state
+    if path_production:
+        def path_checkpoint(state, total):
+            nonlocal path_last
+            if total != request.samples*request.steps:
+                raise DataValidationError("target path statistic work proxy differs")
+            path_last = state
+            if checkpoint is not None:
+                checkpoint(state, total)
+        continuation["checkpoint"] = path_checkpoint
     mixture_production = plugin.plugin_id == "affine-mixture-production-chunk"
     if mixture_production:
         from experiments.pirc27.mixture_production_plugin import production_policies
@@ -183,8 +202,13 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
     metrics = ({"functional_estimate": result.estimate} if synthetic else
                {"absolute_error_vs_float64_reference": abs(result.estimate-analytic_estimate(package, request).estimate)})
     qualified_components = None
+    path_output = None
     if formal:
-        if mixture_production:
+        if path_production:
+            from .path_qualification_admission import target_output_analysis, METRIC
+            path_output = target_output_analysis(spec, cell, package, request, result.manifest(), path_last, admission)
+            error = path_output["total_observed_functional_error_upper"]
+        elif mixture_production:
             from .mixture_qualification_admission import qualified_mixture_forecast, METRIC
             error, qualified_components = qualified_mixture_forecast(spec, cell, package, request, result.manifest(), admission)
         elif mlmc_production:
@@ -208,6 +232,14 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
             "estimated_by": "outward max of continuous and Euler functional interval widths" if mixture_production
                 else "outward declared-affine continuous functional interval width", "status": "BOUNDED"}
         budget["time_discretization"] = {"value": qualified_components["time_bias_absolute_upper"], "units": unit,
+            "estimated_by": "outward absolute signed grid-minus-continuous expectation bound", "status": "BOUNDED"}
+    if path_output is not None:
+        output["forecast"]["path_output_analysis"] = path_output
+        output["forecast"]["current_output_qualification"] = path_output["status"]
+        budget = output["forecast"]["functional"]["error_budget"]
+        budget["reference"] = {"value": path_output["reference_width_upper"], "units": unit,
+            "estimated_by": "outward max of saved continuous and method-specific grid functional interval widths", "status": "BOUNDED"}
+        budget["time_discretization"] = {"value": path_output["absolute_time_bias_upper"], "units": unit,
             "estimated_by": "outward absolute signed grid-minus-continuous expectation bound", "status": "BOUNDED"}
     if config["method"] == "mlmc-pilot":
         from inference.mlmc_pilot import analyze_mlmc_pilot

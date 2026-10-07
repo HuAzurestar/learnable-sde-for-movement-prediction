@@ -193,6 +193,9 @@ class AdmissionGate:
                 # eligible; validate its frozen formal registration pre-read.
                 from .propagation_execution import validate_propagation_cell
                 validate_propagation_cell(spec, cell)
+            if plugin.plugin_id == "affine-path-production-chunk":
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
             if (plugin.plugin_id in {"affine-propagation-chunk", "synthetic-propagation-chunk", "affine-mlmc-qualification-chunk"}
                     and cell.get("execution", {}).get("config", {}).get("method") == "mlmc-pilot"):
                 # BEFORE qualification artifacts or input exposure, including
@@ -283,6 +286,10 @@ class AdmissionGate:
                     from .mixture_qualification_admission import prepare_managed_mixture
                     documents["propagation_qualification"] = prepare_managed_mixture(
                         self.store, spec, cell, package, prereg)
+                elif plugin.plugin_id == "affine-path-production-chunk":
+                    from .path_qualification_admission import prepare_managed_paths
+                    documents["propagation_qualification"] = prepare_managed_paths(
+                        self.store, spec, cell, package, prereg)
             purpose = settings.get("purpose")
             root = grant.get("data_root")
             if not isinstance(root, str) or not Path(root).is_absolute():
@@ -339,7 +346,10 @@ class AdmissionGate:
             if result.get("qualification") != receipt["qualification"]:
                 raise ResearchError("UNQUALIFIED", "worker cannot change admitted qualification")
             if "propagation_qualification" in receipt.get("documents", {}):
-                if plugin.plugin_id == "affine-mixture-production-chunk":
+                if plugin.plugin_id == "affine-path-production-chunk":
+                    from .path_qualification_admission import validate_formal_path_result
+                    validate_formal_path_result(receipt, spec, cell, result)
+                elif plugin.plugin_id == "affine-mixture-production-chunk":
                     from .mixture_qualification_admission import validate_formal_mixture_result
                     validate_formal_mixture_result(receipt, spec, cell, result)
                 elif plugin.plugin_id == "affine-mlmc-production-chunk":
@@ -354,6 +364,17 @@ class AdmissionGate:
         return validate
 
     def run(self, attempt_id, spec, cell, plugin, command_builder, budget, *, builtin_fixture=False, recovery_builder=None, checkpoint_handler=None):
+        if plugin.plugin_id == "affine-path-production-chunk":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.path_production_plugin import production_policies
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                _, policy = production_policies(spec, cell, package, request, config)
+                if budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "path target exceeds the frozen independent production job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
         if plugin.plugin_id == "affine-mixture-production-chunk":
             from .propagation_execution import validate_propagation_cell
             from experiments.pirc27.mixture_production_plugin import production_policies
