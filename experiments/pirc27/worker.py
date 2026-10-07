@@ -24,7 +24,8 @@ def main():
     if len(cells) != 1 or spec.get("runtime_binding") != {"root": str(Path(root).resolve()), "store_id": store_id}:
         raise ResearchError("CONTRACT_MISMATCH", "worker root/store or selected cell differs")
     from experiments.pirc27.mixture_plugin import PLUGIN_IDS
-    state_limit = 65536 if cells[0]["plugin_id"] in PLUGIN_IDS else 16384
+    mixture_ids = PLUGIN_IDS|{"affine-mixture-production-chunk"}
+    state_limit = 65536 if cells[0]["plugin_id"] in mixture_ids else 16384
     restored = read_frame(Path(arguments[6]), state_limit) if len(arguments) == 7 else None
     if len(arguments) == 7 and restored is None:
         raise ResearchError("CONTRACT_MISMATCH", "worker resume state is absent or invocation differs")
@@ -43,7 +44,7 @@ def main():
             control.save(state, {"completed_steps": completed, "total_steps": total,
                 "throughput_per_second": rate, "eta_seconds": (total-completed)/max(rate, 1e-12)})
             raise SystemExit(85)
-    recoverable = cells[0]["plugin_id"] in {"affine-propagation-chunk", "synthetic-propagation-chunk", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk"}|PLUGIN_IDS
+    recoverable = cells[0]["plugin_id"] in {"affine-propagation-chunk", "synthetic-propagation-chunk", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk"}|mixture_ids
     atomic_write(Path(output), encode(execute_propagation(spec, cells[0], resume_state=restored,
         checkpoint=checkpoint if recoverable else None, admission=admission)))
 

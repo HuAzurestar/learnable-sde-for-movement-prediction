@@ -42,9 +42,10 @@ def validate_propagation_cell(spec, cell):
     mlmc_reference = cell["plugin_id"] == "affine-mlmc-qualification-chunk"
     mlmc_production = cell["plugin_id"] == "affine-mlmc-production-chunk"
     mixture_qualification = cell["plugin_id"] == "affine-mixture-qualification"
+    mixture_production = cell["plugin_id"] == "affine-mixture-production-chunk"
     from experiments.pirc27.mixture_plugin import PLUGIN_IDS, mixture_plugin, mixture_policy, mixture_config
     mixture = cell["plugin_id"] in PLUGIN_IDS
-    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk", "affine-mixture-qualification"}|PLUGIN_IDS:
+    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk", "affine-mixture-qualification", "affine-mixture-production-chunk"}|PLUGIN_IDS:
         raise ResearchError("CONTRACT_MISMATCH", "unknown explicit propagation adapter")
     recovery = cell["plugin_id"].endswith("-chunk")
     synthetic = cell["plugin_id"].startswith("synthetic-")
@@ -63,6 +64,9 @@ def validate_propagation_cell(spec, cell):
     if mixture_qualification:
         from experiments.pirc27.mixture_qualification_plugin import mixture_qualification_plugin
         plugin = mixture_qualification_plugin()
+    if mixture_production:
+        from experiments.pirc27.mixture_production_plugin import mixture_production_plugin
+        plugin = mixture_production_plugin()
     execution_plan(spec, cell, plugin)
     request = request_from_manifest(cell["propagation_request"])
     package_type = FrozenNonlinearPackage if synthetic else FrozenDynamicsPackage
@@ -72,7 +76,11 @@ def validate_propagation_cell(spec, cell):
     except DataValidationError as exc:
         raise ResearchError("CONTRACT_MISMATCH", "frozen propagation package schema/content/code differs") from exc
     config = cell["execution"]["config"]
-    if mixture:
+    if mixture_production:
+        from experiments.pirc27.mixture_production_plugin import production_policies, mixture_production_config
+        mixture_bound, policy = production_policies(spec, cell, package, request, config)
+        expected = mixture_production_config(request, mixture_bound, policy)
+    elif mixture:
         policy = mixture_policy(spec, cell, package, request, config)
         expected = mixture_config(request, policy, synthetic=synthetic)
     elif mixture_qualification:
@@ -133,6 +141,10 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
     if not recovery and (resume_state is not None or checkpoint is not None):
         raise ResearchError("CONTRACT_MISMATCH", "restart-only methods cannot accept chunk state")
     continuation = {"resume_state": resume_state, "checkpoint": checkpoint}
+    mixture_production = plugin.plugin_id == "affine-mixture-production-chunk"
+    if mixture_production:
+        from experiments.pirc27.mixture_production_plugin import production_policies
+        production_mixture, _ = production_policies(spec, cell, package, request, config)
     methods = {"exact": lambda: analytic_estimate(package, request),
         "gaussian": lambda: analytic_estimate(package, request, discrete=True),
         "euler": lambda: monte_carlo(package, request, **continuation),
@@ -143,7 +155,7 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
         "importance": lambda: importance_sampling(package, request, proposal=tuple(config["proposal"]), **continuation),
         "cubature": lambda: cubature_estimate(package, request),
         "mixture": lambda: mixture_estimate(package, request,
-            mixture_policy(spec, cell, package, request, config), **continuation)}
+            production_mixture if mixture_production else mixture_policy(spec, cell, package, request, config), **continuation)}
     mixture_analysis = None
     if plugin.plugin_id == "affine-mixture-qualification":
         from experiments.pirc27.mixture_qualification_plugin import mixture_qualification_policies
@@ -158,7 +170,10 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
                {"absolute_error_vs_float64_reference": abs(result.estimate-analytic_estimate(package, request).estimate)})
     qualified_components = None
     if formal:
-        if mlmc_production:
+        if mixture_production:
+            from .mixture_qualification_admission import qualified_mixture_forecast, METRIC
+            error, qualified_components = qualified_mixture_forecast(spec, cell, package, request, result.manifest(), admission)
+        elif mlmc_production:
             from .mlmc_qualification_admission import qualified_mlmc_forecast, METRIC
             error, qualified_components = qualified_mlmc_forecast(spec, cell, package, request, result, admission)
         else:

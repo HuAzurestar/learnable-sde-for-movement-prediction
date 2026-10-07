@@ -45,6 +45,9 @@ The actual supervisor charges native worker occupancy and keeps failed numeric
 checks as completed artifacts. The analysis alone still says
 `OWNER_SETTLEMENT_REQUIRED`: successful settlement, exact source/policy linkage,
 target-output checking and an independent saved-proof reader are required before
-formal target admission. Those remaining gates are not replaced by this producer;
-the existing formal/held-out mixture refusal is retained. This is not a study,
+formal target admission. Those gates are not replaced by this producer;
+the existing fixture/nonlinear formal mixture refusal is retained. The separate
+[settled target adapter](managed-mixture-admission.md) consumes the actual owner
+source chain; its independent reader and interrupted-target verification remain
+required. This is not a study,
 manuscript result, method-wide approval or real-model qualification.
