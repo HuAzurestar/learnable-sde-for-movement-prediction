@@ -182,12 +182,22 @@ class ResearchSupervisor:
                 raise soft_errors[0]
             if soft_started is None:
                 return False
-            # A missing frame has nothing to publish. Keep its request durable
-            # and return to the ordinary fresh budget poll, not an empty save
-            # transaction with an expensive final publication verification.
-            # Presence is only an uncached hint: present/replaced/invalid frames
-            # still need every original physical, budget and response check.
-            if not channel.response_present():
+            # Receiving bounded IPC is not permission to save. Read the actual
+            # frame (not a presence hint) before taking the publication lock:
+            # a missing/sharing-busy frame must keep ordinary fresh budget
+            # polling, not consume the checkpoint margin in an empty save
+            # transaction. A complete frame still needs every fresh authority,
+            # physical/source/save/deadline check below; no decision is reused.
+            try:
+                frame = channel.response()
+            except (ControlError, OSError) as exc:
+                # Retain the actual80% request even when IPC is invalid or
+                # denied. Receiving a bad frame never reaches save or ACK.
+                record_checkpoint_request()
+                if isinstance(exc, ControlError):
+                    raise ResearchError("CONTRACT_MISMATCH", str(exc)) from exc
+                raise
+            if frame is None:
                 record_checkpoint_request()
                 return False
             # REQUEST, fresh budget and ready-response/save share one short
@@ -206,14 +216,11 @@ class ResearchSupervisor:
                 self.store._read_completion(check_current_budget, lambda: None)
                 if budget_stop_requested or past_deadline():
                     return True
-                try:
-                    frame = channel.response()
-                except ControlError as exc:
-                    raise ResearchError("CONTRACT_MISMATCH", str(exc)) from exc
-                # The real response read itself may publish a current closure
-                # or hold. Recheck authority before the funded save handler.
+                # The response read may publish a closure/hold. The initial
+                # fresh physical pass already includes it; recheck authority
+                # here and after the final pass before any funded save/ACK.
                 check_current_budget()
-                if frame is None or budget_stop_requested or past_deadline():
+                if budget_stop_requested or past_deadline():
                     return True
                 progress = frame["progress"]
                 if (type(progress) is not dict or set(progress) != {"completed_steps", "total_steps", "throughput_per_second", "eta_seconds"}

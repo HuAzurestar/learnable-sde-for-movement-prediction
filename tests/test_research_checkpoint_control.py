@@ -88,20 +88,22 @@ def test_owner_cannot_acknowledge_without_request(tmp_path):
     assert not exchange.accepted and not (tmp_path / "checkpoint-ack.json").exists()
 
 
-def test_response_presence_is_uncached_metadata_without_read_or_authority(tmp_path, monkeypatch):
+def test_absent_response_is_uncached_and_never_owner_acceptance(tmp_path):
     exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", time.monotonic() + 3, 4096)
-    monkeypatch.setattr(control, "read_frame", lambda *a, **k: pytest.fail("presence hint read a frame"))
+    exchange.request()
     path = tmp_path / "checkpoint-response.json"
-    assert exchange.response_present() is False
-    path.write_bytes(b"")
-    assert exchange.response_present() is True
-    assert exchange.request_id is None and exchange.accepted is False
+    assert exchange.response() is None
+    frame = {"schema_version": control.SCHEMA, "attempt_id": exchange.attempt_id, "token": exchange.token,
+        "request_id": exchange.request_id, "state": {}, "progress": {}}
+    control.write_frame(path, frame, 4096)
+    assert exchange.response() == frame
+    assert exchange.accepted is False and not (tmp_path / "checkpoint-ack.json").exists()
     path.unlink()
-    assert exchange.response_present() is False
+    assert exchange.response() is None
 
 
 @pytest.mark.parametrize("entry", ["invalid-json", "directory"])
-def test_response_presence_does_not_validate_invalid_entries(tmp_path, entry):
+def test_bounded_response_reader_still_rejects_invalid_entries(tmp_path, entry):
     exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", time.monotonic() + 3, 4096)
     exchange.request()
     path = tmp_path / "checkpoint-response.json"
@@ -109,9 +111,13 @@ def test_response_presence_does_not_validate_invalid_entries(tmp_path, entry):
         path.mkdir()
     else:
         path.write_bytes(b"{not-json")
-    assert exchange.response_present() is True
-    with pytest.raises(control.ControlError):
+    # Preserve native directory access refusal; it is not a sharing-busy frame
+    # and must not be silently deferred or converted into message acceptance.
+    expected = OSError if entry == "directory" else control.ControlError
+    with pytest.raises(expected) as rejected:
         exchange.response()
+    if entry == "directory" and control.os.name == "nt":
+        assert rejected.value.winerror == 5
     assert exchange.accepted is False and not (tmp_path / "checkpoint-ack.json").exists()
 
 

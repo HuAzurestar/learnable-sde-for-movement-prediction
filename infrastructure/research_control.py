@@ -239,18 +239,6 @@ class CheckpointExchange:
         write_frame(self.directory / "checkpoint-request.json", value, 16384, deadline=self.deadline)
         return self.request_id
 
-    def response_present(self):
-        """Uncached scheduling hint, never frame validity or save authority.
-
-        lstat also notices dangling links/nonregular entries: those still go
-        through the existing strict response reader rather than hiding them.
-        """
-        try:
-            (self.directory / "checkpoint-response.json").lstat()
-        except FileNotFoundError:
-            return False
-        return True
-
     def response(self):
         if self.accepted:
             return None
