@@ -391,6 +391,19 @@ def validate_run_record(record: Mapping[str, object]) -> None:
             or gate["sample_size"] < 0
         ):
             raise RunError("mechanism gate contains invalid statistic values")
+        if (
+            not math.isfinite(gate["value"])
+            or not math.isfinite(gate["threshold"])
+            or gate["operator"] not in {"ge", "le"}
+        ):
+            raise RunError("mechanism gate requires finite values and a registered operator")
+        expected = (
+            gate["value"] >= gate["threshold"]
+            if gate["operator"] == "ge"
+            else gate["value"] <= gate["threshold"]
+        )
+        if gate["passed"] != expected:
+            raise RunError("mechanism gate passed flag disagrees with its statistic")
 
 
 def _transition_matrices(
@@ -590,6 +603,14 @@ def predict_segments(
     n_samples: int,
     condition_resolver: ConditionResolver | None = None,
 ) -> tuple[Prediction, ...]:
+    poa = str(config.get("poa", "fp"))
+    integrator = str(config.get("integrator", "split"))
+    if poa not in {"fp", "mc", "crn"}:
+        raise RunError(f"unsupported propagation method: {poa}")
+    if integrator not in {"split", "euler_maruyama", "exact"}:
+        raise RunError(f"unsupported integrator: {integrator}")
+    if str(config.get("bridge", "none")) not in {"none", "doob", "gaussian_schrodinger", "soft_endpoint"}:
+        raise RunError("unsupported bridge")
     rng = np.random.default_rng(seed)
     predictions: list[Prediction] = []
     for segment in segments:
@@ -705,6 +726,8 @@ def mechanism_statistics(
     gate_definition: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     gate = gate_definition or arm.mechanism_gate
+    if gate.get("operator", "ge") not in {"ge", "le"}:
+        raise RunError("mechanism gate operator is not implemented")
     statistic = str(gate["statistic"])
     if statistic == "mode_entropy":
         value = float(-np.sum(model.mode_probabilities * np.log(model.mode_probabilities + 1e-15)))

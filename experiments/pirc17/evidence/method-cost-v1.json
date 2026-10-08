@@ -1,0 +1,184 @@
+{
+  "schema_version": "pirc17-method-cost-evidence-v1",
+  "state": "observed-development-costs",
+  "cost_only": true,
+  "execution_admitted": false,
+  "final_eval_authorized": false,
+  "numerically_qualified": false,
+  "formal_training_accepted": false,
+  "accuracy_claim_authorized": false,
+  "final_eval_label_prediction_metric_reads": 0,
+  "cost_origin_in_calibration_population": true,
+  "interpretation": "Five single-trial mechanism costs on the candidate 485-window population; not a stable unit price, upper bound, independent accuracy evaluation, whole-matrix certification or project ETA.",
+  "settings": {
+    "particles": 512,
+    "maximum_step_seconds": 5,
+    "reference_and_history_seconds": 60,
+    "seed": 20260814,
+    "nominal_seconds": [
+      60.0,
+      300.0,
+      900.0,
+      1800.0
+    ],
+    "actual_horizons_seconds": [
+      55.0,
+      297.0,
+      894.0,
+      1796.0
+    ],
+    "scoring_slots_from_same_forecast": 4,
+    "train_adapt_validation_counts": [
+      328,
+      76,
+      81
+    ],
+    "training_transitions_by_role": {
+      "train": 26009,
+      "adapt": 5762,
+      "validation": 6149
+    }
+  },
+  "provenance": {
+    "plan": {
+      "path": "experiments/pirc17/plans/method-cost-p512-h5-v1.json",
+      "sha256": "31a012915b76c67f554480a20e57d52ae2681d2812cd0efa2af6f43281e30c9a"
+    },
+    "start": {
+      "path": "artifacts/pirc17/dev10/method-cost-p512-h5-v1/start.json",
+      "sha256": "aaf6dc2bd6a2ba2390aca0d3eb245911698318c307536783e63acd0b9613cd4d"
+    },
+    "ledger": {
+      "path": "artifacts/pirc17/dev10/method-cost-p512-h5-v1/ledger.jsonl",
+      "sha256": "6cc4a9a14cc48e60fe12ac60dace9c520bb5f02927ad4600049458c124b83a9f"
+    },
+    "result": {
+      "path": "artifacts/pirc17/dev10/method-cost-p512-h5-v1/result.json",
+      "sha256": "55b2ac2c4f7ffbb43a66babe9708d3cad6a5e748c10604afe4fbeb9a173f14ca"
+    },
+    "supervision": {
+      "path": "artifacts/pirc17/dev10/method-cost-p512-h5-v1/supervision.json",
+      "sha256": "b53b9b08953e4383ecaf8e8f5e1842f4cbbed76175367546352df825ec637a36"
+    }
+  },
+  "runtime": {
+    "python": "3.10.13",
+    "numpy": "1.26.4",
+    "torch": "2.3.1+cu121",
+    "torch_threads": 6,
+    "torch_interop_threads": 12
+  },
+  "input_identity_sha256": "3b17325c864ff1db5c1800533aa227f58a4a0a4e1e957e1430a773019d02c1d3",
+  "source_sha256": {
+    "data/pirc20.py": "e13de6ce21a632c166fad4f5050dd1322e58f6a7581830664b0182d331923124",
+    "experiments/nex326/cohort.py": "e59617dc9b84fe5071ab94e2555f90af4199c3adb6c370c2cc206ba44f38af15",
+    "experiments/nex326/model.py": "8863e936419a55d95b4fe31ddb8790fcbb0a923b57cbc3f77cde3e095dea9aa2",
+    "experiments/nex326/pirc20_adapter.py": "d9f82c905d299cb040157f1bbfb9995c3a197495abc756d1e29ee91fdccc25eb",
+    "experiments/nex326/specification.py": "31e7d6c496c63bdcfd76c666810bc4851ae5e5e5fd86e1d842442314abecfdd2",
+    "experiments/nex326/experiment.json": "f12dc97a20667212b206e46dd274706b8bf799ee54871729727938d2a7d9e54a",
+    "experiments/nex326/pirc19_scope_policy.json": "74c5f331fcb9ee11c2dd055b227095026f17c717e83df09d7c5f04bffc0868c6",
+    "experiments/pirc17/method_cost_probe.py": "ca98c455700204cf3ce42d62d621b712d263e1ddd04a0b413604eae91b573ccd",
+    "experiments/pirc17/method_training.py": "65c78934a74f2725bf7f792cd851178fcc539d67a912fc8d33253d45a1d15598",
+    "experiments/pirc17/method_development.py": "da8f9c1d280c0203636699438f967bd7c831fade6f4e621f5b87a8fa4931ebb7",
+    "experiments/pirc17/method_inputs.py": "11757c38e5aa8a2a7b83520c2465887a467fd63422766330203448e6b3a933b8",
+    "experiments/pirc17/method_rollout.py": "076e3964d8f2f18ea45c93c964962be01a74eff62c380cc8719b5e3af4ac3560",
+    "experiments/pirc17/origins.py": "e06c6165277e994af943c4b5108f978abb58cc39a005e326c15de6d1f26a6c26",
+    "experiments/pirc17/rollout.py": "b8fda002d6c771e86edf799f7708f3f1ad70fe9bc352b1a571bdbfe0aac2e45a",
+    "experiments/pirc17/calibration.py": "42c634c40544a37abbc88c4f06fa25a00938b33099286221de217eca1b9d7427",
+    "experiments/pirc17/metrics.py": "c00059e40421d5267deb35b73096048f22fd439dc9914801ccaf4fd609885570",
+    "experiments/pirc17/features.py": "7ce422a2a83add8ad8484d52f8a83a4669c05a259d3fcb8c55ab5e06de4cc26c",
+    "experiments/pirc17/workload.py": "04f3c003626fc88e3ab16cc239695166cbd6c134bd2767ecbea520616ca354fe",
+    "experiments/pirc17/physical_memory.py": "241f7482032ef4cbb8df1254ba5f81c40986c5b96d6a2f9c69fdf6b599c12680",
+    "experiments/pirc17/seed_resume_session.py": "d66f7f0f9e12ceae91dea78e3efb70167df545f6b1c83ac0d624fc85c854a9df",
+    "experiments/pirc17/seed_resume_lineage.py": "72a090ad3b943b90d230d441fb2e9b1011dc8e23e59aaf2259ee94c950ff2188"
+  },
+  "by_fit": {
+    "arm-01/full": {
+      "count": 1,
+      "fit_only_seconds": 1.0216459999792278,
+      "fit_and_prepare_seconds": 1.6793553999741562
+    },
+    "arm-04/gmm_kernel": {
+      "count": 1,
+      "fit_only_seconds": 1.1101889999699779,
+      "fit_and_prepare_seconds": 1.7635270000318997
+    },
+    "arm-05/explicit_decomp": {
+      "count": 1,
+      "fit_only_seconds": 1.595806099998299,
+      "fit_and_prepare_seconds": 2.2298338999971747
+    },
+    "arm-09/mixed": {
+      "count": 1,
+      "fit_only_seconds": 2.710906199994497,
+      "fit_and_prepare_seconds": 3.403816500038374
+    },
+    "arm-14/reptile": {
+      "count": 1,
+      "fit_only_seconds": 2.169978399993852,
+      "fit_and_prepare_seconds": 2.819076799962204
+    }
+  },
+  "by_forecast": {
+    "arm-01/full": {
+      "count": 1,
+      "forecast_seconds": 0.630744100024458,
+      "common_score_seconds": 0.08166379999602214,
+      "integration_steps": 362,
+      "propagation": "fp"
+    },
+    "arm-04/gmm_kernel": {
+      "count": 1,
+      "forecast_seconds": 0.606813799997326,
+      "common_score_seconds": 0.08022160001564771,
+      "integration_steps": 362,
+      "propagation": "fp"
+    },
+    "arm-05/explicit_decomp": {
+      "count": 1,
+      "forecast_seconds": 0.5531694999663159,
+      "common_score_seconds": 0.08041899994714186,
+      "integration_steps": 362,
+      "propagation": "fp"
+    },
+    "arm-21/mc": {
+      "count": 1,
+      "forecast_seconds": 0.48522550001507625,
+      "common_score_seconds": 0.07301259995438159,
+      "integration_steps": 362,
+      "propagation": "mc"
+    },
+    "arm-21/crn": {
+      "count": 1,
+      "forecast_seconds": 0.5567736999946646,
+      "common_score_seconds": 0.07713350001722574,
+      "integration_steps": 362,
+      "propagation": "crn"
+    }
+  },
+  "load_seconds": 33.372941499983426,
+  "batch_internal_seconds": 49.23111579997931,
+  "batch_outer_seconds": 55.36440069996752,
+  "cumulative_preparation_empirical_seconds": 382.8901889999675,
+  "independent_audit": {
+    "source": "standalone NumPy/stdlib; does not import probe, fitter, forecaster or score implementation",
+    "fit_files_checked": 5,
+    "forecast_detail_files_checked": 5,
+    "array_files_checked": 5,
+    "scoring_time_rows_recomputed": 20,
+    "common_scores_recomputed": true,
+    "matching_model_training_source_identities": true,
+    "process_tree_closed": true,
+    "active_processes": 0,
+    "elapsed_seconds": 0.860182500036899
+  },
+  "unmeasured_or_unsealed": [
+    "other method mechanisms and training intervals",
+    "full formal population selection and qualification",
+    "additional method-specific scoring registry",
+    "formal independent replay",
+    "formal stage/total caps",
+    "paper, review and human decision latency"
+  ],
+  "full_feature_wall_time_estimate_seconds": null
+}

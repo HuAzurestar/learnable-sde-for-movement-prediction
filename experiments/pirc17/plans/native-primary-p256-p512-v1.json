@@ -1,0 +1,32 @@
+{
+  "schema_version": "pirc17-native-primary-plan-v1",
+  "purpose": "complete_primary_family_validation_numerical_pilot",
+  "configurations": [
+    "base",
+    "all-terrain",
+    "loo-road",
+    "loo-river",
+    "loo-worldcover",
+    "loo-surface"
+  ],
+  "seeds": [20260814],
+  "particles": [256, 512],
+  "steps": [0.625, 0.3125],
+  "limit_origins": 3,
+  "selection_policy": "lexical_independent_blocks",
+  "map_backend": "multicell",
+  "wall_seconds": 28800,
+  "outer_wall_seconds": 29220,
+  "minimum_free_bytes": 2147483648,
+  "tolerance_m": 10.27506475,
+  "expected_run_count": 72,
+  "certified": false,
+  "formal_training_accepted": false,
+  "final_eval_authorized": false,
+  "reference_ledger_sha256": "1be94d16af47c5c1701f7a5db0281e3c79286ef960d31991bd75c5a2f095661f",
+  "reference_audit_sha256": "8890a39b6479abf3bff044bfe71730cd4bc5ec7fc10961cffc74b775a78e5f51",
+  "fit_sha256": "22fb218eda4922febc1e2ef8715e31ed3f54bbca3c75aa7461d2346589444c4a",
+  "fit_ledger_sha256": "649fc0540ae5398235a19c7a0bd26d8e31ee5836dff2850c9d30bd5d4043e5be",
+  "training_policy_sha256": "560a6f0776287ab7a31a91c88d029e37f25a1964f8039a39554cd267e202d0ee",
+  "eligibility_sha256": "7b6773ec628b7a14f586400ab315965d1f88b2227365b0b9a6cb35be9a7f9690"
+}

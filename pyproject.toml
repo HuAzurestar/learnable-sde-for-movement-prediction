@@ -24,6 +24,7 @@ Issues = "https://github.com/HuAzurestar/learnable-sde-for-movement-prediction/i
 
 [project.optional-dependencies]
 test = ["pytest>=7.4"]
+benchmark = ["psutil>=5.9", "threadpoolctl>=3"]
 
 [project.scripts]
 learnable-sde = "cli.__main__:main"
