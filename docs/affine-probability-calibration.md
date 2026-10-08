@@ -85,6 +85,37 @@ admission/output/native-cost provenance without starting another worker. These
 producer controls do not prove cross-method geometry reuse or full research
 cost accounting; the dedicated owner/consumer/export/Paper chain is still needed.
 
+## Settled source preparation owner
+
+`prepare_probability_calibration` consumes an explicitly selected source pointer
+under current evaluate/consumer permission. It verifies the original admitted
+synthetic train/validation pilot, canonical artifact and current source code,
+native tree-stop confirmation, reservation/settlement/completion ordering and
+positive charge within the frozen pilot cap. Disclosure is physically verified
+again after extra source I/O. Version selection is exact; no grant is inferred.
+
+The owner checks bounded saved certificates, aggregate operation counts, fixed
+quantile bracket, normalized candidate, actual rounded threshold and separated
+relative probability diagnostics. It executes no matrix exponential, CDF,
+square root, inverse-CDF search or estimator. All that work remains charged in
+the source worker. Tiny-normal physical envelopes stay conservatively coarse;
+candidate selection uses the saved normalized midpoint with exact scale.
+
+The physical geometry key includes the frozen model/law/origin/cutoff/horizon,
+normal/threshold/open-or-closed rule/functional version/coordinates/SI units
+and causal input identity. It excludes request ID, algorithm seed/grid/path
+count/chunk/tolerance/coupling/arm. For explicit source cases the owner uses the
+original validated input binding. Otherwise only the declared fixed synthetic
+initial law is identified, never observed-prefix causality or independent
+trajectories. Private-prefix source preparation is not implemented here.
+
+The preparation proof remains `NOT_ADMITTED` with both qualification flags false.
+`OWNER_SETTLED` refers only to its proven original calibration source cost; one
+source-cost identity is retained for future deduplication, not a new ledger or
+proof that an aggregate currently counts it correctly. Target method admission,
+frozen threshold matrix/preregistration, cross-method reuse, authorized export
+and independent Paper validation still require their dedicated integration.
+
 Every result retains `scientific_qualification: false`,
 `method_qualification: false`, `admission_status: NOT_ADMITTED` and
 `cost_status: OWNER_SETTLEMENT_REQUIRED`, even when the numerical status is

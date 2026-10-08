@@ -4,7 +4,7 @@ from dataclasses import dataclass, fields
 import math
 
 from domain.errors import DataValidationError
-from domain.frozen_dynamics import FrozenDynamicsPackage, content_hash, _hash
+from domain.frozen_dynamics import FrozenDynamicsPackage, content_hash, _hash, STATE_NAMES, STATE_UNITS
 from domain.propagation import PropagationRequest
 
 
@@ -75,3 +75,28 @@ class AffineHalfspaceCalibrationPolicy:
         result = cls(**document)
         result._validate_scalars()
         return result
+
+
+def halfspace_geometry(package, request, *, causal_input_hash):
+    """A physical event key, not method identity, independence or read authority.
+
+    Callers must supply the genuine frozen causal input identity. The owner
+    binds it to the original source; a caller-supplied hash alone is no proof.
+    Numerical tolerance, seed, grid, sample count and budget arm are excluded.
+    """
+    if type(package) is not FrozenDynamicsPackage or type(request) is not PropagationRequest:
+        raise DataValidationError("frozen affine package and halfspace request required")
+    package.validate()
+    request.validate()
+    if (request.model_package_hash != package.package_hash or not _hash(causal_input_hash)
+            or request.functional != "endpoint-halfspace" or request.normal[2:] != (0., 0.)):
+        raise DataValidationError("explicit four-state spatial halfspace and causal input identity required")
+    return {"schema_version": "affine-halfspace-geometry-v1", "model_package_hash": package.package_hash,
+        "initial_mean": list(request.initial_mean),
+        "initial_covariance": [list(row) for row in request.initial_covariance],
+        "origin": request.origin, "history_cutoff": request.history_cutoff, "horizon": request.horizons[0],
+        "functional": request.functional, "functional_version": request.functional_version,
+        "normal": list(request.normal), "threshold": request.threshold, "closed": request.closed,
+        "state_order": list(STATE_NAMES), "units": list(STATE_UNITS), "time_unit": "s",
+        "coordinate_system": request.region_coordinate_system, "threshold_units": "m",
+        "causal_input_hash": causal_input_hash}
