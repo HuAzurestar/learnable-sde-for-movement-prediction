@@ -25,7 +25,7 @@ from experiments.pirc25.affine import ROOT, code_hash
 from infrastructure.research_store import ResearchError, atomic_write, digest, encode
 
 
-VERSION = "pirc26-managed-dsde-preparation-v1"
+VERSION = "pirc26-managed-dsde-preparation-v2"
 MAX_PAIRS = 16
 MAX_SOURCE_BYTES = 32 * 1024 * 1024
 MAX_RESULT_BYTES = 32 * 1024 * 1024
@@ -158,7 +158,7 @@ def _validate_geometry(document, width):
 def _validate_result(value, request):
     """Owner structural/integrity checks; do not rerun numerical preparation."""
     require(type(value) is dict and set(value) == {"schema_version", "request_hash", "computation_ref",
-        "train_binding", "normalizer", "blocks", "scientific_qualification"}, "closed preparation result required")
+        "train_binding", "normalizer", "blocks", "training_population", "scientific_qualification"}, "closed preparation result required")
     require(value["schema_version"] == VERSION and value["request_hash"] == digest(request)
         and value["computation_ref"] == request["computation_ref"]
         and value["train_binding"] == request["train_binding"]
@@ -212,6 +212,9 @@ def _validate_result(value, request):
             train_observations += sum(len(s["time"]) - 1 for s in document["segments"])
     require(observations <= MAX_OBSERVATIONS and train_observations == normalizer["observations"],
             "joint prepared/training observation quota differs", "RESOURCE_PLAN_REJECTED")
+    from application.pirc26_population import validate_population
+    validate_population(value["training_population"], value["blocks"], value["train_binding"], normalizer,
+                        study_id=request["original_study_id"])
     require(len(encode(value)) <= MAX_RESULT_BYTES, "preparation result byte quota", "RESOURCE_PLAN_REJECTED")
 
 
@@ -262,7 +265,7 @@ def load_prepared(store, reference):
         request = store._manifest(reference["request_manifest_id"])
         attempt = store._attempts().get(reference["attempt_id"])
         require(attempt and attempt["state"] == "SUCCEEDED" and attempt["run_id"] == reference["run_id"]
-            and proof["schema_version"] == "pirc26-preparation-receipt-v1"
+            and proof["schema_version"] == "pirc26-preparation-receipt-v2"
             and proof["computation_ref"] == request["computation_ref"] == reference
             and proof["request_hash"] == digest(request) and proof["result_artifact_id"] == attempt["artifact_id"],
             "preparation success/receipt changed", "CORRUPT_ARTIFACT")
@@ -376,7 +379,20 @@ class PreparationRunner:
             settles = [e for e in self.store._events() if e["event_kind"] == "SETTLE" and e["payload"].get("reservation_id") == reference["reservation_id"]]
             require(len(settles) == 1, "preparation settlement missing", "CORRUPT_ARTIFACT")
             settled = settles[0]
-            proof = {"schema_version": "pirc26-preparation-receipt-v1", "computation_ref": reference,
+            # Serialize the already validated worker document, not numerical
+            # conversion/fitting. Publish a train-only artifact so a training
+            # consumer need not open the selection-bearing preparation result.
+            require(_sources(self.store, original, arm, selections) == descriptors, "source authority expired before result read", "UNAUTHORIZED_DATA")
+            value = json.loads(self.store._verified_artifact_content(self.store._manifest("artifact-" + outcome["artifact_id"])))
+            _validate_result(value, request)
+            population = value["training_population"]
+            require(_sources(self.store, original, arm, selections) == descriptors, "source authority expired before train publication", "UNAUTHORIZED_DATA")
+            artifact = self.store.artifact(encode(population["document"]), role="training-population",
+                visibility="synthetic" if all(c.get("visibility") == "synthetic" for c in original["cells"]
+                    if c["block_id"] in population["provenance"]["independent_block_ids"]) else "restricted",
+                block_ids=population["provenance"]["independent_block_ids"], study_id=original["study_id"])
+            proof = {"schema_version": "pirc26-preparation-receipt-v2", "computation_ref": reference,
+                "training_population": {"artifact_id": artifact["artifact_id"], "provenance": population["provenance"]},
                 "request_hash": digest(request), "result_artifact_id": outcome["artifact_id"], "settlement_event_hash": settled["hash"],
                 "cost": {"arm_id": arm["arm_id"], "charged_ms": settled["payload"]["charged_ms"], "unit": "slot-ms",
                     "scope": "whole-shared-computation-job", "basis": "measured-monotonic"}}

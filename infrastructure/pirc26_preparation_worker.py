@@ -92,6 +92,9 @@ def execute(output):
     result = {"schema_version": VERSION, "request_hash": digest(request), "computation_ref": request["computation_ref"],
         "train_binding": request["train_binding"], "normalizer": normalizer, "blocks": blocks,
         "scientific_qualification": "not-established"}
+    from application.pirc26_population import training_population
+    result["training_population"] = training_population(blocks, request["train_binding"], normalizer,
+                                                       study_id=request["original_study_id"])
     _validate_result(result, request)
     content = encode(result)
     require(len(content) <= MAX_RESULT_BYTES, "worker preparation result byte quota", "RESOURCE_PLAN_REJECTED")
