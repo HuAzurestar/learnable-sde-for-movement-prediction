@@ -333,6 +333,12 @@ def freeze_design(design):
         # Compare actual per-horizon configurations, not table labels or an
         # implicit-versus-explicit representation of the same constant grid.
         numerical["steps"] = tuple(_steps(method, h) for h in design.horizons)
+        # These kernels propagate moments or a bounded deterministic point/
+        # component set, not request.samples paths. Retain the original field
+        # in requests/resource bindings, but it cannot create another numerical
+        # stratum for the same deterministic algorithm. No manifest is rewritten.
+        if method.method in {"exact", "gaussian", "cubature", "mixture"}:
+            numerical.pop("samples")
         # All fields are already bounded and typed. Numeric equality also
         # identifies int/float zero and signed-zero aliases, unlike JSON hashes.
         if numerical in numerical_configs:

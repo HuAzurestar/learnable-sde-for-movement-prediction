@@ -119,6 +119,16 @@ configuration under another label is refused. There is no automatic Cartesian
 grid/count search: supply the exact configurations before exposure. The bounded
 method axis and 10,000-cell/32 MiB limits include all of them.
 
+For `exact`, `gaussian`, fixed eight-point `cubature` and bounded deterministic
+`mixture`, `samples` is not a path allocation. Changing only that unused field
+cannot create a distinct numerical configuration, even on a declared unavailable
+row. Duplicate refusal precedes model validation and matrix expansion. Original
+request fields, hashes, resource contracts and previously published manifests
+are not normalized or rewritten. Actual path methods and MLMC retain their
+distinct sample/allocation axes; deterministic grid or component settings can
+still distinguish configurations. This check is not scientific qualification or
+a claim that every other configuration field affects numerical output.
+
 Labels are frozen comparison strata, not method-family or budget identities.
 Matching labels across methods declare the intended configuration comparison;
 the actual grid, allocation and proposal remain fully request-bound and need

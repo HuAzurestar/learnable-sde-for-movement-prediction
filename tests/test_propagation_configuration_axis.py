@@ -100,6 +100,55 @@ def test_scalar_aliases_cannot_disguise_duplicate_numerical_configuration(propos
 
 
 @pytest.mark.parametrize("nonlinear", [False, True])
+@pytest.mark.parametrize("name", ["exact", "gaussian", "cubature", "mixture"])
+def test_unused_path_counts_cannot_disguise_deterministic_configuration(monkeypatch, nonlinear, name):
+    original = StudyMethod(name, steps=2, samples=8, chunk_size=8,
+        recovery=name == "mixture",
+        mixture_settings=MixtureSettings(2, .1, 0., (1.,)*4, 0., 100000, 60.) if name == "mixture" else None,
+        configuration_id="count-8")
+    alias = replace(original, samples=16, configuration_id="count-16")
+    design = fixture(nonlinear=nonlinear, methods=(original, alias))
+    monkeypatch.setattr(module, "validate_oracle_input", lambda *a, **kw: pytest.fail("alias evaluated"))
+    monkeypatch.setattr(module, "validate_nonlinear_input", lambda *a, **kw: pytest.fail("alias evaluated"))
+    monkeypatch.setattr(module, "product", lambda *a: pytest.fail("alias expanded"))
+    with pytest.raises(DataValidationError, match="duplicate numerical configuration"):
+        freeze_design(design)
+
+
+@pytest.mark.parametrize("name", ["euler", "heun", "reversible-heun", "importance", "mlmc"])
+def test_actual_path_count_changes_remain_distinct_original_arm_configs(name):
+    original = StudyMethod(name, steps=2, samples=8, chunk_size=8,
+        recovery=True, level_samples=(4, 4) if name == "mlmc" else (), configuration_id="count-8")
+    changed = replace(original, samples=16, level_samples=(8, 8) if name == "mlmc" else (),
+        configuration_id="count-16")
+    doc = freeze_design(fixture(methods=(original, changed),
+        functionals=(StudyFunctional("probability", "endpoint-halfspace"),),
+        horizons=(1.,), seeds=(11,))).manifest()
+    assert doc["expected_cells"] == 2 and len(doc["arms"]) == 1
+    assert [row["cell"]["propagation_request"]["samples"] for row in doc["matrix"]] == [8, 16]
+    assert len({row["request_hash"] for row in doc["matrix"]}) == 2
+    assert doc["arms"][0]["budget_seconds"] == 86400
+
+
+@pytest.mark.parametrize("nonlinear", [False, True])
+@pytest.mark.parametrize("name", ["exact", "gaussian", "cubature", "mixture"])
+def test_single_deterministic_config_keeps_original_request_and_resource_fields(nonlinear, name):
+    method = StudyMethod(name, steps=2, samples=16, chunk_size=8,
+        recovery=name == "mixture",
+        mixture_settings=MixtureSettings(2, .1, 0., (1.,)*4, 0., 100000, 60.) if name == "mixture" else None)
+    doc = freeze_design(fixture(nonlinear=nonlinear, methods=(method,), horizons=(1.,), seeds=(11,))).manifest()
+    assert doc["axis_manifest"]["methods"][0]["samples"] == 16
+    row = doc["matrix"][0]
+    assert row["cell"]["propagation_request"]["samples"] == 16
+    assert "configuration_id" not in row
+    assert "numerical_configuration" not in row["cell"]["comparison_dimensions"]
+    if row["disposition"] == "PLANNED":
+        assert row["cell"]["execution"]["config"]["samples"] == 16
+    else:
+        assert row["disposition"] == "INELIGIBLE" and "execution" not in row["cell"]
+
+
+@pytest.mark.parametrize("nonlinear", [False, True])
 def test_all_method_configs_keep_full_resource_or_nonexecution_bindings(nonlinear):
     names = ("exact", "gaussian", "euler", "heun", "reversible-heun", "mlmc",
              "importance", "cubature", "mixture", "pde")
