@@ -197,16 +197,19 @@ def test_resealed_declaration_is_not_a_substitute_for_actual_settled_owner(consu
         prepare_calibrated_consumer(store, substituted, substituted["cells"][0])
 
 
-@pytest.mark.parametrize("fault", ["missing-proof", "request", "model"])
+@pytest.mark.parametrize("fault", ["missing-proof", "request", "model", "horizon-type"])
 def test_saved_receipt_and_current_output_cannot_strip_or_swap_geometry_provenance(consumers, fault):
     store, spec, registry, grant, *_ = consumers
     cell = spec["cells"][0]
     outcome = SharedRunner(store, registry).run_cell(spec["study_id"], digest(cell))
-    assert outcome["reused"]
+    assert outcome["state"] == "SUCCEEDED", outcome
     result = json.loads(store.read_artifact(outcome["artifact_id"], purpose="evaluate", authorization=grant))
     receipt = store.manifest("admission-"+result["admission_hash"])
     if fault == "missing-proof":
         receipt["documents"].pop("probability_calibration")
+    elif fault == "horizon-type":
+        result["forecast"]["horizons"] = [True]
+        result["output_hash"] = digest({k: result[k] for k in ("metrics", "forecast", "fit", "source_schema")})
     else:
         result["forecast"]["request_hash" if fault == "request" else "model_package_hash"] = "a"*64
         result["output_hash"] = digest({k: result[k] for k in ("metrics", "forecast", "fit", "source_schema")})
@@ -239,3 +242,76 @@ def test_malformed_or_unbounded_consumer_axes_refuse_before_store_access(fault):
         axes["functionals"] *= 65
     with pytest.raises(ResearchError):
         AdmissionGate.prepare(None, spec, spec["cells"][0], None, "not-created")
+
+
+def test_preregistered_table_cannot_substitute_equal_python_boolean_for_physical_horizon(monkeypatch):
+    from application import probability_calibration_consumption as consumption
+    frozen = freeze_design(declared_design())
+    spec = frozen.study_spec(expected_hash=frozen.manifest_hash)
+    table = spec["propagation_design"]["axis_manifest"]["calibrations"]
+    substituted = deepcopy(table)
+    substituted[0]["horizon"] = True  # True == 1., but not canonical physical metadata.
+    prereg = {"probability_calibration_bindings": substituted,
+        "probability_calibration_bindings_hash": digest(table)}
+    monkeypatch.setattr(consumption, "prepare_probability_calibration",
+        lambda *a, **k: pytest.fail("source owner reached before exact preregistration"))
+    with pytest.raises(ResearchError, match="preregistration"):
+        consumption.prepare_calibrated_consumer(None, spec, spec["cells"][0], preregistration=prereg)
+
+
+def test_saved_proof_cannot_replace_false_qualification_with_integer_zero(consumers):
+    from application.probability_calibration_consumption import validate_calibrated_result
+    store, spec, _, _, _, _, proof = consumers
+    cell = spec["cells"][0]
+    saved = deepcopy(proof)
+    saved["scientific_qualification"] = 0  # 0 == False does not preserve the proof hash/type.
+    receipt = {"documents": {"probability_calibration": saved}}
+    result = {"forecast": {"model_package_hash": proof["geometry"]["model_package_hash"],
+        "request_hash": digest(cell["propagation_request"]), "horizons": [cell["horizon"]]}}
+    with pytest.raises(ResearchError, match="saved calibration proof"):
+        validate_calibrated_result(store, receipt, spec, cell, result)
+
+
+def test_legacy_bundle_cannot_hide_an_unrecognized_embedded_calibration_during_publication(consumers):
+    from application.research_evidence import authorize_evidence_publication
+    store, _, _, _, source_spec, *_ = consumers
+    grant = store.authorization("execution-fixture")
+    bundle = export_evidence(store, source_spec["study_id"], grant)
+    bundle["cells"][0]["admission"]["documents"]["probability_calibration"] = {
+        "kind": "explicit opaque synthetic control, not authorized source proof"}
+    bundle["bundle_hash"] = digest({k: v for k, v in bundle.items() if k != "bundle_hash"})
+    # Explicit disposable operator publication reaches the additional scope
+    # guard. An unpublished/tampered object is already refused by old checks.
+    store.publish("bundle-"+bundle["bundle_hash"], bundle)
+    with pytest.raises(ResearchError, match="independent calibration export"):
+        authorize_evidence_publication(store, bundle, grant)
+
+
+def test_exact_preregistered_full_table_reuses_actual_geometry_without_method_promotion(consumers):
+    from application.probability_calibration_consumption import prepare_calibrated_consumer
+    store, spec, _, _, source_spec, _, proof = consumers
+    table = spec["propagation_design"]["axis_manifest"]["calibrations"]
+    prereg = {"probability_calibration_bindings": deepcopy(table),
+        "probability_calibration_bindings_hash": digest(table)}
+    before = BudgetLedger(store).balance(source_spec["arms"][0]["arm_id"])
+    accepted = prepare_calibrated_consumer(store, spec, spec["cells"][0], preregistration=prereg)
+    assert accepted == proof
+    assert accepted["scientific_qualification"] is accepted["method_qualification"] is False
+    assert BudgetLedger(store).balance(source_spec["arms"][0]["arm_id"]) == before
+
+
+@pytest.mark.parametrize("fault", ["null", "cycle", "oversized"])
+def test_preregistration_table_is_bounded_before_hashing_or_source_access(monkeypatch, fault):
+    from application import probability_calibration_consumption as consumption
+    frozen = freeze_design(declared_design())
+    spec = frozen.study_spec(expected_hash=frozen.manifest_hash)
+    table = spec["propagation_design"]["axis_manifest"]["calibrations"]
+    declared = None if fault == "null" else [] if fault == "cycle" else [table[0]]*10001
+    if fault == "cycle":
+        declared.append(declared)
+    prereg = {"probability_calibration_bindings": declared,
+        "probability_calibration_bindings_hash": digest(table)}
+    monkeypatch.setattr(consumption, "prepare_probability_calibration",
+        lambda *a, **k: pytest.fail("source owner called before bounded metadata checks"))
+    with pytest.raises(ResearchError):
+        consumption.prepare_calibrated_consumer(None, spec, spec["cells"][0], preregistration=prereg)

@@ -7,9 +7,9 @@ is deliberately required before any calibrated study can disclose a bundle.
 
 from domain.probability_calibration import halfspace_geometry
 from experiments.pirc27.calibration_bindings import require_consumer_support
-from infrastructure.research_store import ResearchError, digest
+from infrastructure.research_store import ResearchError, digest, encode
 
-from .probability_calibration_admission import prepare_probability_calibration
+from .probability_calibration_admission import _bounded, prepare_probability_calibration
 from .propagation_execution import validate_propagation_cell
 
 
@@ -23,8 +23,13 @@ def prepare_calibrated_consumer(store, spec, cell, *, preregistration=None):
     if entry is None:
         return None
     if preregistration is not None:
+        from experiments.pirc27.design import MAX_MANIFEST_BYTES
         table = spec["propagation_design"]["axis_manifest"]["calibrations"]
-        _require(preregistration.get("probability_calibration_bindings") == table
+        declared = preregistration.get("probability_calibration_bindings")
+        _bounded(declared, nodes=2000000, depth_limit=30, string_limit=16384)
+        _require(type(declared) is list and 0 < len(declared) <= 10000
+            and len(encode(declared)) <= MAX_MANIFEST_BYTES, "bounded preregistration table required")
+        _require(digest(declared) == digest(table)
             and preregistration.get("probability_calibration_bindings_hash") == digest(table),
             "complete geometry table absent from frozen preregistration")
     # Actual current permissions, original native settlement and canonical
@@ -52,20 +57,29 @@ def validate_calibrated_result(store, receipt, spec, cell, result):
         _require(saved is None, "orphan calibration proof")
         return
     _require(saved is not None, "result lacks settled geometry admission")
+    _bounded(saved, nodes=25000, depth_limit=30, string_limit=16384)
+    _require(type(saved) is dict and len(encode(saved)) <= 2*1024*1024
+        and saved.get("evidence_hash") == digest({k: v for k, v in saved.items() if k != "evidence_hash"}),
+        "saved calibration proof content binding differs")
     fresh = prepare_calibrated_consumer(store, spec, cell,
         preregistration=receipt.get("documents", {}).get("preregistration"))
-    _require(saved == fresh, "saved calibration proof differs from current owner")
+    _require(digest(saved) == digest(fresh), "saved calibration proof differs from current owner")
     package, request, _, _ = validate_propagation_cell(spec, cell)
     forecast = result.get("forecast", {})
-    _require(forecast.get("model_package_hash") == package.package_hash
+    _require(type(forecast) is dict and forecast.get("model_package_hash") == package.package_hash
         and forecast.get("request_hash") == request.request_hash
-        and forecast.get("horizons") == list(request.horizons),
+        and type(forecast.get("horizons")) is list and len(forecast["horizons"]) == 1
+        and type(forecast["horizons"][0]) in (int, float)
+        and digest(forecast["horizons"]) == digest(list(request.horizons)),
         "current output model/request/horizon differs")
+    return fresh
 
 
-def require_calibration_export_support(spec):
+def require_calibration_export_support(spec, *, cells=()):
     axes = spec.get("propagation_design", {}).get("axis_manifest", {})
     if (axes.get("calibrations") or any(f.get("target_probability") is not None
             for f in axes.get("functionals", []) if type(f) is dict)
-            or any("calibration_binding" in c for c in spec.get("cells", []))):
+            or any("calibration_binding" in c for c in spec.get("cells", []))
+            or any("probability_calibration" in (c.get("admission") or {}).get("documents", {})
+                for c in cells)):
         raise ResearchError("UNQUALIFIED", "independent calibration export support is not yet available")

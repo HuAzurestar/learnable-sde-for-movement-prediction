@@ -165,7 +165,7 @@ def _require_current_export_grants(store, grants):
 def _fresh_export_authority(store, bundle, authorization):
     spec = store.manifest("study-" + bundle["study_id"])["spec"]
     from .probability_calibration_consumption import require_calibration_export_support
-    require_calibration_export_support(spec)
+    require_calibration_export_support(spec, cells=bundle["cells"])
     if spec != bundle["registered_spec"] or digest(spec) != bundle["spec_hash"]:
         raise ResearchError("CORRUPT_ARTIFACT", "export study source binding changed")
     if not {cell["block_id"] for cell in spec["cells"]} <= set(authorization["block_ids"]):
@@ -255,6 +255,7 @@ def _assemble_evidence(store, study_id, authorization):
                 # Qualification attachments are additional disclosures, not
                 # automatically public because execution was authorized.
                 documents = admission.get("documents", {})
+                require_calibration_export_support(spec, cells=[{"admission": admission}])
                 from infrastructure.research_store import encode
                 for attachment in documents.get("qualification_evidence", []):
                     content = store.read_artifact(attachment["artifact"]["artifact_id"], purpose="export", authorization=authorization)

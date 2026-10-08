@@ -387,7 +387,7 @@ class AdmissionGate:
             if result.get("qualification") != receipt["qualification"]:
                 raise ResearchError("UNQUALIFIED", "worker cannot change admitted qualification")
             from .probability_calibration_consumption import validate_calibrated_result
-            validate_calibrated_result(self.store, receipt, spec, cell, result)
+            calibrated = validate_calibrated_result(self.store, receipt, spec, cell, result)
             if "propagation_qualification" in receipt.get("documents", {}):
                 if plugin.plugin_id == "affine-cubature":
                     from .cubature_qualification_admission import validate_formal_cubature_result
@@ -406,6 +406,11 @@ class AdmissionGate:
                     validate_formal_analytic_result(receipt, spec, cell, result)
             if result.get("admission_hash", receipt["admission_hash"]) != receipt["admission_hash"]:
                 raise ResearchError("CONTRACT_MISMATCH", "worker substituted another admission")
+            if calibrated is not None:
+                # Own method-output validation can perform additional I/O.
+                # Revalidate the source physically/at current expiry last.
+                self.store.verify_artifact_read(calibrated["source_artifact"]["artifact_id"],
+                    purpose="evaluate", authorization=calibrated["authorization"])
             result["admission_hash"] = receipt["admission_hash"]
         return validate
 
