@@ -111,7 +111,7 @@ def _diagnostic_projection(analysis, names):
 
 
 def _verify_numeric_witnesses(gates, details, population):
-    """Repeat max-error and seed-variance arithmetic from public numbers."""
+    """Repeat registered worst-case and seed-variance arithmetic from public numbers."""
     _fields(details, ('per_origin_diagnostics', 'variance'))
     if set(details['per_origin_diagnostics']) != NUMERICAL_SLOTS | SCORE_SLOTS:
         raise ValueError('all five per-origin numerical/score diagnostics required')
@@ -142,7 +142,8 @@ def _verify_numeric_witnesses(gates, details, population):
                     errors.append(error)
             values.append(max(errors))
         gate = gates[slot]
-        if len(values) != gate['available_count'] or gate['value'] != (max(values) if values and len(values) == len(expected) else None):
+        aggregate = max if gate['operator'] == 'le' else min
+        if len(values) != gate['available_count'] or gate['value'] != (aggregate(values) if values and len(values) == len(expected) else None):
             raise ValueError('public worst-case mechanism differs from all required numeric witnesses')
     v = details['variance']
     if v is None:
