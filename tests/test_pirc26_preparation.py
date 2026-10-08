@@ -147,21 +147,42 @@ def test_worker_cannot_execute_without_actual_shared_owner(tmp_path, monkeypatch
 
 def test_prepared_output_is_compatible_with_the_actual_observed_consumer(tmp_path, contracts):
     import torch
-    from application.pirc26_data import decode_block
+    from application.pirc26_data import decode_block, read_block
     from models.phase_space import DynamicsSpec, AffineAccelerationDrift, PhaseSpaceSDE
-    result = run(prepared_fixture(tmp_path, contracts))
+    fixture = prepared_fixture(tmp_path, contracts)
+    store = fixture[0]
+    result = run(fixture)
     assert result["state"] == "SUCCEEDED", result
     prepared = result["prepared"]
     n = prepared["normalizer"]
     spec_value = DynamicsSpec("fixture-metric-frame", n["train_binding_hash"], digest(n), n["context_hash"],
                              56, tuple(n["means"]), tuple(n["scales"]))
     model = PhaseSpaceSDE(AffineAccelerationDrift(56), [[.1, 0.], [0., .1]], spec_value).to(dtype=torch.float64)
+    # Fixture-only explicit derived protocol/grant. Production must resolve
+    # actual lawful purpose and preregistration before such registrations.
+    entries = []
+    for i, b in enumerate(prepared["blocks"]):
+        d, p = b["document"], b["provenance"]
+        name = "prepared-" + str(i) + ".json"
+        (tmp_path / name).write_bytes(encode(d))
+        entries.append({"block_id": d["block_id"], "dataset_id": p["feature"]["dataset_id"],
+            "release_id": "prepared-fixture", "source_block_id": p["feature"]["independent_block_id"],
+            "sha256": p["content_sha256"], "size_bytes": p["size_bytes"], "path": name,
+            "split_role": p["split_role"], "fit_scope": p["split_role"] == "train",
+            "preparation_ref": result["preparation_ref"]})
+    protocol = {"schema_version": "pirc25-data-protocol-v1", "protocol_id": "prepared-fixture",
+                "study_id": "prepared-consumer-fixture", "blocks": entries}
+    EvaluationExposureLedger(store).register_protocol(protocol, digest(protocol))
+    store.authorize({"authorization_id": "prepared-fixture-grant", "study_id": protocol["study_id"],
+        "protocol_hash": digest(protocol), "expires_at": "2099-01-01T00:00:00+00:00",
+        "evidence_hash": digest(result["preparation_ref"]), "data_root": str(tmp_path),
+        "block_ids": [e["block_id"] for e in entries], "purposes": ["fit", "select"],
+        "visibilities": ["synthetic"], "test_authorization": False})
     for b in prepared["blocks"]:
         d, p = b["document"], b["provenance"]
-        admission = {"schema_version": "pirc26-admitted-block-v1", "protocol_hash": p["source_protocol_hash"],
-            "block_id": d["block_id"], "source_identity": {"dataset_id": p["feature"]["dataset_id"],
-                "release_id": "prepared-fixture", "source_block_id": p["feature"]["independent_block_id"], "sha256": p["content_sha256"]},
-            "split_role": p["split_role"], "purpose": p["purpose"], "content_sha256": p["content_sha256"], "content_utf8": encode(d).decode()}
+        admission = read_block(store, "prepared-fixture", d["block_id"],
+                              authorization_id="prepared-fixture-grant", purpose=p["purpose"])
+        assert admission["source_identity"]["source_block_id"] == p["feature"]["independent_block_id"]
         block = decode_block(admission, model)
         assert len(block.segments) == 1
         if block.role == "train":
@@ -169,6 +190,11 @@ def test_prepared_output_is_compatible_with_the_actual_observed_consumer(tmp_pat
         else:
             with pytest.raises(ResearchError, match="only admitted train"):
                 block.transitions(batch_size=8)
+    wrong = prepared["blocks"][-1]["document"]["block_id"]
+    with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
+        read_block(store, "prepared-fixture", wrong, authorization_id="prepared-fixture-grant", purpose="fit")
+    assert {e["payload"]["block_id"] for e in store.events() if e["event_kind"] == "READ_STARTED"
+            and e["payload"].get("protocol_hash") == digest(protocol)} == {e["block_id"] for e in entries}
 
 
 def test_read_receipts_and_normalizer_bindings_cannot_be_substituted(tmp_path, contracts):
