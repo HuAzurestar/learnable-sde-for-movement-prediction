@@ -190,15 +190,6 @@ class ResearchSupervisor:
             # physical/source/save/deadline check below; no decision is reused.
             try:
                 frame = channel.response()
-                if frame is None and not warned:
-                    # The worker can publish while the first durable REQUEST
-                    # journal is being written. Receive afresh immediately
-                    # afterwards rather than spend its save margin on another
-                    # ordinary budget scan before noticing that response.
-                    # IPC is still not authority: any complete frame goes
-                    # through the unchanged fresh save/physical/budget scope.
-                    if record_checkpoint_request() and not past_deadline():
-                        frame = channel.response()
             except (ControlError, OSError) as exc:
                 # Retain the actual80% request even when IPC is invalid or
                 # denied. Receiving a bad frame never reaches save or ACK.
@@ -206,7 +197,7 @@ class ResearchSupervisor:
                 if isinstance(exc, ControlError):
                     raise ResearchError("CONTRACT_MISMATCH", str(exc)) from exc
                 raise
-            if frame is None:
+            if frame is None and warned:
                 record_checkpoint_request()
                 return False
             # REQUEST, fresh budget and ready-response/save share one short
@@ -216,6 +207,21 @@ class ResearchSupervisor:
             # checks. Every event fsync remains real; ACK stays outside.
             with self.store._checkpoint_publication():
                 record_checkpoint_request()
+                if frame is None:
+                    # Only the first durable REQUEST needs this phase when
+                    # IPC was initially absent. Its immediate head is unchanged.
+                    # Receive afresh after publication, then share this OWNED
+                    # phase's physical prefix, never an earlier budget decision.
+                    # All original final physical/authority guards still finish
+                    # before ACK, including when this response changes authority.
+                    if past_deadline():
+                        return False
+                    try:
+                        frame = channel.response()
+                    except ControlError as exc:
+                        raise ResearchError("CONTRACT_MISMATCH", str(exc)) from exc
+                    if frame is None:
+                        return False
                 def check_current_budget():
                     nonlocal budget_stop_requested
                     budget_stop_requested |= self.budget.balance(run["arm_id"])["closed"]
