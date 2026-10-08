@@ -142,10 +142,10 @@ def _export_grants(bundle, authorization):
     grants = {digest(authorization): authorization}
     if bundle.get("probability_calibration") is not None:
         for source in bundle["probability_calibration"]["sources"]:
-            grant = source["authorization"]
-            if grant["study_id"] != bundle["study_id"] and bundle["study_id"] not in grant.get("consumer_study_ids", []):
-                raise ResearchError("UNAUTHORIZED_DATA", "calibration export consumer differs")
-            grants[digest(grant)] = grant
+            for grant in [source["authorization"], *source["extra_authorizations"]]:
+                if grant["study_id"] != bundle["study_id"] and bundle["study_id"] not in grant.get("consumer_study_ids", []):
+                    raise ResearchError("UNAUTHORIZED_DATA", "calibration export consumer differs")
+                grants[digest(grant)] = grant
     for cell in bundle["cells"]:
         documents = cell.get("admission", {}).get("documents", {})
         if documents.get("model_qualification_evidence"):
@@ -315,8 +315,9 @@ def _assemble_evidence(store, study_id, authorization):
                                    "comparison_dimensions": comparison_dimensions(c)} for c in spec["cells"]],
                "cells": cells, "disclosure_scope": "authorized-local-export"}
     if calibration is not None:
+        from .probability_calibration_export import calibration_recorded_at
         payload.update(probability_calibration=calibration,
-            exported_at=datetime.now(timezone.utc).isoformat())
+            recorded_at=calibration_recorded_at(store, spec, cells, calibration, authorization))
     bundle = {**payload, "bundle_hash": digest(payload)}
     if len(encode(bundle)) > 64*1024*1024:
         raise ResearchError("TOO_LARGE", "complete evidence bundle exceeds fixed export byte quota")

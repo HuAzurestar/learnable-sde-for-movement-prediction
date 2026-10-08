@@ -16,7 +16,7 @@ from .research_cost import frozen_cost
 
 
 TERMINAL_FAILURES = {"FAILED", "INTERRUPTED", "TIMEOUT", "BUDGET_EXHAUSTED", "PREFLIGHT_FAILED", "CANCELLED"}
-SOURCE_KINDS = {"RESERVE", "WORKER_STARTED", "WORKER_TREE_STOPPED", "SETTLE", "ADMISSION", "ATTEMPT"}
+SOURCE_KINDS = {"RESERVE", "WORKER_STARTED", "WORKER_TREE_STOPPED", "WORKER_STOP_CONFIRMED", "SETTLE", "ADMISSION", "ATTEMPT"}
 
 
 def _require(condition, detail):
@@ -67,13 +67,21 @@ def _source_scope(store, target, entry, target_authorization):
         and e["payload"].get("attempt_id") == attempt["attempt_id"]]
     _require(len(admissions) <= 1, "source has ambiguous admission")
     receipt = store.manifest("admission-"+admissions[0]["payload"]["admission_hash"]) if admissions else None
-    labels = [study_visibility(store.manifest, spec)]
+    lineage = {}
+    def manifest(object_id):
+        value = store.manifest(object_id)
+        _require(len(lineage) < 10000 or object_id in lineage, "bounded source metadata lineage")
+        lineage[object_id] = value
+        return value
+    labels = [study_visibility(manifest, spec)]
     if receipt is not None:
         _require(receipt["admission_hash"] == digest({k: v for k, v in receipt.items() if k != "admission_hash"})
+            == admissions[0]["payload"]["admission_hash"]
             and receipt["spec_hash"] == digest(spec) and receipt["cell_hash"] == digest(cell)
+            and digest(receipt["spec"]) == digest(spec) and digest(receipt["cell"]) == digest(cell)
             and receipt["attempt_id"] == attempt["attempt_id"] and receipt["run_id"] == run["run_id"]
             and receipt["mode"] == "pilot", "source admission identity differs")
-        labels.append(admission_visibility(store.manifest, receipt))
+        labels.append(admission_visibility(manifest, receipt))
     metadata = store.manifest("artifact-"+attempt["artifact_id"]) if attempt["artifact_id"] is not None else None
     if metadata is not None:
         _require(metadata["artifact_id"] == attempt["artifact_id"]
@@ -86,14 +94,47 @@ def _source_scope(store, target, entry, target_authorization):
     visibility = combine_visibility(labels)
     _require(visibility in grant["visibilities"] and visibility in target_authorization["visibilities"],
         "source admission/package/lineage visibility is not covered")
+    attachments, extra_grants = [], {}
+    documents = receipt.get("documents", {}) if receipt is not None else {}
+    groups = [(documents.get("qualification_evidence", []), grant)]
+    if documents.get("model_qualification_evidence"):
+        groups.append((documents["model_qualification_evidence"], documents["model_authorization"]))
+    if documents.get("propagation_qualification"):
+        evidence = documents["propagation_qualification"]
+        groups.append(([{"artifact": evidence["source_artifact"], "content": evidence["source_result"]}],
+            evidence["authorization"]))
+    for items, saved_grant in groups:
+        if not items:
+            continue
+        current = store.authorization(saved_grant["authorization_id"], version=saved_grant.get("version"))
+        owner = manifest("study-"+current["study_id"])["spec"]
+        _require(digest(current) == digest(saved_grant) and current["protocol_hash"] == owner["protocol_hash"]
+            and (target["study_id"] == current["study_id"] or target["study_id"] in current.get("consumer_study_ids", []))
+            and {"evaluate", "export"} <= set(current["purposes"])
+            and visibility in current["visibilities"]
+            and datetime.fromisoformat(current["expires_at"]) > datetime.now(timezone.utc),
+            "current secondary attachment export consumer permission differs")
+        authorize_study(store, current["study_id"], current, "export")
+        extra_grants[digest(current)] = current
+        for item in items:
+            actual = manifest("artifact-"+item["artifact"]["artifact_id"])
+            _require(digest(actual) == digest(item["artifact"]) and actual["study_id"] == current["study_id"]
+                and actual["visibility"] in current["visibilities"]
+                and set(actual["block_ids"]) <= set(current["block_ids"])
+                and actual["sha256"] == digest(item["content"]) and actual["size_bytes"] == len(encode(item["content"])),
+                "secondary attachment metadata/content export permission differs")
+            attachments.append((item, current))
     authorize_study(store, spec["study_id"], grant, "export")
-    return spec, cell, run, attempt, receipt, metadata, grant, visibility
+    return spec, cell, run, attempt, receipt, metadata, grant, visibility, lineage, list(extra_grants.values()), attachments
 
 
 def _record(store, target, entry, authorization):
     from .research_reuse import verified_reuse
     from experiments.pirc27.calibration_plugin import calibration_plugin
-    spec, cell, run, attempt, receipt, metadata, grant, visibility = _source_scope(store, target, entry, authorization)
+    spec, cell, run, attempt, receipt, metadata, grant, visibility, lineage, extra_grants, attachments = _source_scope(store, target, entry, authorization)
+    for attachment, attachment_grant in attachments:
+        content = store.read_artifact(attachment["artifact"]["artifact_id"], purpose="export", authorization=attachment_grant)
+        _require(content == encode(attachment["content"]), "secondary attachment export bytes differ")
     result, proof = None, None
     if metadata is not None:
         content = store.read_artifact(metadata["artifact_id"], purpose="export", authorization=grant)
@@ -146,11 +187,14 @@ def _record(store, target, entry, authorization):
         "source_run": run, "selected_attempt": attempt, "history": history, "events": events, "cost": cost,
         "source_admission": receipt, "source_artifact": metadata, "source_result": result, "authorization": grant,
         "proof": proof, "outcome": outcome, "visibility": visibility,
+        "lineage": lineage, "extra_authorizations": extra_grants,
         "scientific_qualification": False, "method_qualification": False}
     _bounded(body, nodes=100000, depth_limit=32, string_limit=16384)
     _require(len(encode(body)) <= 8*1024*1024, "source record exceeds fixed byte quota")
     if metadata is not None:
         store.verify_artifact_read(metadata["artifact_id"], purpose="export", authorization=grant)
+    for attachment, attachment_grant in attachments:
+        store.verify_artifact_read(attachment["artifact"]["artifact_id"], purpose="export", authorization=attachment_grant)
     return {**body, "record_hash": digest(body)}
 
 
@@ -215,4 +259,23 @@ def prepare_calibration_export(store, spec, authorization):
 def verify_calibration_export(store, spec, header, authorization):
     fresh = prepare_calibration_export(store, spec, authorization)
     _require(digest(header) == digest(fresh), "complete source table/history/cost changed before disclosure")
-    return [] if fresh is None else [r["authorization"] for r in fresh["sources"]]
+    return [] if fresh is None else [g for r in fresh["sources"]
+        for g in [r["authorization"], *r["extra_authorizations"]]]
+
+
+def calibration_recorded_at(store, spec, cells, header, authorization):
+    """Stable evidence-as-of time, NOT a reusable export permission clock.
+
+    Only immutable selected study/grant publications and original attempt
+    events contribute. Audit/reuse/disclosure I/O and unrelated studies do not
+    mutate an unchanged bundle; every disclosure still checks the live clock.
+    """
+    from infrastructure.research_store import authorization_key_for_grant
+    grants = [authorization, *[g for r in header["sources"] for g in [r["authorization"], *r["extra_authorizations"]]]]
+    objects = {"study-"+spec["study_id"], *[authorization_key_for_grant(g) for g in grants]}
+    attempts = {a["attempt_id"] for row in cells for a in row["history"]}
+    attempts.update(a["attempt_id"] for record in header["sources"] for a in record["history"])
+    selected = [e for e in store.events() if e["event_kind"] == "MANIFEST" and e["payload"].get("object_id") in objects
+        or e["event_kind"] == "ATTEMPT" and e["payload"].get("attempt_id") in attempts]
+    _require({e["payload"].get("object_id") for e in selected} >= objects, "original study/grant publications required")
+    return max(datetime.fromisoformat(e["created_at"]) for e in selected).isoformat()

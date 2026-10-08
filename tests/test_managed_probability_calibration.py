@@ -20,7 +20,8 @@ from tests.research_admission_fixtures import admit_fixture
 from tests.test_affine_probability_calibration import example
 
 
-def prepared(root, *, formal=False, policy_changes=None):
+def prepared(root, *, formal=False, policy_changes=None,
+             study_id="probability-calibration-unit", fixture_prefix=""):
     store = ResearchStore(root, "probability-calibration-unit", initialize=True)
     package, request, policy = example()
     policy = replace(policy, maximum_job_seconds=60., **(policy_changes or {}))
@@ -33,15 +34,15 @@ def prepared(root, *, formal=False, policy_changes=None):
         "propagation_request": json.loads(json.dumps(asdict(request))),
         "frozen_dynamics": package.manifest(), "probability_calibration_policy": policy.manifest(),
         "execution": execution_binding(plugin.registry_entry, config, parameters, matrix_cells=1)}
-    spec = {"schema_version": "pirc25-contract-v1", "study_id": "probability-calibration-unit",
-        "experiment_id": "probability-calibration-unit", "comparison_family": "synthetic-engineering",
+    spec = {"schema_version": "pirc25-contract-v1", "study_id": study_id,
+        "experiment_id": study_id, "comparison_family": "synthetic-engineering",
         "code_hash": code_hash(), "protocol_hash": digest("pending"), "data_hash": digest("pending"),
         "feature_hash": digest("none"), "selection_hash": digest("none"),
         "arms": [{"arm_id": request.arm_id, "model_family_id": "affine-stable-v1",
             "method_family_id": "exact", "objective_id": request.functional, "budget_seconds": 86400}],
         "cells": [cell], "runtime_binding": {"root": str(root.resolve()), "store_id": store.store_id}}
     admit_fixture(store, spec, plugin, root, formal=formal, execution_config=config,
-        execution_inputs=parameters, legacy_upstream=False)
+        execution_inputs=parameters, legacy_upstream=False, fixture_prefix=fixture_prefix)
     spec["admission"]["mode"] = "formal" if formal else "pilot"
     registry = CapabilityRegistry()
     registry.register(plugin)
