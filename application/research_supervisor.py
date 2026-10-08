@@ -190,6 +190,15 @@ class ResearchSupervisor:
             # physical/source/save/deadline check below; no decision is reused.
             try:
                 frame = channel.response()
+                if frame is None and not warned:
+                    # The worker can publish while the first durable REQUEST
+                    # journal is being written. Receive afresh immediately
+                    # afterwards rather than spend its save margin on another
+                    # ordinary budget scan before noticing that response.
+                    # IPC is still not authority: any complete frame goes
+                    # through the unchanged fresh save/physical/budget scope.
+                    if record_checkpoint_request() and not past_deadline():
+                        frame = channel.response()
             except (ControlError, OSError) as exc:
                 # Retain the actual80% request even when IPC is invalid or
                 # denied. Receiving a bad frame never reaches save or ACK.
