@@ -1,10 +1,10 @@
 # Bounded affine spatial probability calibration kernel
 
-This is a numerical building block, not a registered research producer or a
-formal-study admission API. Do not call it from the design compiler or preflight
-to obtain free reference work. Shared producer, settled source ownership,
-frozen geometry consumers, preregistration and independent Paper verification
-remain required before using its output in research.
+The numerical building block now has an explicit charged pilot adapter, not a
+formal-study admission API. Do not call the kernel from the design compiler or
+preflight to obtain free reference work. Settled source ownership, frozen geometry
+consumers, preregistration and independent Paper verification remain required
+before using its output in research.
 
 The motion model stays two-dimensional with four SI states `[x,y,vx,vy]`.
 Calibration supports the declared constant-affine Gaussian endpoint law only,
@@ -61,13 +61,36 @@ recording; they never authorize retry with larger controls.
 
 ## Output is not permission
 
+`experiments.pirc27.calibration_plugin` registers the restart-only
+`affine-halfspace-calibration` adapter through the existing propagation worker.
+It requires an explicit frozen policy, pilot admission, train/validation inputs,
+`execution_role: probability-calibration` and the original exact/halfspace
+reference arm. Held-out/formal input is refused before grant lookup or protected
+reads. The existing pre-reserve budget guard requires the pilot category and
+the frozen job cap; there is no second timer, queue, ledger or research launch.
+
+Its resource declaration includes the entire frozen operation allowance and
+the conservative 64 MiB rational/serialization pools, under unchanged global
+hard caps. It honestly declares zero sampled paths and four physical SI states.
+The shared resource-plan `steps` count denotes counted arithmetic here, not an
+integration-grid length; ordinary propagation keeps its original grid limit.
+No generic estimate or discarded float-reference metric is computed. The pilot
+result's metric is actual `reference_arithmetic_operations`, in operations,
+not an accuracy score or a successful scientific qualification.
+
+Numerical `FAILED` analyses remain computationally successful saved artifacts;
+operation exhaustion is an ordinary charged failed attempt, never an automatic
+retry or quota expansion. Existing successful-attempt reuse verifies original
+admission/output/native-cost provenance without starting another worker. These
+producer controls do not prove cross-method geometry reuse or full research
+cost accounting; the dedicated owner/consumer/export/Paper chain is still needed.
+
 Every result retains `scientific_qualification: false`,
 `method_qualification: false`, `admission_status: NOT_ADMITTED` and
 `cost_status: OWNER_SETTLEMENT_REQUIRED`, even when the numerical status is
 `PASSED`. A hash alone is not evidence of source execution or settlement.
 
-Next integration must run all numerical work inside an original charged pilot
-worker, bind settled native events/costs/source caps and authority, freeze exact
+Next integration must bind settled native events/costs/source caps and authority, freeze exact
 model/input/horizon geometry before heldout access, preserve method-qualification
 requirements at the new threshold, refuse missing/altered proof before reading
 generic attachments or protected inputs, and close reuse/export/Paper checks.

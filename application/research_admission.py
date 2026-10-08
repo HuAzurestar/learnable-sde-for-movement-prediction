@@ -193,6 +193,13 @@ class AdmissionGate:
                     raise ResearchError("UNAUTHORIZED_DATA", "analytic qualification cannot consume test/final-eval inputs")
                 from .propagation_execution import validate_propagation_cell
                 validate_propagation_cell(spec, cell)
+            if plugin.plugin_id == "affine-halfspace-calibration":
+                # Refuse before any grant lookup, qualification attachment or
+                # protected input. Geometry calibration is charged pilot work.
+                if mode != "pilot" or block["split_role"] not in {"train", "validation"}:
+                    raise ResearchError("UNAUTHORIZED_DATA", "probability calibration cannot consume test/final-eval inputs")
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
             if plugin.plugin_id == "affine-mixture-qualification":
                 if mode != "pilot" or block["split_role"] not in {"train", "validation"}:
                     raise ResearchError("UNAUTHORIZED_DATA", "mixture qualification cannot consume test/final-eval inputs")
@@ -462,6 +469,17 @@ class AdmissionGate:
                 policy = qualification_policy(spec, cell, package, request, config)
                 if budget.category != "pilot" or budget.job_seconds > policy.maximum_job_seconds:
                     raise ResearchError("CONTRACT_MISMATCH", "analytic qualification requires the frozen pilot job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
+        if plugin.plugin_id == "affine-halfspace-calibration":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.calibration_plugin import calibration_policy
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                policy = calibration_policy(spec, cell, package, request, config)
+                if budget.category != "pilot" or budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "probability calibration requires the frozen pilot job budget")
             except ResearchError as exc:
                 self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
                 raise

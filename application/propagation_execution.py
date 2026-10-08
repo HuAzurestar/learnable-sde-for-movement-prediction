@@ -48,13 +48,18 @@ def validate_propagation_cell(spec, cell):
     from experiments.pirc27.cubature_plugin import PLUGIN_IDS as CUBATURE_IDS, cubature_plugin, cubature_config, cubature_policy
     cubature = cell["plugin_id"] in CUBATURE_IDS
     cubature_qualification = cell["plugin_id"] == "affine-cubature-qualification"
+    from experiments.pirc27.calibration_plugin import PLUGIN_ID as CALIBRATION_ID
+    calibration = cell["plugin_id"] == CALIBRATION_ID
     from experiments.pirc27.mixture_plugin import PLUGIN_IDS, mixture_plugin, mixture_policy, mixture_config
     mixture = cell["plugin_id"] in PLUGIN_IDS
-    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk", "affine-mixture-qualification", "affine-mixture-production-chunk", "affine-path-qualification", "affine-path-production-chunk"}|PLUGIN_IDS|CUBATURE_IDS:
+    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk", "affine-mixture-qualification", "affine-mixture-production-chunk", "affine-path-qualification", "affine-path-production-chunk", CALIBRATION_ID}|PLUGIN_IDS|CUBATURE_IDS:
         raise ResearchError("CONTRACT_MISMATCH", "unknown explicit propagation adapter")
     recovery = cell["plugin_id"].endswith("-chunk")
     synthetic = cell["plugin_id"].startswith("synthetic-")
     plugin = propagation_plugin(recovery=recovery, synthetic=synthetic)
+    if calibration:
+        from experiments.pirc27.calibration_plugin import calibration_plugin
+        plugin = calibration_plugin()
     if cubature:
         plugin = cubature_plugin(qualification=cubature_qualification)
     if qualification:
@@ -91,7 +96,11 @@ def validate_propagation_cell(spec, cell):
     except DataValidationError as exc:
         raise ResearchError("CONTRACT_MISMATCH", "frozen propagation package schema/content/code differs") from exc
     config = cell["execution"]["config"]
-    if cubature:
+    if calibration:
+        from experiments.pirc27.calibration_plugin import calibration_policy, calibration_config
+        policy = calibration_policy(spec, cell, package, request, config)
+        expected = calibration_config(request, policy)
+    elif cubature:
         policy = cubature_policy(spec, cell, package, request, config) if cubature_qualification else None
         expected = cubature_config(request, policy=policy)
     elif path_qualification:
@@ -168,6 +177,25 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
     recovery = plugin.resume_level == "chunk"
     if not recovery and (resume_state is not None or checkpoint is not None):
         raise ResearchError("CONTRACT_MISMATCH", "restart-only methods cannot accept chunk state")
+    if plugin.plugin_id == "affine-halfspace-calibration":
+        # Geometry preparation executes no generic estimate or discarded float
+        # reference. All moment/CDF/quantile work shares the charged kernel cap.
+        from experiments.pirc27.calibration_plugin import calibration_policy
+        from inference.affine_probability_calibration import calibrate_affine_halfspace
+        policy = calibration_policy(spec, cell, package, request, config)
+        analysis = calibrate_affine_halfspace(package, request, policy)
+        metrics = {"reference_arithmetic_operations": analysis["reference_arithmetic_operations"]}
+        output = {"metrics": metrics,
+            "forecast": {"kind": "probability-calibration", "horizons": list(request.horizons),
+                "model_package_hash": package.package_hash, "source_request_hash": request.request_hash,
+                "probability_calibration_analysis": analysis},
+            "fit": {"training": "none; frozen synthetic generator"},
+            "source_schema": "affine-halfspace-calibration-source-v1"}
+        return {"schema_version": "pirc25-result-v1", "status": "SUCCEEDED", "qualification": "fixture",
+            "spec_hash": digest(spec), "cell_hash": digest(cell), "protocol_hash": spec["protocol_hash"],
+            "state_order": list(plugin.state_order), "units": list(plugin.units), "time_unit": "s",
+            "resume_level": plugin.resume_level, "input_hash": spec["data_hash"], "output_hash": digest(output),
+            "metric_units": {"reference_arithmetic_operations": "operations"}, **output}
     continuation = {"resume_state": resume_state, "checkpoint": checkpoint}
     path_production = plugin.plugin_id == "affine-path-production-chunk"
     path_last = resume_state
