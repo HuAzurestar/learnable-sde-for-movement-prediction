@@ -29,7 +29,7 @@ def cubature_plugin(*, qualification=False):
                     "axes": ["state_dim"]*8, "item_bytes": 16})
     identity = "affine-cubature-qualification" if qualification else "affine-cubature"
     capabilities = frozenset({"generic-rollout"})
-    entry = replace(base.registry_entry, component_id=identity, version="1.0.0",
+    entry = replace(base.registry_entry, component_id=identity, version="1.0.0" if qualification else "1.1.0",
         config_schema=schema, resource_contract=contract, capabilities=capabilities)
     return ExecutionPlugin(identity, capabilities, base.state_order, base.units,
         "restart-only", propagation_command, entry)

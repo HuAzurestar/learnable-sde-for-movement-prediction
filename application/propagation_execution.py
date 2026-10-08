@@ -163,7 +163,7 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
     formal = settings.get("mode") == "formal"
     if formal and admission is None or not formal and admission is not None:
         raise ResearchError("UNQUALIFIED", "formal propagation needs its owner admission, never a caller qualification flag")
-    if formal and plugin.plugin_id in {"affine-cubature", "affine-cubature-qualification"}:
+    if formal and plugin.plugin_id == "affine-cubature-qualification":
         raise ResearchError("UNQUALIFIED", "affine cubature numerical pilot is not dedicated formal owner evidence")
     recovery = plugin.resume_level == "chunk"
     if not recovery and (resume_state is not None or checkpoint is not None):
@@ -215,13 +215,17 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
     # enclosures below. Do not compute and discard another analytic metric.
     # The original sampler's own float64 error-budget diagnostics are unchanged.
     metrics = {}
-    if not path_production:
+    cubature_formal = formal and plugin.plugin_id == "affine-cubature"
+    if not path_production and not cubature_formal:
         metrics = ({"functional_estimate": result.estimate} if synthetic else
                    {"absolute_error_vs_float64_reference": abs(result.estimate-analytic_estimate(package, request).estimate)})
     qualified_components = None
     path_output = None
     if formal:
-        if path_production:
+        if cubature_formal:
+            from .cubature_qualification_admission import qualified_cubature_forecast, METRIC
+            error, qualified_components = qualified_cubature_forecast(spec, cell, package, request, result.manifest(), admission)
+        elif path_production:
             from .path_qualification_admission import target_output_analysis, METRIC
             path_output = target_output_analysis(spec, cell, package, request, result.manifest(), path_last, admission)
             error = path_output["total_observed_functional_error_upper"]
@@ -250,6 +254,12 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
                 else "outward declared-affine continuous functional interval width", "status": "BOUNDED"}
         budget["time_discretization"] = {"value": qualified_components["time_bias_absolute_upper"], "units": unit,
             "estimated_by": "outward absolute signed grid-minus-continuous expectation bound", "status": "BOUNDED"}
+        if cubature_formal:
+            budget["propagation_approximation"] = {"value": 0, "units": unit,
+                "estimated_by": "eight equal-weight points reproduce affine Euler Gaussian moments; declared affine finite-grid law only",
+                "status": "IDENTIFIED"}
+            budget["sampling"] = {"value": 0, "units": unit,
+                "estimated_by": "deterministic eight-point moment propagation", "status": "NOT_APPLICABLE"}
     if path_output is not None:
         output["forecast"]["path_output_analysis"] = path_output
         output["forecast"]["current_output_qualification"] = path_output["status"]

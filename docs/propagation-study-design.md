@@ -22,11 +22,12 @@ Failed numerical checks remain saved evidence without automatic refinement or
 retry. Nonlinear packages cannot inherit the affine proof; strict PSD refusal is
 unchanged. Pilot analysis is explicitly not scientific/formal qualification:
 ordinary output keeps its unknown reference/model/closure error fields, and
-formal or test/final-eval admission is refused before grants or protected bytes.
-Dedicated owner consumption and independent paper qualification checks are still
-required before formal cubature studies, as are legitimate source preparation
-and immutable preregistration. No interface here grants data access or launches
-an actual study automatically.
+the numerical qualification adapter still refuses formal or test/final-eval
+admission before grants or protected bytes. The ordinary affine adapter can
+consume only its [dedicated owner chain](managed-cubature-admission.md), not a
+generic numerical pass or old analytic proof. Independent paper qualification,
+legitimate source preparation and immutable preregistration remain mandatory.
+No interface here grants data access or launches an actual study automatically.
 
 ## Two-dimensional motion and file-based preparation
 

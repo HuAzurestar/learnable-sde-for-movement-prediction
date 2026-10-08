@@ -167,9 +167,12 @@ class AdmissionGate:
             from experiments.pirc27.input_cases import validate_cell_input_binding
             validate_cell_input_binding(cell, protocol_block=block, selection_hash=spec.get("selection_hash"))
             if plugin.plugin_id in {"affine-cubature", "affine-cubature-qualification"}:
-                # Numerical pilot checks are not a dedicated formal owner proof.
-                # Refuse before grant/package lookup or any protected bytes.
-                if mode == "formal" or block["split_role"] in {"test", "final-eval"}:
+                # A numerical qualifier never becomes a formal target. Ordinary
+                # affine targets need the dedicated owner proof below, pre-read.
+                if (plugin.plugin_id == "affine-cubature-qualification" and
+                        (mode == "formal" or block["split_role"] in {"test", "final-eval"})) or (
+                        plugin.plugin_id == "affine-cubature" and mode != "formal"
+                        and block["split_role"] in {"test", "final-eval"}):
                     raise ResearchError("UNQUALIFIED", "affine cubature requires dedicated held-out owner qualification")
                 if plugin.plugin_id == "affine-cubature-qualification" and (
                         mode != "pilot" or block["split_role"] not in {"train", "validation"}):
@@ -283,6 +286,12 @@ class AdmissionGate:
                             or plan.get("adjudication_hash") != digest(policy)
                             or prereg.get("adjudication_spec") != policy):
                         raise ResearchError("UNQUALIFIED", "adjudication policy differs from pre-read frozen preregistration")
+                # Missing method proof must fail before even the generic
+                # qualification attachment is read, not just before target data.
+                if plugin.plugin_id == "affine-cubature":
+                    from .cubature_qualification_admission import prepare_managed_cubature
+                    documents["propagation_qualification"] = prepare_managed_cubature(
+                        self.store, spec, cell, package, prereg)
                 report, evidence = self._qualification(package, prereg, grant)
                 documents.update(qualification=report, qualification_evidence=evidence)
                 if plugin.plugin_id in {"affine-propagation", "affine-propagation-chunk",
@@ -358,7 +367,10 @@ class AdmissionGate:
             if result.get("qualification") != receipt["qualification"]:
                 raise ResearchError("UNQUALIFIED", "worker cannot change admitted qualification")
             if "propagation_qualification" in receipt.get("documents", {}):
-                if plugin.plugin_id == "affine-path-production-chunk":
+                if plugin.plugin_id == "affine-cubature":
+                    from .cubature_qualification_admission import validate_formal_cubature_result
+                    validate_formal_cubature_result(receipt, spec, cell, result)
+                elif plugin.plugin_id == "affine-path-production-chunk":
                     from .path_qualification_admission import validate_formal_path_result
                     validate_formal_path_result(receipt, spec, cell, result)
                 elif plugin.plugin_id == "affine-mixture-production-chunk":
