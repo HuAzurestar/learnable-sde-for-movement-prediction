@@ -140,7 +140,7 @@ def reseal_target(bundle):
 
 
 @pytest.mark.parametrize("fault", ["missing-proof", "changed-estimate", "analytic-estimator", "projected",
-    "false-error", "claimed-model", "missing-sampling-count"])
+    "false-error", "claimed-model", "missing-sampling-count", "unexpected-calibration"])
 def test_resealed_current_target_never_falls_back_to_generic_paper_pass(exported, tmp_path, fault):
     bundle = deepcopy(exported)
     row = bundle["cells"][0]
@@ -159,12 +159,14 @@ def test_resealed_current_target_never_falls_back_to_generic_paper_pass(exported
         row["metrics"] = deepcopy(result["metrics"])
     elif fault == "claimed-model":
         functional["error_budget"]["model"] = {"value": 0, "status": "IDENTIFIED", "units": "m"}
+    elif fault == "unexpected-calibration":
+        row["admission"]["documents"]["probability_calibration"] = {"opaque_pass": True}
     else:
         functional.pop("sample_count")
     reseal_target(bundle)
     checked = paper_validate(tmp_path, bundle)
     assert checked.returncode != 0
-    assert "cubature" in checked.stderr.lower()
+    assert ("calibration" if fault == "unexpected-calibration" else "cubature") in checked.stderr.lower()
 
 
 def test_formal_target_does_not_replay_reference_kernels(exported, monkeypatch):
