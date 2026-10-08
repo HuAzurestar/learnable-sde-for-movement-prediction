@@ -1,5 +1,54 @@
 # Frozen synthetic propagation design preparation
 
+## Two-dimensional motion and file-based preparation
+
+This study retains position and velocity in a plane: `[x, y, vx, vy]`, with
+motion-space dimension 2 and state dimension 4. It does not add independent
+vertical position/velocity or arbitrary state-dimension scaling. Terrain and
+other conditioning features are not additional dynamical states. Only
+comparisons requiring completed admissible terrain outputs wait for the
+upstream terrain study; independent no-terrain affine/synthetic preparation
+can continue. This scope clarification does not qualify any synthetic or real
+model, admit a study or establish a scientific result.
+
+`python -m experiments.pirc27 prepare` reloads a saved compiler manifest,
+checks its expected canonical hash and current source, reconstructs its
+bounded models/configurations/arms, and recompiles the entire matrix. A
+matching digest alone is insufficient: every generated request, resource
+binding and unavailable row must match the compiler output. Changed budgets,
+state dimensions, comparison strata or test visibility are refused, even
+when the edited document has been rehashed.
+
+```console
+python -m experiments.pirc27 prepare frozen-design.json --expected-hash DESIGN_HASH --runtime-config /absolute/runtime/runtime.json --expected-runtime-config-hash CONNECTION_FILE_SHA256
+```
+
+The explicitly selected connection file uses
+`pirc25-local-runtime-config-v1`, includes this study's participant, and declares
+the existing Git-external root and original store ID. Its exact file bytes are
+hash-bound. The command reads only that configuration and existing `store.json`
+identity; it does not instantiate `ResearchStore`, acquire a ledger writer lock,
+create directories, register/authorize studies, check balances, read trajectory
+payloads, or run numerical research. Input files are bounded opened regular
+files, with duplicate/nonfinite JSON fields rejected.
+
+Standard output is a `pirc27-prepared-study-v1` envelope containing the bound
+`study_spec`, its canonical hash, design/configuration/identity hashes, explicit
+2D/4-state semantics and `NOT_REGISTERED_NOT_ADMITTED`. Registration consumes
+the nested `study_spec`, not this envelope. Shared grants, immutable protocol,
+package qualifications, budget admission and supervised execution must still
+be established using the existing shared interfaces. Connection metadata is
+never a data-read grant, evidence of unused budget, or a ledger-health check.
+The command does not initialize a missing store or substitute fixture stores.
+No workstation-specific root or private data is committed in this example.
+
+`tests/test_propagation_preparation.py` exercises affine/nonlinear and labelled
+full-matrix roundtrips, bounded CLI output and failures, retained unavailable
+rows, byte/hash/schema/dimension/identity refusals and unchanged disposable
+runtime files. These are engineering controls, not formal research evidence.
+
+## Compiler contract
+
 `experiments.pirc27.design.freeze_design` compiles an explicit
 `PropagationStudyDesign` into immutable `PropagationStudyManifest` bytes.
 This is preparation, not preregistration, authorization, numerical evaluation or
