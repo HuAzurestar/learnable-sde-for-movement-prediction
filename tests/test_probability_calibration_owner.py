@@ -213,3 +213,41 @@ def test_saved_owner_rejects_cycles_before_encoding(monkeypatch):
     monkeypatch.setattr(owner, "encode", lambda *args: pytest.fail("unbounded caller document encoded"))
     with pytest.raises(ResearchError, match="structure"):
         saved_calibration_request(analysis, policy, package, request)
+
+
+def test_actual_settled_source_can_be_frozen_with_its_selected_string_grant_version(source):
+    from experiments.pirc27.calibration_bindings import StudyCalibration
+    from infrastructure.research_store import encode
+    store, spec, original = source
+    consumer = "versioned-geometry-consumer"
+    original_grant = store.authorization(original["source_authorization_id"])
+    grant = {**original_grant,
+        "version": "calibration-consumer-v1", "consumer_study_ids": [consumer]}
+    # Disposable synthetic test store only. This creates a distinct immutable
+    # version, not an overwrite, official grant, source budget or new worker.
+    store.authorize(grant)
+    ref = {**original, "source_authorization_version": grant["version"]}
+    before = BudgetLedger(store).balance(spec["arms"][0]["arm_id"])
+    evidence = prepare_probability_calibration(store, ref, consumer_study_id=consumer)
+    geometry = evidence["geometry"]
+    entry = StudyCalibration("tail", "affine-stable-v1", geometry["model_package_hash"], geometry["horizon"],
+        status="CALIBRATED", geometry_document=encode(geometry), source_pointer_document=encode(ref),
+        source_evidence_hash=evidence["evidence_hash"], consumer_study_id=consumer)
+    document = entry.manifest()
+    assert StudyCalibration.from_manifest(document).manifest() == document
+    assert document["source_pointer"]["source_authorization_version"] == grant["version"]
+    assert evidence["authorization"] == grant
+    assert store.authorization(original["source_authorization_id"]) == original_grant
+    reopened = ResearchStore(store.path.parent, store.store_id)
+    assert prepare_probability_calibration(reopened, ref, consumer_study_id=consumer) == evidence
+    assert BudgetLedger(store).balance(spec["arms"][0]["arm_id"]) == before
+    assert len([e for e in store.events() if e["event_kind"] == "WORKER_STARTED"]) == 1
+
+
+@pytest.mark.parametrize("version", ["unselected-calibration-version", 1, True, ""])
+def test_source_owner_does_not_fall_back_from_missing_or_invalid_selected_grant(source, monkeypatch, version):
+    store, spec, original = source
+    monkeypatch.setattr(store, "read_artifact", lambda *a, **kw: pytest.fail("read before selected grant refusal"))
+    with pytest.raises(ResearchError):
+        prepare_probability_calibration(store, {**original, "source_authorization_version": version},
+            consumer_study_id=spec["study_id"])

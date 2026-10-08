@@ -116,9 +116,12 @@ class StudyCalibration:
             AffineHalfspaceCalibrationPolicy.from_manifest(pointer["policy"])
             for key in ("source_attempt_id", "source_authorization_id"):
                 identifier(pointer[key])
-            _require(_hash(pointer["source_artifact_id"]) and (pointer["source_authorization_version"] is None
-                or type(pointer["source_authorization_version"]) is int and pointer["source_authorization_version"] > 0),
-                "invalid source artifact or grant version")
+            _require(_hash(pointer["source_artifact_id"]), "invalid source artifact")
+            # The shared owner uses an immutable string selector, not an
+            # integer revision counter. None selects only the original grant;
+            # never stringify another type or silently fall back to None.
+            if pointer["source_authorization_version"] is not None:
+                identifier(pointer["source_authorization_version"])
         if self.status == "CALIBRATED":
             _require(geometry is not None and pointer is not None and _hash(self.source_evidence_hash)
                 and self.consumer_study_id is not None, "complete declared owner binding required")

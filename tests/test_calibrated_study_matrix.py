@@ -212,3 +212,22 @@ def test_deterministic_alias_refusal_precedes_even_calibrated_table_expansion(mo
     monkeypatch.setattr(module, "product", lambda *a: pytest.fail("calibrated alias expanded"))
     with pytest.raises(DataValidationError, match="duplicate numerical configuration"):
         freeze_design(design)
+
+
+@pytest.mark.parametrize("version", [None, "grant-v1"])
+def test_frozen_pointer_uses_original_shared_string_grant_version_contract(version):
+    entry = declared_design().calibrations[0]
+    pointer = entry.manifest()["source_pointer"]
+    pointer["source_authorization_version"] = version
+    value = replace(entry, source_pointer_document=encode(pointer)).manifest()
+    assert value["source_pointer"]["source_authorization_version"] == version
+    assert StudyCalibration.from_manifest(value).manifest() == value
+
+
+@pytest.mark.parametrize("version", [1, True, "", "x"*129, "invalid/version", [], {}])
+def test_frozen_pointer_refuses_nonidentifier_versions_without_converting_or_falling_back(version):
+    entry = declared_design().calibrations[0]
+    pointer = entry.manifest()["source_pointer"]
+    pointer["source_authorization_version"] = version
+    with pytest.raises((DataValidationError, ResearchError)):
+        replace(entry, source_pointer_document=encode(pointer)).manifest()
