@@ -50,13 +50,16 @@ class Interval:
 
 
 class Arithmetic:
-    def __init__(self):
+    def __init__(self, *, maximum_operations=MAX_OPERATIONS):
+        if type(maximum_operations) is not int or not 1 <= maximum_operations <= MAX_OPERATIONS:
+            raise DataValidationError("reference arithmetic requires an original bounded operation quota")
         self.operations = 0
+        self.maximum_operations = maximum_operations
 
     def box(self, lo, hi=None):
-        self.operations += 1
-        if self.operations > MAX_OPERATIONS:
+        if self.operations >= self.maximum_operations:
             raise NumericalError("reference arithmetic exceeds fixed operation quota")
+        self.operations += 1
         lo, hi = _checked(lo), _checked(lo if hi is None else hi)
         if lo > hi:
             raise NumericalError("empty reference enclosure")
@@ -308,6 +311,18 @@ def bound_affine_reference(package, request):
     Python floats in inputs denote their exact binary rational values. No claim
     covers parameter/model uncertainty, nonlinear closure or first passage.
     """
+    return _bound_affine_reference(package, request, Arithmetic())
+
+
+def _bound_affine_reference(package, request, a):
+    """Worker-side composable counter; certificate counts remain per reference.
+
+    A shared counter can only reduce the original fixed cap. Ordinary public
+    reference certificates and canonical recomputation retain their old form.
+    """
+    if type(a) is not Arithmetic:
+        raise DataValidationError("explicit bounded reference arithmetic required")
+    start_operations = a.operations
     if type(package) is not FrozenDynamicsPackage or type(request) is not PropagationRequest:
         raise DataValidationError("reference requires frozen affine dynamics and endpoint request")
     package.validate()
@@ -316,7 +331,6 @@ def bound_affine_reference(package, request):
         raise DataValidationError("reference request/model content differs")
     initial_covariance = _strict_covariance(request.initial_covariance)
     p = package.manifest()["parameters"]
-    a = Arithmetic()
     A = [[a.box(value) for value in row] for row in p["A"]]
     b = [[a.box(value)] for value in p["b"]]
     L = [[a.box(value) for value in row] for row in p["L"]]
@@ -360,7 +374,7 @@ def bound_affine_reference(package, request):
     document = {"schema_version": "affine-reference-certificate-v1", "algorithm": algorithm_manifest(),
         "code_hash": code_hash(), "model_package_hash": package.package_hash, "request_hash": request.request_hash,
         "scope": "declared-affine-Gaussian-endpoint-law", "scientific_qualification": False,
-        "status": status, "doublings": doublings, "operations": a.operations,
+        "status": status, "doublings": doublings, "operations": a.operations-start_operations,
         "units": "m" if request.functional == "endpoint-x" else "1",
         "functional_bounds": _interval_manifest(functional),
         "mean_bounds": [_interval_manifest(row[0]) for row in mean],
