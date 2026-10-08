@@ -28,8 +28,9 @@ from inference.phase_space import forecast
 from infrastructure.research_store import digest, encode
 from tests.test_pirc26_dynamics import model
 from tests.test_pirc26_training_forecast import batch, request
-output, value, cell, restored = sys.argv[1:]
+output, value, cell, restored, pause_step = sys.argv[1:]
 value, cell = json.loads(value), json.loads(cell)
+pause_step = int(pause_step)
 torch.set_num_threads(1)
 m = model('M2')
 state = json.loads(Path(restored).read_bytes()) if restored else None
@@ -39,6 +40,15 @@ def report(control, row):
     original_progress(control, row)
     if row['step'] % 100 == 0 or row['step'] == 1:
         print('synthetic-training-step', row['step'], time.monotonic(), flush=True)
+    if state is None and row['step'] == pause_step:
+        # A synthetic synchronization barrier, not simulated compute or a
+        # numerical timing measurement. Keep the real owner clock, 80% signal,
+        # hard fuse and save/ACK exchange; do not predict machine throughput.
+        print('synthetic-awaiting-owner-checkpoint', row['step'], flush=True)
+        while not control.requested():
+            if time.monotonic() >= control.control.descriptor['deadline']:
+                raise TimeoutError('owner checkpoint request did not arrive before the hard deadline')
+            time.sleep(0.01)
 ManagedTrainingControl.progress = report
 try:
     result = managed_fit_o1(m, [batch(m, 4096)],
@@ -65,26 +75,31 @@ exit_managed_worker(0)
 '''
 
 
-def command(output, value, cell):
-    return [sys.executable, "-c", PROGRAM, str(output), encode(value).decode(), encode(cell).decode(), ""]
+def command(output, value, cell, *, pause_step=0):
+    return [sys.executable, "-c", PROGRAM, str(output), encode(value).decode(), encode(cell).decode(), "", str(pause_step)]
+
+
+def interruption_command(output, value, cell):
+    return command(output, value, cell, pause_step=100)
 
 
 def resume_command(output, value, cell, state):
     path = Path(output).with_name("training-resume.json")
     atomic_write(path, encode(state))
     result = command(output, value, cell)
-    result[-1] = str(path)
+    result[-2] = str(path)
     return result
 
 
-def prepare(root, study_id):
+def prepare(root, study_id, *, interrupt=False):
     root.mkdir()
     store = ResearchStore(root, "pirc26-synthetic-training", initialize=True)
     value = spec()
     value["study_id"] = study_id
     value["cells"][0].update(plugin_id="pirc26-training-control-fixture", capability="generic-rollout", visibility="synthetic")
+    builder = interruption_command if interrupt else command
     plugin = synthetic_plugin("pirc26-training-control-fixture", frozenset({"generic-rollout"}),
-                              ("x", "y", "vx", "vy"), ("m", "m", "m/s", "m/s"), "exact", command)
+                              ("x", "y", "vx", "vy"), ("m", "m", "m/s", "m/s"), "exact", builder)
     plugin.registry_entry.resource_contract["counts"].update(
         steps={"constant": 600}, paths={"constant": 8}, observations={"constant": 4096}, components={"constant": 128})
     plugin.registry_entry.resource_contract["limits"]["result_bytes"] = 4 * 1024 * 1024
@@ -114,13 +129,16 @@ def test_owner_checkpoint_reopened_numerical_training_matches_continuous_and_cha
         baseline["study_id"], digest(baseline["cells"][0]), budget=BudgetSpec(70))
     assert expected["state"] == "SUCCEEDED", (expected, worker_log(continuous, expected))
     expected_output = json.loads((continuous.path / "artifacts" / expected["artifact_id"]).read_bytes())
-    store, value, registry, adapters, grant = prepare(tmp_path / "resumed", "resumed-training")
+    store, value, registry, adapters, grant = prepare(tmp_path / "resumed", "resumed-training", interrupt=True)
     interrupted = SharedRunner(store, registry, recovery_registry=adapters).run_cell(
-        value["study_id"], digest(value["cells"][0]), budget=BudgetSpec(32))
+        value["study_id"], digest(value["cells"][0]), budget=BudgetSpec(70))
     assert interrupted["state"] == "FAILED", (interrupted, worker_log(store, interrupted))
     assert store.attempts()[interrupted["attempt_id"]]["error_code"] == "CHECKPOINT_SAVED"
     saved = [event["payload"] for event in store.events() if event["event_kind"] == "CHECKPOINT_SAVED"]
-    assert len(saved) == 1 and 0 < saved[0]["progress"]["completed_steps"] < 600
+    assert len(saved) == 1 and saved[0]["progress"]["completed_steps"] == 100
+    requests = [event["payload"] for event in store.events() if event["event_kind"] == "CHECKPOINT_REQUESTED"]
+    assert len(requests) == 1 and requests[0]["supported"]
+    assert 0 < requests[0]["remaining_seconds"] <= 70 * 0.2 + 1e-6
     cost = BudgetLedger(store).balance("affine")["committed_ms"]
     assert cost > 0 and not BudgetLedger(store).balance("affine")["closed"]
     reopened = ResearchStore(tmp_path / "resumed", "pirc26-synthetic-training")
