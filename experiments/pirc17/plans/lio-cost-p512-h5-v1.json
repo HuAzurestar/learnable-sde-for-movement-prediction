@@ -1,0 +1,71 @@
+{
+  "schema_version": "pirc17-lio-cost-probe-v1",
+  "purpose": "four_LIO_costs_only_no_precision_search",
+  "axes": {
+    "configurations": [
+      "lio-road",
+      "lio-river",
+      "lio-worldcover",
+      "lio-surface"
+    ],
+    "seeds": [
+      20260814
+    ],
+    "particles": [
+      512
+    ],
+    "steps": [
+      5.0
+    ],
+    "limit_origins": 1,
+    "selection_policy": "lexical_independent_blocks",
+    "map_backend": "multicell",
+    "wall_seconds": 600
+  },
+  "expected_run_count": 4,
+  "outer_wall_seconds": 660,
+  "preparation_empirical_cap_seconds": 1800,
+  "prior_preparation_empirical_seconds": 0,
+  "final_eval_authorized": false,
+  "numerical_qualification_claim": false,
+  "automatic_retry": false,
+  "nominal_horizon_seconds": 1800.0,
+  "expected_sample_id": "00d6711e02d7224c4f68497b0b751391bab28a2844cf2bda1e8d7e57762a1a8b",
+  "source_sha256": {
+    "direct_linear_rollout.py": "e3bb139321cfc16d09ebc6a68e9ab112405f4d3156e787da5dcda902a9a13034",
+    "direct_linear_evidence.py": "13ce7908c357321f967b43d3d15acbfe81123fe6b4ee299be124be80b3ffd538",
+    "direct_linear.py": "0c80ec0f01089d056f5652ff81c623c533d7e2080aed5942018b516d5c59181e",
+    "direct_linear_fit.py": "2b35d715df070e4a3a54e017f4258f93bac263247d128d4553a3ae2e3d56d96d",
+    "development_rollout.py": "ca1fe3c166a752f054fdc053f370e09253f969c71fbe5affe71724f09712af94",
+    "rollout.py": "b8fda002d6c771e86edf799f7708f3f1ad70fe9bc352b1a571bdbfe0aac2e45a",
+    "brownian.py": "65ebb27581beed398fa819ac73880a4f2fa708e928e2a1271860fdcd20beced9",
+    "dynamics.py": "15c2c8650ee3fbc0451922d953ff7f8a7235a0f3736b56f776be97ea96fc28f9",
+    "checkpoints.py": "ff494f2332829900eac0fe512cc505bdf6b8c47493a870f315d6b3cc7e757d3e",
+    "development.py": "9e760f529cca04bf1b497a346313c343924a64938a8d2badf789e3ea6ee089ca",
+    "features.py": "7ce422a2a83add8ad8484d52f8a83a4669c05a259d3fcb8c55ab5e06de4cc26c",
+    "configurations.py": "2ec5fa1f19ba28fd62823f756ca011e4d54c89ed7ca88f1524ffebf8425556b3",
+    "metrics.py": "c00059e40421d5267deb35b73096048f22fd439dc9914801ccaf4fd609885570",
+    "pilot_selection.py": "91202eae7a4420ca9a7db331378ea39ef7a78704db74d306b2b00ad907e3f8cc",
+    "precision.py": "e5780c6620d5f1ad9701c2576ab40c3c22eaa106591699efa8615329f9573596",
+    "origins.py": "e06c6165277e994af943c4b5108f978abb58cc39a005e326c15de6d1f26a6c26",
+    "calibration.py": "42c634c40544a37abbc88c4f06fa25a00938b33099286221de217eca1b9d7427",
+    "inference.py": "d25def4bec006173f5c0f005ab3eda0eab2c3a35ec39c842e6622ea446e1a1b2",
+    "qualification.py": "2b641315b143d7ee675778f5289bde4e99bb803a47c01dd1a0acc8dcdb286bbd",
+    "lio_cost_probe.py": "e88b08980d7172d0feabb4c3f83930a7445b815cf367804d1363de2a58797bc3",
+    "physical_memory.py": "241f7482032ef4cbb8df1254ba5f81c40986c5b96d6a2f9c69fdf6b599c12680",
+    "resource_replay.py": "e2f97eaa4e2788c3a1ab8ce58fa9d35fc602b0241bd23da2e3e9192052802d3e",
+    "seed_resume_session.py": "d66f7f0f9e12ceae91dea78e3efb70167df545f6b1c83ac0d624fc85c854a9df"
+  },
+  "evidence": {
+    "fit": "artifacts/pirc17/dev10/direct-linear-fit-v1.json",
+    "fit_sha256": "22fb218eda4922febc1e2ef8715e31ed3f54bbca3c75aa7461d2346589444c4a",
+    "fit_ledger": "artifacts/pirc17/dev10/direct-linear-fit-v1.jsonl",
+    "fit_ledger_sha256": "649fc0540ae5398235a19c7a0bd26d8e31ee5836dff2850c9d30bd5d4043e5be",
+    "training_policy_sha256": "560a6f0776287ab7a31a91c88d029e37f25a1964f8039a39554cd267e202d0ee"
+  },
+  "locations_source": {
+    "path": "artifacts/pirc17/dev10/native-primary-p1024-missing-v1.extension/root.json",
+    "sha256": "381c000b3ba9919d08325968255a4708a001d4a2a550940765428d0a37ecbc7d",
+    "use": "existing data locators only; never restart authority"
+  }
+}

@@ -82,6 +82,14 @@ PUBLIC_NEX326_REFERENCES = {
 
 
 def is_approved_public_reference(label: str, relative: Path, matched: str) -> bool:
+    # This study uses the already-public experiment contract. Permit only its
+    # exact public identifier, never arbitrary internal work items or roles.
+    if (label == "internal work item"
+            and matched.upper().replace("-", "").replace("_", "") == "NEX326"
+            and (relative.is_relative_to(Path("experiments/pirc17"))
+                 or (relative.parent == Path("tests")
+                     and relative.name.startswith("test_pirc17")))):
+        return True
     if label == "internal work item" and (
         relative.is_relative_to(PUBLIC_NEX326)
         or relative in PUBLIC_NEX326_REFERENCES

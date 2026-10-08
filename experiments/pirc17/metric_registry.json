@@ -1,0 +1,112 @@
+{
+  "schema_version": "pirc17-metric-registry-v1",
+  "implementation_version": "pirc17-position-metrics-v1",
+  "coordinate_contract": "2D metres in an origin-anchored local frame; same transform for predictions and truth",
+  "truth_contract": "original observed positions only; scoring-time eligibility/selection must be sealed separately; no interpolation by the scorer",
+  "primary": {
+    "name": "time_weighted_energy_score_m",
+    "units": "m",
+    "direction": "lower",
+    "formula": "sum_t w_t (mean_i ||X_it-y_t|| - sum_{i!=j} ||X_it-X_jt|| / (2 N (N-1)))",
+    "estimator": "unbiased Monte Carlo U-statistic",
+    "time_weights": "explicit nonnegative vector summing to one, frozen before final eval"
+  },
+  "secondary": [
+    {
+      "name": "ade_grid_mean_m",
+      "units": "m",
+      "estimator": "unweighted mean over registered scoring instants of distance from ensemble mean to truth"
+    },
+    {
+      "name": "fde_m",
+      "units": "m",
+      "estimator": "final scoring instant error of ensemble mean; never minimum particle error"
+    },
+    {
+      "name": "marginal_crps_m",
+      "units": "m",
+      "estimator": "coordinatewise unbiased ensemble CRPS",
+      "report": "east/north separately"
+    },
+    {
+      "name": "radial_coverage",
+      "units": "fraction",
+      "levels": [
+        0.5,
+        0.8,
+        0.9,
+        0.95
+      ],
+      "estimator": "inclusion in ensemble-mean-centred disk with ceil(level*N) order-statistic radius",
+      "limitation": "not HDR and not joint trajectory coverage"
+    },
+    {
+      "name": "radial_area",
+      "units": "m^2",
+      "estimator": "pi * radius^2, paired with observed coverage"
+    },
+    {
+      "name": "particle_endpoint_error_quantiles_m",
+      "units": "m",
+      "levels": [
+        0.5,
+        0.9,
+        0.95
+      ],
+      "limitation": "within one forecast ensemble, distinct from population quantiles of per-origin FDE"
+    },
+    {
+      "name": "path_energy_score_m",
+      "units": "m",
+      "estimator": "joint path ES after multiplying each 2D position by sqrt(time_weight); supplementary dependence-sensitive score"
+    },
+    {
+      "name": "position_entropy",
+      "units": "nats_discrete",
+      "estimator": "plug-in categorical entropy on frozen 2D position bins plus one overflow bin",
+      "comparison_requires": [
+        "same bin edges",
+        "same coordinate convention",
+        "same particle budget"
+      ],
+      "limitation": "not differential entropy, not accuracy, not joint-path entropy"
+    },
+    {
+      "name": "nll",
+      "status": "unavailable",
+      "reason": "no qualified predictive density estimator; no Gaussian shortcut"
+    },
+    {
+      "name": "mode_entropy",
+      "status": "unavailable",
+      "reason": "current kinematic model is not mode-labelled"
+    },
+    {
+      "name": "joint_path_entropy",
+      "status": "unavailable",
+      "reason": "marginal entropy sum is not joint entropy"
+    }
+  ],
+  "aggregation_contract": "one origin/seed report; independent-block and seed aggregation belongs to the sealed paired-inference protocol",
+  "runtime": {
+    "version": "pirc17-cpu-runtime-v1",
+    "primary_units": "ms per forecast minute",
+    "separate": [
+      "end-to-end latency p50/p95",
+      "inclusive rollout time",
+      "inclusive terrain query/I/O time",
+      "failure rate",
+      "sampled RSS lower bound",
+      "process-lifetime peak RSS where available"
+    ],
+    "excluded": [
+      "training",
+      "offline scoring"
+    ],
+    "cold": "provider recreated; OS cache and interpreter not cold",
+    "warm": "same provider after explicit warm-up",
+    "gpu": "unsupported by CPU timing harness; CPU runs report GPU memory as not applicable"
+  },
+  "failure_contract": "nonfinite forecasts/targets reject scoring; caller must retain failed origin/seed in denominator. Never drop failures to improve scores",
+  "prohibited": "No combined arbitrary accuracy-runtime score and no best-of-N accuracy"
+}

@@ -1,0 +1,99 @@
+{
+  "schema_version": "pirc17-combined-cost-projection-v1",
+  "execution_admitted": false,
+  "final_eval_authorized": false,
+  "new_empirical_fits": 0,
+  "new_empirical_forecasts": 0,
+  "evidence": {
+    "terrain": {
+      "path": "experiments/pirc17/evidence/terrain-cost-v1.json",
+      "sha256": "905aed0dcbc2ed448af10fc9ae8541fd1067b719bb45e45ae38426e3a9de4600"
+    },
+    "methods": {
+      "path": "experiments/pirc17/evidence/method-cost-v1.json",
+      "sha256": "61c98536ee15ebcfda3df821030cd6355e2fc3bf6aa695acea917313ad775d65"
+    }
+  },
+  "method_sampling": "5 single-trial fits, 5 single-trial forecasts, one calibration-exposed validation origin/seed",
+  "scenarios": [
+    {
+      "independent_blocks_scenario_only": 30,
+      "origins_per_block": 1,
+      "seed_count": 5,
+      "method_forecasts": 4200,
+      "terrain_forecasts": 1500,
+      "complete_forecasts": 5700,
+      "scoring_slots_per_forecast": 4,
+      "assumed_fp_seconds_per_complete_forecast": 0.630744100024458,
+      "assumed_common_score_seconds_per_forecast": 0.08166379999602214,
+      "terrain_prediction_seconds": 54097.35520899063,
+      "method_prediction_seconds": 2616.2018700968474,
+      "common_scoring_seconds": 465.48365997732617,
+      "prediction_and_common_scoring_hours": 15.883066871962445,
+      "scope": "same hardware/runtime/settings conditional serial projection, not a cap or full project ETA",
+      "method_cost_assumption": "all 26 FP slots use the largest of three observed FP costs; MC/CRN use their own single trial",
+      "score_cost_assumption": "all 38 slots/configurations use the largest observed method common-score cost; excludes extra method-specific metrics",
+      "final_eval_available_blocks": null,
+      "formal_physical_fit_count": null,
+      "full_feature_wall_time_estimate_seconds": null,
+      "execution_admitted": false
+    },
+    {
+      "independent_blocks_scenario_only": 46,
+      "origins_per_block": 1,
+      "seed_count": 5,
+      "method_forecasts": 6440,
+      "terrain_forecasts": 2300,
+      "complete_forecasts": 8740,
+      "scoring_slots_per_forecast": 4,
+      "assumed_fp_seconds_per_complete_forecast": 0.630744100024458,
+      "assumed_common_score_seconds_per_forecast": 0.08166379999602214,
+      "terrain_prediction_seconds": 82949.27798711897,
+      "method_prediction_seconds": 4011.5095341484994,
+      "common_scoring_seconds": 713.7416119652335,
+      "prediction_and_common_scoring_hours": 24.35403587034242,
+      "scope": "same hardware/runtime/settings conditional serial projection, not a cap or full project ETA",
+      "method_cost_assumption": "all 26 FP slots use the largest of three observed FP costs; MC/CRN use their own single trial",
+      "score_cost_assumption": "all 38 slots/configurations use the largest observed method common-score cost; excludes extra method-specific metrics",
+      "final_eval_available_blocks": null,
+      "formal_physical_fit_count": null,
+      "full_feature_wall_time_estimate_seconds": null,
+      "execution_admitted": false
+    },
+    {
+      "independent_blocks_scenario_only": 62,
+      "origins_per_block": 1,
+      "seed_count": 5,
+      "method_forecasts": 8680,
+      "terrain_forecasts": 3100,
+      "complete_forecasts": 11780,
+      "scoring_slots_per_forecast": 4,
+      "assumed_fp_seconds_per_complete_forecast": 0.630744100024458,
+      "assumed_common_score_seconds_per_forecast": 0.08166379999602214,
+      "terrain_prediction_seconds": 111801.20076524731,
+      "method_prediction_seconds": 5406.817198200151,
+      "common_scoring_seconds": 961.9995639531408,
+      "prediction_and_common_scoring_hours": 32.82500486872239,
+      "scope": "same hardware/runtime/settings conditional serial projection, not a cap or full project ETA",
+      "method_cost_assumption": "all 26 FP slots use the largest of three observed FP costs; MC/CRN use their own single trial",
+      "score_cost_assumption": "all 38 slots/configurations use the largest observed method common-score cost; excludes extra method-specific metrics",
+      "final_eval_available_blocks": null,
+      "formal_physical_fit_count": null,
+      "full_feature_wall_time_estimate_seconds": null,
+      "execution_admitted": false
+    }
+  ],
+  "not_included": [
+    "formal data qualification/loading",
+    "sealed training population and physical fit policy",
+    "extra method-specific scores",
+    "independent replay/audit",
+    "failure and resource reserve",
+    "software tests/review",
+    "full manuscript/PDF",
+    "human decision latency"
+  ],
+  "next": "select exact finite formal workload and phase/total caps, seal protocol/matrix, test/review, obtain ACCEPT-01",
+  "no_new_probe_requested": true,
+  "full_feature_wall_time_estimate_seconds": null
+}

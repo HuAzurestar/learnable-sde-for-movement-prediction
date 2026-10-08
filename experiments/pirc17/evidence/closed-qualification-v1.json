@@ -1,0 +1,197 @@
+{
+  "schema_version": "pirc17-closed-qualification-record-v1",
+  "source_file_sha256": {
+    "terrain_power": "29e92c11d2642f0ec334920bb51fafaad8b4b24dec0b0be7431a2497aed3a771",
+    "terrain_fine": "a70a367e7bce829f45f96e81365f46ccd5224b8551dd6af159c5018cf7b61877",
+    "terrain_coarse": "f098e1351fb7e122c171f42f01ca9ed7284db9d19bbaae81f18da6b52f3b2def",
+    "methods": "fbedee50aee338f230bc7251f3b1c2cea6414f3e320ec51d8b266e212bdcc7e0",
+    "method_audit": "b52e0a91bf1e371ef50d3a213e5306d10053a7ac1ec718ba001aa73d5c4cfa7d"
+  },
+  "partition": "validation",
+  "independent_blocks": 3,
+  "origins_per_block": 1,
+  "registered_seeds": [
+    20260814,
+    20260815,
+    20260816,
+    20260817,
+    20260818
+  ],
+  "delta_m": 41.100259,
+  "terrain_primary": {
+    "all-vs-base": {
+      "paired_block_sd_m": 65.0154741726509,
+      "planning_sd_step_seconds": 0.3125,
+      "fine_mc_margin_m": 5.879774242440712,
+      "coarse_mc_margin_m": 5.879305334860691,
+      "step_change_plus_margin_m": 2.467640561961353,
+      "combined_pilot_margin_m": 8.347414804402066,
+      "epsilon_m": 10.27506475
+    },
+    "road": {
+      "paired_block_sd_m": 68.37489569412546,
+      "planning_sd_step_seconds": 0.3125,
+      "fine_mc_margin_m": 5.922366580339742,
+      "coarse_mc_margin_m": 5.913727254231265,
+      "step_change_plus_margin_m": 3.134657683590749,
+      "combined_pilot_margin_m": 9.05702426393049,
+      "epsilon_m": 10.27506475
+    },
+    "river": {
+      "paired_block_sd_m": 81.0705518834614,
+      "planning_sd_step_seconds": 0.3125,
+      "fine_mc_margin_m": 6.525185411321579,
+      "coarse_mc_margin_m": 6.492995522339929,
+      "step_change_plus_margin_m": 3.4331635714978614,
+      "combined_pilot_margin_m": 9.958348982819441,
+      "epsilon_m": 10.27506475
+    },
+    "worldcover": {
+      "paired_block_sd_m": 38.60658266405379,
+      "planning_sd_step_seconds": 0.3125,
+      "fine_mc_margin_m": 4.414878472679777,
+      "coarse_mc_margin_m": 4.432137437884972,
+      "step_change_plus_margin_m": 4.044991496163041,
+      "combined_pilot_margin_m": 8.477128934048013,
+      "epsilon_m": 10.27506475
+    },
+    "surface": {
+      "paired_block_sd_m": 35.02097703424808,
+      "planning_sd_step_seconds": 0.3125,
+      "fine_mc_margin_m": 5.178948177693661,
+      "coarse_mc_margin_m": 5.117033123830421,
+      "step_change_plus_margin_m": 3.196072670218499,
+      "combined_pilot_margin_m": 8.37502084791216,
+      "epsilon_m": 10.27506475
+    }
+  },
+  "method_families": {
+    "method-model-structure": {
+      "arm-02/pointwise": {
+        "paired_block_sd_m": 18.927274310223673,
+        "simulation_mean_standard_error_m": 5.295566686290505
+      },
+      "arm-03/single_gaussian": {
+        "paired_block_sd_m": 73.93907304769968,
+        "simulation_mean_standard_error_m": 4.556813547904274
+      },
+      "arm-04/gmm_kernel": {
+        "paired_block_sd_m": 54.22226240107379,
+        "simulation_mean_standard_error_m": 4.328401385598306
+      },
+      "arm-05/explicit_decomp": {
+        "paired_block_sd_m": 66.242830586491,
+        "simulation_mean_standard_error_m": 3.8230427080249068
+      }
+    },
+    "method-observation-interval": {
+      "arm-06/dt30": {
+        "paired_block_sd_m": 8.99606383946941,
+        "simulation_mean_standard_error_m": 7.450399467782752
+      },
+      "arm-06/dt120": {
+        "paired_block_sd_m": 13.998020614352917,
+        "simulation_mean_standard_error_m": 3.4879976062548153
+      },
+      "arm-06/dt300": {
+        "paired_block_sd_m": 47.980715863946656,
+        "simulation_mean_standard_error_m": 3.7495889986997164
+      },
+      "arm-06/dt600": {
+        "paired_block_sd_m": 84.35413023768275,
+        "simulation_mean_standard_error_m": 6.838488783347402
+      }
+    },
+    "method-objective-and-score": {
+      "arm-08/qmle": {
+        "paired_block_sd_m": 9.70264951449391,
+        "simulation_mean_standard_error_m": 2.8348289648797196
+      },
+      "arm-09/mixed": {
+        "paired_block_sd_m": 1.2199009210809573,
+        "simulation_mean_standard_error_m": 6.524012527832578
+      },
+      "arm-09/pure_es": {
+        "paired_block_sd_m": 6.298838186018459,
+        "simulation_mean_standard_error_m": 7.332245315450976
+      },
+      "arm-10/d2_mc": {
+        "paired_block_sd_m": 0.0,
+        "simulation_mean_standard_error_m": 0.0
+      },
+      "arm-10/d2_closed": {
+        "paired_block_sd_m": 0.0,
+        "simulation_mean_standard_error_m": 0.0
+      }
+    },
+    "method-transfer-adaptation": {
+      "arm-12/scratch": {
+        "paired_block_sd_m": 9.049835711758194,
+        "simulation_mean_standard_error_m": 6.1399760452034835
+      },
+      "arm-14/reptile": {
+        "paired_block_sd_m": 32.85482507704025,
+        "simulation_mean_standard_error_m": 3.9216601342076727
+      },
+      "arm-15/drift_only": {
+        "paired_block_sd_m": 6.13969644463973,
+        "simulation_mean_standard_error_m": 4.080174130949568
+      },
+      "arm-15/two_step": {
+        "paired_block_sd_m": 9.996238753100918,
+        "simulation_mean_standard_error_m": 4.8062865374893455
+      }
+    },
+    "method-numerical-propagation": {
+      "arm-19/em": {
+        "paired_block_sd_m": 0.016705410970429095,
+        "simulation_mean_standard_error_m": 0.001041346969557654
+      },
+      "arm-19/euler": {
+        "paired_block_sd_m": 0.016705410970429095,
+        "simulation_mean_standard_error_m": 0.001041346969557654
+      },
+      "arm-21/mc": {
+        "paired_block_sd_m": 11.763022269176798,
+        "simulation_mean_standard_error_m": 4.626532744654345
+      },
+      "arm-21/crn": {
+        "paired_block_sd_m": 0.00037061196888097834,
+        "simulation_mean_standard_error_m": 2.6596308788208843e-05
+      }
+    }
+  },
+  "crn_difference_variance": {
+    "numerator_m2": 237.85098949176268,
+    "denominator_m2": 9.686662189479529e-09,
+    "descriptive_block_bootstrap_interval": [
+      14605676720.093544,
+      184692850710.97226
+    ],
+    "independent_block_count": 3,
+    "seed_count": 5,
+    "variance_ddof": 1
+  },
+  "verified_method_counts": {
+    "fitted_models_checked": 16,
+    "model_gates_checked": 21,
+    "forecast_arrays_checked": 435,
+    "observed_time_score_records_checked": 1740,
+    "method_planning_comparisons_checked": 21
+  },
+  "limitations": [
+    "Only three calibration-exposed development blocks; not final effects or a representative population certificate.",
+    "Terrain power SD comes from the finite N512/h0.3125 reference, not a final-data or coarse-grid variance estimate.",
+    "Terrain margins concern only five weighted-ES primary contrasts, not LIO, secondary origin modes, every time slot or other metrics.",
+    "Finite N512 reference, no five-seed N512-to-larger-N convergence certificate.",
+    "Method simulation SE is descriptive, not a total numerical-error or particle-refinement bound.",
+    "Same-grid exact affine-kernel diagnostics are not a globally exact nonlinear SDE reference.",
+    "Near-zero CRN-FP variance is pair-conditional; ratio is not speedup or a universal variance-reduction guarantee."
+  ],
+  "new_fits": 0,
+  "new_forecasts": 0,
+  "final_eval_reads": 0,
+  "numerically_qualified": false,
+  "scientific_claim_authorized": false,
+  "sha256": "6065a8245f6a1d21bdf489332266393af0f26e874ba0f0a9376430179e652841"
+}
