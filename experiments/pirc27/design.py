@@ -390,8 +390,6 @@ def freeze_design(design):
                          for method in design.methods for f in design.functionals}
     if set(arms) != expected_families:
         raise DataValidationError("arm bindings must cover exactly the model/method/objective families")
-    calibration_documents, calibration_lookup = _calibration_table(design, arms)
-    calibration_table_hash = content_hash(calibration_documents) if calibration_documents else None
     # Different labels cannot disguise duplicate numerical configurations as
     # independent cells. All primitive and mixture settings checks precede copy.
     numerical_configs = []
@@ -413,6 +411,10 @@ def freeze_design(design):
         if numerical in numerical_configs:
             raise DataValidationError("duplicate numerical configuration under different labels")
         numerical_configs.append(numerical)
+    # Preserve the original primitive/numerical alias refusal before *any*
+    # Cartesian expansion, including a table with no calibrated functionals.
+    calibration_documents, calibration_lookup = _calibration_table(design, arms)
+    calibration_table_hash = content_hash(calibration_documents) if calibration_documents else None
     # Validate each model and each small configuration combination first. No
     # estimator is evaluated, and no horizon/seed matrix is materialized here.
     from inference.affine_oracle import _covariance

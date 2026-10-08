@@ -200,3 +200,15 @@ def test_missing_nonlinear_and_extreme_probability_slots_remain_full_unavailable
     document = freeze_design(replace(design, calibrations=entries)).manifest()
     assert document["expected_cells"] == len(document["matrix"]) == 8
     assert all(r["disposition"] == "INELIGIBLE" and "execution" not in r["cell"] for r in document["matrix"])
+
+
+def test_deterministic_alias_refusal_precedes_even_calibrated_table_expansion(monkeypatch):
+    from experiments.pirc27 import design as module
+    design = declared_design()
+    methods = (StudyMethod("exact", samples=2, configuration_id="two"),
+        StudyMethod("exact", samples=4, configuration_id="four"))
+    design = replace(design, methods=methods, arms=fixture(methods=methods,
+        functionals=design.functionals).arms)
+    monkeypatch.setattr(module, "product", lambda *a: pytest.fail("calibrated alias expanded"))
+    with pytest.raises(DataValidationError, match="duplicate numerical configuration"):
+        freeze_design(design)
