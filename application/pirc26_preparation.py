@@ -23,6 +23,7 @@ from application.research_data import EvaluationExposureLedger
 from application.research_supervisor import ResearchSupervisor
 from experiments.pirc25.affine import ROOT, code_hash
 from infrastructure.research_store import ResearchError, atomic_write, digest, encode
+from application.pirc26_fragment_contract import SHORT_POLICY, POLICIES as FRAGMENT_POLICIES, fragment_summary
 
 
 VERSION = "pirc26-managed-dsde-preparation-v2"
@@ -44,22 +45,28 @@ def require(ok, message, code="CONTRACT_MISMATCH"):
         raise ResearchError(code, message)
 
 
-def preparation_settings(feature_spec, benchmark_binding, projection, *, duplicate_policy="reject"):
+def preparation_settings(feature_spec, benchmark_binding, projection, *, duplicate_policy="reject", fragment_policy="reject"):
     """Metadata-only configuration; no source inspection or automatic frame fit."""
     require(isinstance(projection, ProjectionSpec), "explicit projection required")
     require(duplicate_policy in {"reject", "keep-first-exact-time-v1"}, "explicit duplicate policy required")
-    return {"schema_version": VERSION, "feature_spec": deepcopy(feature_spec),
+    require(type(fragment_policy) is str and fragment_policy in FRAGMENT_POLICIES, "explicit causal fragment policy required")
+    settings = {"schema_version": VERSION, "feature_spec": deepcopy(feature_spec),
             "benchmark_binding": deepcopy(benchmark_binding), "projection": asdict(projection),
             "context_binding": context_binding(feature_spec, benchmark_binding),
             "duplicate_policy": duplicate_policy, "normalizer_policy": deepcopy(NORMALIZER_POLICY)}
+    if fragment_policy == SHORT_POLICY:
+        settings["fragment_policy"] = fragment_policy
+        settings["normalizer_policy"]["fragment_policy"] = fragment_policy
+    return settings
 
 
 def validate_settings(settings):
-    require(type(settings) is dict and set(settings) == {
+    require(type(settings) is dict and set(settings) - {"fragment_policy"} == {
         "schema_version", "feature_spec", "benchmark_binding", "projection", "context_binding",
         "duplicate_policy", "normalizer_policy"}, "closed preparation settings required")
     require(settings == preparation_settings(settings["feature_spec"], settings["benchmark_binding"],
-        ProjectionSpec(**settings["projection"]), duplicate_policy=settings["duplicate_policy"]),
+        ProjectionSpec(**settings["projection"]), duplicate_policy=settings["duplicate_policy"],
+        fragment_policy=settings.get("fragment_policy", "reject")),
         "preparation settings/context/normalizer policy differs")
     require(len(encode(settings)) <= 1024 * 1024, "preparation settings byte quota", "RESOURCE_PLAN_REJECTED")
 
@@ -118,7 +125,7 @@ def _sources(store, original, arm, selections, *, require_train=True):
 
 def train_binding(descriptors, settings):
     """Freeze actual file/unit membership and preprocessing before reads."""
-    return {"schema_version": "pirc26-train-population-v1",
+    binding = {"schema_version": "pirc26-train-population-v1",
             # Fit identity binds only the actual train population. The full
             # protocol (including selection metadata) remains in request/source
             # receipts, but is not a training-only numerical fit dependency.
@@ -126,6 +133,9 @@ def train_binding(descriptors, settings):
                         for d in descriptors if d["split_role"] == "train"],
             "projection": settings["projection"], "context_binding": settings["context_binding"],
             "duplicate_policy": settings["duplicate_policy"], "normalizer_policy": settings["normalizer_policy"]}
+    if settings.get("fragment_policy") == SHORT_POLICY:
+        binding["fragment_policy"] = SHORT_POLICY
+    return binding
 
 
 def _validate_geometry(document, width):
@@ -158,6 +168,9 @@ def _validate_geometry(document, width):
 
 def _validate_result(value, request):
     """Owner structural/integrity checks; do not rerun numerical preparation."""
+    validate_settings(request["settings"])
+    require(request["train_binding"] == train_binding(request["sources"], request["settings"]),
+            "preparation eligibility/train binding differs", "CORRUPT_ARTIFACT")
     require(type(value) is dict and set(value) == {"schema_version", "request_hash", "computation_ref",
         "train_binding", "normalizer", "blocks", "training_population", "scientific_qualification"}, "closed preparation result required")
     require(value["schema_version"] == VERSION and value["request_hash"] == digest(request)
@@ -170,7 +183,7 @@ def _validate_result(value, request):
     width = 4 + request["settings"]["context_binding"]["context_dim"]
     require(normalizer["schema_version"] == "pirc26-fitted-normalizer-v1"
         and normalizer["train_binding_hash"] == digest(request["train_binding"])
-        and normalizer["policy"] == NORMALIZER_POLICY
+        and normalizer["policy"] == request["settings"]["normalizer_policy"]
         and normalizer["context_hash"] == digest(request["settings"]["context_binding"])
         and type(normalizer["observations"]) is int and 0 < normalizer["observations"] <= MAX_OBSERVATIONS
         and normalizer["independent_block_ids"] == sorted({d["independent_block_id"] for d in request["sources"] if d["split_role"] == "train"}),
@@ -185,6 +198,7 @@ def _validate_result(value, request):
         require(type(block) is dict and set(block) == {"document", "provenance"}, "closed prepared block required")
         document, provenance = block["document"], block["provenance"]
         _validate_geometry(document, width)
+        fragment_summary(block, expected_policy=request["settings"].get("fragment_policy", "reject"))
         require(document["schema_version"] == "pirc26-observed-block-v1"
             and document["block_id"] == source["selection"]["output_block_id"]
             and document["coordinate_frame"] == request["settings"]["projection"]["coordinate_frame"]
@@ -309,6 +323,10 @@ class PreparationRunner:
             descriptors = _sources(self.store, original, arm, selections)
             require(all(d["feature"]["feature_spec_sha256"] == settings["context_binding"]["feature_spec_sha256"]
                         for d in descriptors), "source feature context differs before read")
+            if settings.get("fragment_policy") == SHORT_POLICY:
+                require(all(type(d["feature"].get("aligned_row_count")) is int
+                    and 3 <= d["feature"]["aligned_row_count"] <= MAX_OBSERVATIONS for d in descriptors),
+                    "frozen aligned row count required before fragment preparation")
         runtime_hash = code_hash()
         population = train_binding(descriptors, settings)
         origin = {"study_id": study_id, "spec_hash": digest(original), "cell_hash": cell_hash,

@@ -55,7 +55,8 @@ def execute(output):
             encode(source["feature"]).decode(), encode(source["condition"]).decode(), feature, condition)
         item = materialize_source_pair(pair, settings["feature_spec"], settings["benchmark_binding"],
             ProjectionSpec(**settings["projection"]), block_id=source["selection"]["output_block_id"],
-            duplicate_policy=settings["duplicate_policy"], max_observations=MAX_OBSERVATIONS)
+            duplicate_policy=settings["duplicate_policy"], fragment_policy=settings.get("fragment_policy", "reject"),
+            max_observations=MAX_OBSERVATIONS)
         observations += sum(len(s["time"]) for s in item["document"]["segments"])
         require(observations <= MAX_OBSERVATIONS, "joint decoded preparation population quota", "RESOURCE_PLAN_REJECTED")
         materialized.append(item)

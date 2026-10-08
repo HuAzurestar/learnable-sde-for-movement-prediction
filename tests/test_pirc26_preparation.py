@@ -18,11 +18,15 @@ from tests.test_research_store import spec
 
 
 def prepared_fixture(tmp_path, contracts, *, selection_shift=0., missing_grant=False, cross_role_unit=False,
-                     consumer_study_ids=(), arm=None, selection_files=1):
+                     consumer_study_ids=(), arm=None, selection_files=1, source_segments=None, fragment_policy="reject"):
     store = ResearchStore(tmp_path / "ledger", "managed-preparation-fixture", initialize=True)
     pairs, selections, blocks = [], [], []
     for i, role in enumerate(("train", "train", *(["selection"] * selection_files))):
         feature, condition, entry = sources(contracts, role=role)
+        if source_segments is not None:
+            assert len(source_segments) == len(feature)
+            feature = feature.set_column(feature.schema.get_field_index("segment_id"), "segment_id", pa.array(source_segments))
+            entry["aligned_row_count"] = len(feature)
         unit = "train-unit" if role == "train" or cross_role_unit else "selection-unit"
         file_id = "fixture-file-" + str(i)
         for name, value in {"file_id": file_id, "independent_block_id": unit}.items():
@@ -61,7 +65,7 @@ def prepared_fixture(tmp_path, contracts, *, selection_shift=0., missing_grant=F
         "purposes": ["fit", "select"], "visibilities": ["synthetic"], "test_authorization": False,
         "consumer_study_ids": list(consumer_study_ids)})
     store.register(value, digest(value))
-    settings = preparation_settings(*contracts, ProjectionSpec("fixture-metric-frame", 20., 110., .1))
+    settings = preparation_settings(*contracts, ProjectionSpec("fixture-metric-frame", 20., 110., .1), fragment_policy=fragment_policy)
     return store, value, selections, settings
 
 

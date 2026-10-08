@@ -11,6 +11,7 @@ import hashlib
 from application.pirc26_population import (population_source, require, MAX_BYTES,
     MAX_SEGMENTS, MAX_OBSERVATIONS)
 from infrastructure.research_store import digest, encode
+from application.pirc26_fragment_contract import fragment_summary, population_fragments, validate_population_fragments
 
 VERSION = "pirc26-selection-population-v1"
 
@@ -38,6 +39,7 @@ def selection_populations(blocks, normalizer, *, study_id):
         for block in members:
             d, p = block["document"], block["provenance"]
             _validate_geometry(d, len(normalizer["means"]))
+            summary = fragment_summary(block, expected_policy=normalizer["policy"].get("fragment_policy", "reject"))
             require(all(d[k] == document[k] for k in document if k != "block_id")
                 and d["train_binding_hash"] == normalizer["train_binding_hash"]
                 and d["normalizer_hash"] == digest(normalizer) and d["context_hash"] == normalizer["context_hash"],
@@ -49,6 +51,8 @@ def selection_populations(blocks, normalizer, *, study_id):
                 "source_document_sha256": hashlib.sha256(encode(d)).hexdigest(),
                 "feature_sha256": p["feature"]["sha256"], "condition_sha256": p["condition"]["sha256"],
                 "independent_block_id": unit, "source_membership_hash": digest(p["membership"])})
+            if summary is not None:
+                metadata_members[-1]["fragment_disposition"] = summary
             for segment, membership in zip(d["segments"], p["membership"]):
                 segment_id = "select-" + digest([d["block_id"], segment["segment_id"]])
                 n = len(segment["time"])
@@ -74,6 +78,9 @@ def selection_populations(blocks, normalizer, *, study_id):
             "context_hash": normalizer["context_hash"], "members": metadata_members, "segments": mapping,
             "observations": observations, "content_sha256": hashlib.sha256(content).hexdigest(),
             "size_bytes": len(content), "scientific_qualification": "not-established"}
+        fragments = population_fragments(metadata_members)
+        if fragments is not None:
+            metadata["fragment_eligibility"] = fragments
         populations.append({"document": document, "provenance": metadata})
     return populations
 
@@ -111,6 +118,7 @@ def selection_source(store, reference, independent_block_id, *, consumer_study_i
         metadata = selected["provenance"]
         normalizer = train["normalizer"]
         artifact = store._manifest("artifact-" + selected["artifact_id"])
+        validate_population_fragments(metadata, raw, request["settings"].get("fragment_policy", "reject"))
         require(metadata["schema_version"] == VERSION and metadata["source_study_id"] == original["study_id"]
             and metadata["purpose"] == "select" and metadata["scientific_qualification"] == "not-established"
             and metadata["population_kind"] == "all-declared-selection-files-one-original-unit"

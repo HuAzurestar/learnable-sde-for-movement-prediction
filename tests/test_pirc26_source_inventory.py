@@ -69,6 +69,7 @@ def test_complete_unit_membership_roles_and_original_protocol_compatibility(inve
     assert [s["purpose"] for s in result["source_selections"]] == ["fit", "fit", "select"]
     assert all(b["source_block_id"] == b["independent_block_id"] for b in blocks)
     assert all(b["fit_scope"] is (b["split_role"] == "train") for b in blocks)
+    assert all(b["aligned_row_count"] == 5 for b in blocks if b["source_kind"] == "dsde-feature-parquet")
     assert result["membership"]["payload_hashes"] == "declared-not-read"
     assert result["membership"]["execution_readiness"] == "not-established"
     assert result["protocol"]["source_inventory_hash"] == digest(result["membership"])

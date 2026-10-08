@@ -9,6 +9,7 @@ from copy import deepcopy
 import hashlib
 
 from infrastructure.research_store import ResearchError, digest, encode
+from application.pirc26_fragment_contract import fragment_summary, population_fragments, validate_population_fragments
 
 VERSION = "pirc26-training-population-v1"
 MAX_BYTES = 8 * 1024 * 1024
@@ -47,6 +48,7 @@ def training_population(blocks, train_binding, normalizer, *, study_id):
     for block in train:
         source, provenance = block["document"], block["provenance"]
         _validate_geometry(source, width)
+        summary = fragment_summary(block, expected_policy=train_binding.get("fragment_policy", "reject"))
         require(all(source[k] == document[k] for k in document if k not in {"block_id", "segments"})
             and source["train_binding_hash"] == digest(train_binding)
             and source["normalizer_hash"] == digest(normalizer)
@@ -60,6 +62,8 @@ def training_population(blocks, train_binding, normalizer, *, study_id):
             "condition_sha256": provenance["condition"]["sha256"],
             "independent_block_id": provenance["feature"]["independent_block_id"],
             "source_membership_hash": digest(provenance["membership"])})
+        if summary is not None:
+            members[-1]["fragment_disposition"] = summary
         require(len(source["segments"]) == len(provenance["membership"]), "source segment membership differs")
         for segment, membership in zip(source["segments"], provenance["membership"]):
             # Explicit map makes this namespace reversible without guessing or
@@ -91,6 +95,9 @@ def training_population(blocks, train_binding, normalizer, *, study_id):
         "observations": observations, "transitions": transitions,
         "content_sha256": hashlib.sha256(content).hexdigest(), "size_bytes": len(content),
         "scientific_qualification": "not-established"}
+    fragments = population_fragments(members)
+    if fragments is not None:
+        metadata["fragment_eligibility"] = fragments
     return {"document": document, "provenance": metadata}
 
 
@@ -139,6 +146,7 @@ def population_source(store, reference):
         metadata = population["provenance"]
         normalizer = population["normalizer"]
         artifact = store._manifest("artifact-" + population["artifact_id"])
+        validate_population_fragments(metadata, sources, request["settings"].get("fragment_policy", "reject"))
         require(metadata["schema_version"] == VERSION and metadata["train_binding_hash"] == digest(request["train_binding"])
             and metadata["source_study_id"] == original["study_id"]
             and metadata["block_id"] == "train-population-" + digest([original["study_id"], digest(request["train_binding"])])
@@ -154,6 +162,7 @@ def population_source(store, reference):
             and artifact["block_ids"] == metadata["independent_block_ids"],
             "training population artifact/member receipt differs", "CORRUPT_ARTIFACT")
         require(digest(normalizer) == metadata["normalizer_hash"]
+            and normalizer["policy"] == request["settings"]["normalizer_policy"]
             and normalizer["train_binding_hash"] == metadata["train_binding_hash"]
             and normalizer["context_hash"] == metadata["context_hash"]
             and normalizer["independent_block_ids"] == metadata["independent_block_ids"],

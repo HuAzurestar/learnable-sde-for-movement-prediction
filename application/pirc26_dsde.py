@@ -15,6 +15,7 @@ from pathlib import Path
 
 from application.research_data import EvaluationExposureLedger
 from infrastructure.research_store import ResearchError, digest, encode
+from application.pirc26_fragment_contract import SHORT_POLICY, POLICIES as FRAGMENT_POLICIES
 
 
 VERSION = "pirc26-dsde-observed-conversion-v1"
@@ -239,7 +240,8 @@ def _context_adapter(spec, binding, entry):
 
 
 def materialize_source_pair(pair, feature_spec, benchmark_binding, projection, *, block_id,
-                            duplicate_policy="reject", max_observations=16_912, max_output_bytes=MAX_BYTES):
+                            duplicate_policy="reject", fragment_policy="reject",
+                            max_observations=16_912, max_output_bytes=MAX_BYTES):
     """Numerical geometry/context stage, before a train normalizer exists.
 
     No placeholder normalizer identity is assigned to this intermediate value.
@@ -254,12 +256,16 @@ def materialize_source_pair(pair, feature_spec, benchmark_binding, projection, *
              and all(_hash(v) for v in (pair.protocol_hash, pair.authorization_hash)),
              "CONTRACT_MISMATCH", "frozen conversion transport/provenance required")
     _require(type(block_id) is str and 0 < len(block_id) <= 128
-             and duplicate_policy in {"reject", "keep-first-exact-time-v1"},
+             and type(duplicate_policy) is str and duplicate_policy in {"reject", "keep-first-exact-time-v1"}
+             and type(fragment_policy) is str and fragment_policy in FRAGMENT_POLICIES,
              "CONTRACT_MISMATCH", "explicit block and timestamp policy required")
     _require(type(max_observations) is int and 3 <= max_observations <= MAX_ROWS
              and type(max_output_bytes) is int and 0 < max_output_bytes <= MAX_BYTES,
              "RESOURCE_PLAN_REJECTED", "bounded conversion quotas required")
     feature, condition = pair.metadata()
+    if fragment_policy == SHORT_POLICY:
+        _require(type(feature.get("aligned_row_count")) is int and 3 <= feature["aligned_row_count"] <= max_observations,
+                 "CONTRACT_MISMATCH", "frozen aligned row count required for fragment eligibility")
     role = feature.get("split_role")
     _pair_contract(feature, condition, ROLES.get(role, (None, None))[1])
     for metadata, content in ((feature, pair.feature_bytes), (condition, pair.condition_bytes)):
@@ -274,6 +280,9 @@ def materialize_source_pair(pair, feature_spec, benchmark_binding, projection, *
                      max_rows=min(max_observations, MAX_ROWS // (6 + frozen_context["context_dim"])))
     _require(3 <= table.num_rows <= max_observations and table.num_rows * (6 + frozen_context["context_dim"]) <= MAX_ROWS,
              "RESOURCE_PLAN_REJECTED", "observed-state decoded element/row quota")
+    if "aligned_row_count" in feature:
+        _require(type(feature["aligned_row_count"]) is int and feature["aligned_row_count"] == table.num_rows,
+                 "CONTRACT_MISMATCH", "decoded aligned rows differ from frozen source inventory")
     adapter.table = table
     raw = _parquet(pair.condition_bytes, ["file_id", "t", "lat", "lon"])
     _require(pa.types.is_timestamp(raw["t"].type) and raw["t"].null_count == 0,
@@ -307,7 +316,7 @@ def materialize_source_pair(pair, feature_spec, benchmark_binding, projection, *
     context = adapter.transform(feature["source_split"], file_ids=[feature["file_id"]]).model_matrix()
     _require(context.shape == (table.num_rows, frozen_context["context_dim"]) and np.isfinite(context).all(),
              "CONTRACT_MISMATCH", "frozen context shape/finite contract differs")
-    segments, membership, duplicate_count = [], [], 0
+    segments, membership, duplicate_count, dispositions = [], [], 0, []
     for segment_id, points in grouped:
         kept, previous_epoch = [], None
         for offset, index, epoch in points:
@@ -320,12 +329,16 @@ def materialize_source_pair(pair, feature_spec, benchmark_binding, projection, *
                     continue
             previous_epoch = epoch
             kept.append((offset, index, epoch))
-        _require(3 <= len(kept) <= 4098, "RESOURCE_PLAN_REJECTED", "source segment needs explicit bounded window policy")
+        _require(len(kept) <= 4098 and (len(kept) >= 3 or fragment_policy == SHORT_POLICY),
+                 "RESOURCE_PLAN_REJECTED", "source segment needs explicit bounded window policy")
         first_epoch = kept[0][2]
         time = [(epoch - first_epoch) / 1_000_000_000 for _, _, epoch in kept]
         _require(all(a < b for a, b in zip(time, time[1:])), "CONTRACT_MISMATCH", "timestamps collapsed during seconds conversion")
-        position = []
-        for _, index, _ in kept:
+        position_by_offset = {}
+        # Opt-in exclusion must not conceal invalid points or fixed-frame
+        # violations, including duplicates and short fragments. Strict legacy
+        # mode retains its existing validation/rejection order and geometry.
+        for offset, index, _ in (points if fragment_policy == SHORT_POLICY else kept):
             latitude, longitude = lat[index], lon[index]
             _require(type(latitude) in (int, float) and type(longitude) in (int, float)
                      and math.isfinite(latitude) and math.isfinite(longitude)
@@ -336,13 +349,24 @@ def materialize_source_pair(pair, feature_spec, benchmark_binding, projection, *
             _require(max(abs(dx), abs(dy)) <= projection.max_offset_degrees,
                      "CONTRACT_MISMATCH", "source lies outside registered local projection")
             factor = projection.earth_radius_m * math.pi / 180
-            position.append([dx * factor * math.cos(math.radians(projection.origin_latitude_deg)), dy * factor])
+            position_by_offset[offset] = [dx * factor * math.cos(math.radians(projection.origin_latitude_deg)), dy * factor]
+        if fragment_policy == SHORT_POLICY:
+            excluded = len(kept) < 3
+            dispositions.append({"segment_id": segment_id,
+                "disposition": "excluded-short-causal-path" if excluded else "included-causal-path",
+                "reason_code": "INSUFFICIENT_CAUSAL_POINTS" if excluded else None,
+                "points": [{"point_id": identity[offset]["point_id"], "source_point_index": index,
+                    "absolute_epoch_ns": epoch} for offset, index, epoch in points]})
+            if excluded:
+                continue
+        position = [position_by_offset[offset] for offset, _, _ in kept]
         segments.append({"segment_id": segment_id, "time": time, "position": position,
                          "condition": [context[offset].tolist() for offset, _, _ in kept],
                          "condition_available_at": list(time)})
         membership.append({"segment_id": segment_id, "independent_block_id": feature["independent_block_id"],
                            "point_ids": [identity[offset]["point_id"] for offset, _, _ in kept],
                            "source_point_indices": [index for _, index, _ in kept], "absolute_start_epoch_ns": first_epoch})
+    _require(bool(segments), "RESOURCE_PLAN_REJECTED", "source file has no eligible causal path; whole-file exclusion forbidden")
     document = {"schema_version": "pirc26-observed-block-v1", "block_id": block_id,
         "coordinate_frame": projection.coordinate_frame, "state_units": ["m", "m", "m/s", "m/s"], "time_unit": "s",
         "velocity_source": "backward-difference-v1", "segments": segments}
@@ -355,6 +379,12 @@ def materialize_source_pair(pair, feature_spec, benchmark_binding, projection, *
         "duplicate_policy": duplicate_policy, "removed_duplicate_timestamps": duplicate_count,
         "membership": membership, "content_sha256": hashlib.sha256(content).hexdigest(), "size_bytes": len(content),
         "scientific_qualification": "not-established"}
+    if fragment_policy == SHORT_POLICY:
+        from application.pirc26_fragment_contract import VERSION as DISPOSITION_VERSION, fragment_summary
+        provenance.update(fragment_policy=fragment_policy, fragment_disposition={
+            "schema_version": DISPOSITION_VERSION, "policy": fragment_policy,
+            "source_rows": table.num_rows, "segments": dispositions})
+        fragment_summary({"document": document, "provenance": provenance}, expected_policy=fragment_policy)
     return {"document": document, "content": content, "provenance": provenance}
 
 
@@ -377,7 +407,8 @@ def bind_conversion(materialized, *, train_binding_hash, normalizer_hash, contex
 
 def convert_source_pair(pair, feature_spec, benchmark_binding, projection, *, block_id,
                         train_binding_hash, normalizer_hash, context_hash,
-                        duplicate_policy="reject", max_observations=16_912, max_output_bytes=MAX_BYTES):
+                        duplicate_policy="reject", fragment_policy="reject",
+                        max_observations=16_912, max_output_bytes=MAX_BYTES):
     """Convert one admitted file with already frozen external bindings.
 
     This compatibility entry does not fit or qualify a normalizer. Managed
@@ -387,7 +418,7 @@ def convert_source_pair(pair, feature_spec, benchmark_binding, projection, *, bl
              and context_hash == digest(context_binding(feature_spec, benchmark_binding)),
              "CONTRACT_MISMATCH", "frozen conversion provenance required")
     materialized = materialize_source_pair(pair, feature_spec, benchmark_binding, projection,
-        block_id=block_id, duplicate_policy=duplicate_policy, max_observations=max_observations,
+        block_id=block_id, duplicate_policy=duplicate_policy, fragment_policy=fragment_policy, max_observations=max_observations,
         max_output_bytes=max_output_bytes)
     return bind_conversion(materialized, train_binding_hash=train_binding_hash, normalizer_hash=normalizer_hash,
                            context_hash=context_hash, max_output_bytes=max_output_bytes)

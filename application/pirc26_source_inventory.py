@@ -213,7 +213,8 @@ def compile_source_protocol(root, metadata, *, feature_directory, condition_dire
             "independent_block_id": unit, "source_split": roles[unit], "split_role": role, "fit_scope": role == "train"}
         feature = {**common, "block_id": "features-" + key, "source_kind": "dsde-feature-parquet",
             "release_id": release_id, "path": feature_path, "sha256": f["sha256"],
-            "size_bytes": feature_size, "feature_spec_sha256": features["feature_spec_sha256"]}
+            "size_bytes": feature_size, "feature_spec_sha256": features["feature_spec_sha256"],
+            "aligned_row_count": f["row_count"]}
         condition = {**common, "block_id": "conditions-" + key, "source_kind": "dsde-condition-parquet",
             "release_id": dataset_id, "path": condition_path, "sha256": c["sha256"], "size_bytes": condition_size}
         _pair_contract(feature, condition, purpose)
