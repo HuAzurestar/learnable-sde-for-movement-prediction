@@ -117,6 +117,9 @@ class AdmissionGate:
     def prepare(self, spec, cell, plugin, attempt_id, *, builtin_fixture=False, recovery_builder=None):
         from experiments.pirc25.affine import ROOT, code_hash, fixture_spec
         from experiments.pirc25.upstream import audit_inputs
+        from experiments.pirc27.calibration_bindings import require_consumer_support
+
+        require_consumer_support(spec, cell)
 
         if spec["code_hash"] != code_hash():
             raise ResearchError("CONTRACT_MISMATCH", "execution code differs from registered code hash")

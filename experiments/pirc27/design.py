@@ -22,6 +22,7 @@ from infrastructure.research_store import identifier
 from .oracles import matrix_cardinality
 from .plugin import propagation_plugin, execution_config, execution_inputs
 from .input_cases import StudyInputCase, StudyInputPolicy, validate_cases, input_binding
+from .calibration_bindings import StudyCalibration, MAX_DOCUMENT_BYTES
 
 
 METHODS = frozenset({"exact", "gaussian", "euler", "heun", "mlmc", "importance",
@@ -60,6 +61,7 @@ class StudyFunctional:
     threshold: float = 0.0
     closed: bool = True
     tolerance: float = 0.01
+    target_probability: float | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +93,7 @@ class PropagationStudyDesign:
     primary_metrics: tuple[str, ...] = ("functional-estimate", "sampling-uncertainty", "charged-slot-ms")
     input_cases: tuple[StudyInputCase, ...] = ()
     input_policy: StudyInputPolicy | None = None
+    calibrations: tuple[StudyCalibration, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -163,13 +166,31 @@ def _model_manifest(model):
     return value
 
 
-def _request(design, model, method, functional, horizon, seed, arm_id, case=None):
+def _functional_manifest(functional):
+    value = asdict(functional)
+    if functional.target_probability is None:
+        del value["target_probability"]
+    return value
+
+
+def _calibration_key(model, functional, horizon, case):
+    return (model.family_id, model.configuration_id, model.package.package_hash,
+            functional.functional_id, horizon, case.instance_id if case is not None else None)
+
+
+def _request(design, model, method, functional, horizon, seed, arm_id, case=None, calibration=None):
     initial = case if case is not None else model
     origin, cutoff = (case.origin, case.history_cutoff) if case is not None else (design.origin, design.history_cutoff)
+    actual_functional = _functional_manifest(functional)
+    actual_functional.pop("target_probability", None)
+    if calibration is not None and calibration["status"] == "CALIBRATED":
+        actual_functional["threshold"] = calibration["geometry"]["threshold"]
     paired = {"model_package_hash": model.package.package_hash,
               "initial_mean": initial.initial_mean, "initial_covariance": initial.initial_covariance,
               "origin": origin, "history_cutoff": cutoff,
-              "horizon": horizon, "functional": asdict(functional), "seed": seed}
+              "horizon": horizon, "functional": actual_functional, "seed": seed}
+    if calibration is not None:
+        paired["calibration_binding_hash"] = calibration["binding_hash"]
     if case is not None:
         paired["input_binding_hash"] = input_binding(case, design.input_policy)["binding_hash"]
     coupling_id = "paired-" + content_hash(paired)
@@ -177,7 +198,45 @@ def _request(design, model, method, functional, horizon, seed, arm_id, case=None
     return PropagationRequest(request_id, model.package.package_hash, initial.initial_mean, initial.initial_covariance,
         origin, cutoff, (horizon,), functional.kind, seed, coupling_id, arm_id,
         steps=_steps(method, horizon), samples=method.samples, chunk_size=method.chunk_size, normal=functional.normal,
-        threshold=functional.threshold, closed=functional.closed, tolerance=functional.tolerance)
+        threshold=actual_functional["threshold"], closed=functional.closed, tolerance=functional.tolerance)
+
+
+def _calibration_table(design, arms):
+    from domain.probability_calibration import halfspace_geometry
+    from experiments.pirc25.affine import code_hash
+    if (type(design.calibrations) is not tuple or len(design.calibrations) > 10000
+            or any(type(entry) is not StudyCalibration for entry in design.calibrations)):
+        raise DataValidationError("bounded immutable calibration table required")
+    calibrated = tuple(f for f in design.functionals if f.target_probability is not None)
+    slots = product(design.models, calibrated, design.horizons, design.input_cases or (None,))
+    expected = [(m, f, h, c) for m, f, h, c in slots]
+    if len(design.calibrations) != len(expected):
+        raise DataValidationError("calibration table must cover exactly all physical geometry slots")
+    documents, lookup = [], {}
+    current_code = code_hash() if expected else None
+    for entry, (model, functional, horizon, case) in zip(design.calibrations, expected):
+        # Manifest validates primitive keys before they can enter a hash map.
+        value = entry.manifest()
+        key = _calibration_key(model, functional, horizon, case)
+        if entry.key != key or key in lookup:
+            raise DataValidationError("calibration table duplicate, order or slot differs")
+        if value["source_pointer"] is not None:
+            policy = value["source_pointer"]["policy"]
+            if (policy["model_package_hash"] != model.package.package_hash
+                    or policy["target_probability"] != functional.target_probability
+                    or policy["code_hash"] != current_code):
+                raise DataValidationError("calibration source policy/model/probability/code differs")
+        if entry.status == "CALIBRATED":
+            if type(model.package) is not FrozenDynamicsPackage or entry.consumer_study_id != design.study_id:
+                raise DataValidationError("calibration requires affine geometry and exact consumer study")
+            request = _request(design, model, design.methods[0], functional, horizon, design.seeds[0],
+                arms[(model.family_id, design.methods[0].method, functional.kind)], case, value)
+            geometry = halfspace_geometry(model.package, request, causal_input_hash=value["geometry"]["causal_input_hash"])
+            if content_hash(geometry) != value["geometry_hash"]:
+                raise DataValidationError("calibration geometry differs from actual model/input/event")
+        documents.append(value)
+        lookup[key] = value
+    return documents, lookup
 
 
 def _disposition(model, method):
@@ -217,6 +276,10 @@ def freeze_design(design):
     if any(type(model.package) not in (FrozenDynamicsPackage, FrozenNonlinearPackage) for model in design.models):
         raise DataValidationError("only explicit frozen synthetic packages are supported")
     per_cell_bytes = 12288 if design.input_cases else 8192
+    if any(f.target_probability is not None for f in design.functionals):
+        # Reserve repeated geometry/pointer/binding bytes plus the axis copy
+        # before allocating either the calibration table or the full matrix.
+        per_cell_bytes += 2 * MAX_DOCUMENT_BYTES + 2048
     if count * (max(len(model.package._document) for model in design.models) + per_cell_bytes) > MAX_MANIFEST_BYTES:
         raise DataValidationError("design exceeds bounded manifest byte quota before expansion")
     for value in (design.study_id, design.experiment_id, design.comparison_family):
@@ -276,6 +339,10 @@ def freeze_design(design):
                 or not _finite(functional.threshold) or type(functional.closed) is not bool
                 or not _finite(functional.tolerance) or functional.tolerance <= 0):
             raise DataValidationError("invalid bounded endpoint functional")
+        if functional.target_probability is not None and (not _finite(functional.target_probability)
+                or not 0 < functional.target_probability < 1 or functional.kind != "endpoint-halfspace"
+                or functional.normal[2:] != (0., 0.) or functional.threshold != 0):
+            raise DataValidationError("calibrated probability requires a zero-template spatial halfspace")
     for method in design.methods:
         if (method.method not in METHODS or type(method.recovery) is not bool
                 or type(method.steps) is not int or not 1 <= method.steps <= 8192
@@ -323,6 +390,8 @@ def freeze_design(design):
                          for method in design.methods for f in design.functionals}
     if set(arms) != expected_families:
         raise DataValidationError("arm bindings must cover exactly the model/method/objective families")
+    calibration_documents, calibration_lookup = _calibration_table(design, arms)
+    calibration_table_hash = content_hash(calibration_documents) if calibration_documents else None
     # Different labels cannot disguise duplicate numerical configurations as
     # independent cells. All primitive and mixture settings checks precede copy.
     numerical_configs = []
@@ -369,13 +438,16 @@ def freeze_design(design):
         if model_config in model_configs:
             raise DataValidationError("duplicate model configuration under different labels")
         model_configs.append(model_config)
-        for method, functional, horizon in product(design.methods, design.functionals, design.horizons):
+        for method, functional, horizon, case in product(design.methods, design.functionals,
+                                                       design.horizons, design.input_cases or (None,)):
             arm_id = arms[(model.family_id, method.method, functional.kind)]
-            request = _request(design, model, method, functional, horizon, design.seeds[0], arm_id)
+            calibration = calibration_lookup.get(_calibration_key(model, functional, horizon, case))
+            request = _request(design, model, method, functional, horizon, design.seeds[0], arm_id, case, calibration)
             request.validate()
             if method.method == "importance" and functional.kind != "endpoint-halfspace":
                 raise DataValidationError("rare-event proposal requires an endpoint probability objective")
-            if _disposition(model, method)[0] != "PLANNED":
+            if (_disposition(model, method)[0] != "PLANNED"
+                    or calibration is not None and calibration["status"] != "CALIBRATED"):
                 continue
             synthetic = isinstance(model.package, FrozenNonlinearPackage)
             key = (synthetic, method.recovery, method.method == "mixture", method.method == "cubature")
@@ -411,8 +483,11 @@ def freeze_design(design):
     for model, method, functional, horizon, seed, case in product(design.models, design.methods, design.functionals,
                                                           design.horizons, design.seeds, design.input_cases or (None,)):
         arm_id = arms[(model.family_id, method.method, functional.kind)]
-        request = _request(design, model, method, functional, horizon, seed, arm_id, case)
+        calibration = calibration_lookup.get(_calibration_key(model, functional, horizon, case))
+        request = _request(design, model, method, functional, horizon, seed, arm_id, case, calibration)
         disposition, reason = _disposition(model, method)
+        if calibration is not None and calibration["status"] != "CALIBRATED" and disposition == "PLANNED":
+            disposition, reason = "INELIGIBLE", "calibration " + calibration["status"] + ": " + calibration["reason"]
         if case is not None and case.source_kind == "private-past-prefix" and disposition == "PLANNED":
             disposition, reason = "INELIGIBLE", "no admitted past-only source initialization adapter; source declaration is not read authority"
         row = {"row_id": request.request_id, "model_family_id": model.family_id, "method": method.method,
@@ -422,10 +497,16 @@ def freeze_design(design):
         dimensions = {"functional_id": functional.functional_id, "functional_kind": functional.kind,
                       "functional_version": request.functional_version,
                       "region": {"coordinate_system": request.region_coordinate_system,
-                                 "normal": functional.normal, "threshold": functional.threshold,
+                                 "normal": functional.normal, "threshold": request.threshold,
                                  "closed": functional.closed},
                       "initialization": content_hash({"mean": model.initial_mean, "covariance": model.initial_covariance}),
                       "prediction_origin": design.origin}
+        if calibration is not None:
+            # Keep different source blocks in the same frozen probability-rule
+            # stratum. Literal per-block thresholds remain in requests/bindings.
+            dimensions["region"] = {"coordinate_system": request.region_coordinate_system,
+                "normal": functional.normal, "closed": functional.closed,
+                "target_probability": functional.target_probability, "calibration_table_hash": calibration_table_hash}
         if configured:
             row["configuration_id"] = method.configuration_id
             dimensions["numerical_configuration"] = method.configuration_id
@@ -444,6 +525,8 @@ def freeze_design(design):
                        "frozen_dynamics": model.package.manifest(),
                        "propagation_request": json.loads(_encode(asdict(request))), "resource_class": "cpu",
                        "functional_id": functional.functional_id, "comparison_dimensions": dimensions}
+        if calibration is not None:
+            row["cell"]["calibration_binding"] = calibration
         if case is not None:
             row["input_case_id"] = case.instance_id
             row["cell"].update(instance_id=case.instance_id, input_binding=input_binding(case, design.input_policy))
@@ -473,10 +556,12 @@ def freeze_design(design):
             ("protocol_hash", "data_hash", "feature_hash", "selection_hash", "stopping_rule", "primary_metrics")},
         "qualification": "preparation-only-not-scientific", "expected_cells": count,
         "axis_manifest": {"models": [_model_manifest(model) for model in design.models],
-            "methods": [_method_manifest(method) for method in design.methods], "functionals": [asdict(f) for f in design.functionals],
+            "methods": [_method_manifest(method) for method in design.methods], "functionals": [_functional_manifest(f) for f in design.functionals],
             "horizons": design.horizons, "seeds": design.seeds, "origin": design.origin, "history_cutoff": design.history_cutoff,
             "state_names": ("x", "y", "vx", "vy"), "time_unit": "s", "coordinate_system": "local-cartesian"},
         "arms": [{**asdict(arm), "budget_seconds": 86400} for arm in design.arms], "matrix": rows}
+    if calibration_documents:
+        document["axis_manifest"]["calibrations"] = calibration_documents
     if design.input_cases:
         document["axis_manifest"].update(input_cases=[case.manifest() for case in design.input_cases],
             input_policy=design.input_policy.manifest())

@@ -19,6 +19,7 @@ from infrastructure.research_store import ResearchError, identifier
 from .design import (MAX_MANIFEST_BYTES, PropagationStudyDesign, StudyArm,
     StudyFunctional, StudyMethod, StudyModel, freeze_design)
 from .input_cases import StudyInputCase, StudyInputPolicy, _restore
+from .calibration_bindings import StudyCalibration
 
 
 MAX_CONNECTION_BYTES = 64 * 1024
@@ -94,7 +95,7 @@ def reload_design(path, *, expected_hash):
         _require(document["code_hash"] == code_hash(), "frozen design current source hash differs")
         axes = document["axis_manifest"]
         _keys(axes, {"models", "methods", "functionals", "horizons", "seeds", "origin", "history_cutoff",
-            "state_names", "time_unit", "coordinate_system"}, {"input_cases", "input_policy"})
+            "state_names", "time_unit", "coordinate_system"}, {"input_cases", "input_policy", "calibrations"})
         _require(("input_cases" in axes) == ("input_policy" in axes), "complete source case/policy axis required")
         cases = tuple(_restore(StudyInputCase, value) for value in _tuple(axes.get("input_cases", [])))
         policy = _restore(StudyInputPolicy, axes["input_policy"]) if "input_policy" in axes else None
@@ -128,7 +129,7 @@ def reload_design(path, *, expected_hash):
             methods.append(StudyMethod(**value))
         functionals = []
         for value in _tuple(axes["functionals"]):
-            _keys(value, {f.name for f in fields(StudyFunctional)})
+            _keys(value, {f.name for f in fields(StudyFunctional)} - {"target_probability"}, {"target_probability"})
             functionals.append(StudyFunctional(**{**value, "normal": _tuple(value["normal"], exact=4)}))
         arms = []
         for value in _tuple(document["arms"], maximum=10000):
@@ -143,7 +144,9 @@ def reload_design(path, *, expected_hash):
             tuple(models), tuple(methods), tuple(functionals), _tuple(axes["horizons"]), _tuple(axes["seeds"]),
             tuple(arms), *(document[k] for k in ("protocol_hash", "data_hash", "feature_hash", "selection_hash")),
             origin=axes["origin"], history_cutoff=axes["history_cutoff"], stopping_rule=document["stopping_rule"],
-            primary_metrics=_tuple(document["primary_metrics"]), input_cases=cases, input_policy=policy)
+            primary_metrics=_tuple(document["primary_metrics"]), input_cases=cases, input_policy=policy,
+            calibrations=tuple(StudyCalibration.from_manifest(value)
+                for value in _tuple(axes.get("calibrations", []), maximum=10000)))
         frozen = freeze_design(design)
         _require(frozen.manifest_hash == expected_hash, "frozen design differs from regenerated compiler output")
         return frozen

@@ -163,6 +163,8 @@ def validate_cell_input_binding(cell, *, request=None, protocol_block=None, sele
             "functional": {"functional_id": cell["functional_id"], "kind": actual_request["functional"],
                 **{k: actual_request[k] for k in ("normal", "threshold", "closed", "tolerance")}},
             "seed": actual_request["seed"], "input_binding_hash": binding["binding_hash"]}
+        if "calibration_binding" in cell:
+            paired["calibration_binding_hash"] = cell["calibration_binding"]["binding_hash"]
         if actual_request["coupling_id"] != "paired-"+content_hash(paired):
             raise ValueError("case pairing root differs from frozen source/input/functional")
         dimensions = cell["comparison_dimensions"]
