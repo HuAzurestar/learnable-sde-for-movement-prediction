@@ -234,7 +234,11 @@ class ProcessTree:
             if self.process is not None:
                 self.process.poll()
             if not self.active():
-                return True
+                # Group/job accounting alone is not the owned root's exit
+                # evidence. Refresh its real handle after the group query;
+                # a still-running or not-yet-signalled root vetoes approval.
+                if self.process is None or self.process.poll() is not None:
+                    return True
             if time.monotonic() >= until:
                 return False
             time.sleep(0.005)
