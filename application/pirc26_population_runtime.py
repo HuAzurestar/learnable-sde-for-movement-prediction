@@ -14,6 +14,7 @@ from application.pirc26_population import population_source, require
 from application.research_recovery import RecoveryPlugin
 from application.research_registry import implementation_hash
 from infrastructure.research_store import ResearchStore, digest
+from infrastructure.research_visibility import combine_visibility, study_visibility
 
 VERSION = "1.0.0"
 PREFIX = "pirc26-population-"
@@ -96,6 +97,11 @@ def source(receipt, *, consumer_study_id=None, store=None):
         original = store._manifest("study-" + request["original_study_id"])["spec"]
         arm = next(a for a in spec["arms"] if a["arm_id"] == cell["arm_id"])
         require(arm in original["arms"], "population consumer created another budget arm", "CONTRACT_MISMATCH")
+        artifact = store._manifest("artifact-" + population["protocol_entry"]["path"])
+        visibility = combine_visibility([artifact["visibility"], study_visibility(store._manifest, original),
+            study_visibility(store._manifest, spec)])
+        require(cell["visibility"] == receipt["documents"]["package"]["visibility"] == visibility,
+            "population consumer would widen original source visibility", "UNAUTHORIZED_DATA")
         raw_sources = [s for s in request["sources"] if s["split_role"] == "train"]
         def authority():
             require(_sources(store, original, arm, [s["selection"] for s in raw_sources]) == raw_sources,

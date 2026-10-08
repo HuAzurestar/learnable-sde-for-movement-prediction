@@ -36,10 +36,10 @@ def one_thread():
     torch.set_num_threads(previous)
 
 
-def prepare(tmp_path, contracts, *, permit_consumer=True):
+def prepare(tmp_path, contracts, *, permit_consumer=True, selection_files=1):
     study_id = "population-training-fixture"
     arm = {**spec()["arms"][0], "model_family_id": "M0", "method_family_id": "observed-o1"}
-    fixture = prepared_fixture(tmp_path, contracts, arm=arm,
+    fixture = prepared_fixture(tmp_path, contracts, arm=arm, selection_files=selection_files,
         consumer_study_ids=[study_id, "selection-consumer"] if permit_consumer else [])
     store = fixture[0]
     prepared = run(fixture)
@@ -150,6 +150,18 @@ def test_actual_supervised_fit_visits_all_members_and_reuses_without_new_job(tmp
         with pytest.raises(ResearchError):
             source(forged_receipt, store=store)
     assert len([e for e in store.events() if e["event_kind"] == "READ_STARTED"]) == before
+    resolve = store._manifest
+    population, _ = source(receipt, store=store)
+    def restricted_population(object_id):
+        metadata = resolve(object_id)
+        if object_id == "artifact-" + population["protocol_entry"]["path"]:
+            return {**metadata, "visibility":"restricted"}
+        return metadata
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "_manifest", restricted_population)
+        patch.setattr(store, "_verified_artifact_content", lambda *a,**k: pytest.fail("visibility denial read payload"))
+        with pytest.raises(ResearchError, match="UNAUTHORIZED_DATA"):
+            source(receipt, store=store)
     # Only permission-clock injection, after the numerical worker is stopped.
     # Actual supervisor clocks, deadline, costs and success remain untouched.
     import application.pirc26_preparation as preparation

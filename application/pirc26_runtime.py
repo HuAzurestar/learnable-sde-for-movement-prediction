@@ -170,6 +170,11 @@ def admitted_context(output, spec, cell, *, running=False, recovery=False):
         plugin = population_runtime.execution_plugin(config["family"])
         if config["objective"] != "O1" or plugin.plugin_id != cell["plugin_id"]:
             raise ResearchError("CONTRACT_MISMATCH", "population adapter identity differs")
+    elif cell["plugin_id"].startswith("pirc26-selection-"):
+        from application import pirc26_selection_runtime as population_runtime
+        plugin = population_runtime.execution_plugin(config["family"])
+        if config["objective"] != "O1" or plugin.plugin_id != cell["plugin_id"]:
+            raise ResearchError("CONTRACT_MISMATCH", "selection adapter identity differs")
     plan = execution_plan(spec, cell, plugin)
     child_inputs = {k: v for k, v in inputs.items() if k not in ("runtime_root", "store_id")}
     if any(part["config"] != config or part["inputs"] != child_inputs for part in binding["components"].values()):
@@ -209,6 +214,9 @@ def _dispatch(output, spec, cell, state, recovery):
     store, receipt, _, _ = admitted_context(output, spec, cell, recovery=recovery)
     if recovery:
         validate_restored_state(receipt,state)
+    if cell["plugin_id"].startswith("pirc26-selection-"):
+        from application.pirc26_selection_runtime import read_attached_model
+        read_attached_model(store, receipt)
     settings = spec["admission"]
     transport = read_block(store, settings["protocol_id"], cell["block_id"],
         authorization_id=settings["authorization_id"], authorization_version=settings.get("authorization_version"),

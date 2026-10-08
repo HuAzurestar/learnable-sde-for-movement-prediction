@@ -36,11 +36,17 @@ def run(output, handoff_hash):
     profile = cell["execution"]["inputs"]
     block = decode_block(transport, model, max_observations=profile["observations"])
     population_evidence = None
+    selection_evidence = None
     if plugin.plugin_id.startswith("pirc26-population-"):
         from application.pirc26_population_runtime import source
         population, population_evidence = source(receipt)
         require([s["segment_id"] for s in block.segments] == [s["pooled_segment_id"] for s in population["provenance"]["segments"]],
                 "decoded training population segment identity differs")
+    elif plugin.plugin_id.startswith("pirc26-selection-"):
+        from application.pirc26_selection_runtime import source
+        selected, selection_evidence = source(receipt)
+        require([s["segment_id"] for s in block.segments] == selection_evidence["segment_ids"],
+                "decoded selection segment membership differs")
     requests = [block.forecast_request(recipe["segment_id"], recipe["origin_index"], recipe["time_grid"],
         sample_count=recipe["sample_count"], brownian_root_id=recipe["brownian_root_id"], chunk_size=recipe["chunk_size"])
         for recipe in job["origins"]]
@@ -83,8 +89,12 @@ def run(output, handoff_hash):
         else:
             fit["training_population"] = population_evidence
     if control is not None and fit_frame is None:
+        if selection_evidence is not None:
+            fit["selection_input"] = selection_evidence
         fit["producer_attempt_id"] = ownership.attempt_id
         fit_frame = pack_fit(fit, job, cell["execution"]["config"], batch_count)
+    elif selection_evidence is not None:
+        require(fit.get("selection_input") == selection_evidence, "recovered selection identity differs")
     forecasts, forecast_phase_times = [], []
     for index, (recipe, req) in enumerate(zip(job["origins"], requests)):
         if index < origin_index:
@@ -153,6 +163,9 @@ def run(output, handoff_hash):
     content = encode(result)
     if population_evidence is not None:
         from application.pirc26_population_runtime import result_validate
+        result_validate(receipt, result)
+    elif selection_evidence is not None:
+        from application.pirc26_selection_runtime import result_validate
         result_validate(receipt, result)
     if len(content) > receipt["resource_plan"]["limits"]["result_bytes"]:
         raise ResearchError("RESOURCE_PLAN_REJECTED", "actual numerical result exceeds the declared publication quota")
