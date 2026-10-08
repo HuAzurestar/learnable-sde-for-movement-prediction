@@ -238,20 +238,20 @@ def _context_adapter(spec, binding, entry):
     return AdmittedRows()
 
 
-def convert_source_pair(pair, feature_spec, benchmark_binding, projection, *, block_id,
-                        train_binding_hash, normalizer_hash, context_hash,
-                        duplicate_policy="reject", max_observations=16_912, max_output_bytes=MAX_BYTES):
-    """Convert one admitted same-file unit, returning private bytes/provenance.
+def materialize_source_pair(pair, feature_spec, benchmark_binding, projection, *, block_id,
+                            duplicate_policy="reject", max_observations=16_912, max_output_bytes=MAX_BYTES):
+    """Numerical geometry/context stage, before a train normalizer exists.
 
-    No global/multi-block fit, source license, pilot or blind-test qualification
-    is inferred. Windows/JSON/model quotas remain explicit, including expansion
-    from compressed Parquet. Oversize/invalid units fail, never silently shrink.
+    No placeholder normalizer identity is assigned to this intermediate value.
+    Managed production callers execute this stage inside the owned worker.
+    It is not an observed-input artifact until bind_conversion adds actual
+    frozen training/normalizer/context identities and checks its final size.
     """
     import numpy as np
     import pyarrow as pa
     import pyarrow.compute as pc
     _require(isinstance(pair, SourcePair) and isinstance(projection, ProjectionSpec)
-             and all(_hash(v) for v in (pair.protocol_hash, pair.authorization_hash, train_binding_hash, normalizer_hash, context_hash)),
+             and all(_hash(v) for v in (pair.protocol_hash, pair.authorization_hash)),
              "CONTRACT_MISMATCH", "frozen conversion transport/provenance required")
     _require(type(block_id) is str and 0 < len(block_id) <= 128
              and duplicate_policy in {"reject", "keep-first-exact-time-v1"},
@@ -267,7 +267,7 @@ def convert_source_pair(pair, feature_spec, benchmark_binding, projection, *, bl
                  and hashlib.sha256(content).hexdigest() == metadata["sha256"],
                  "CORRUPT_ARTIFACT", "admitted DSDE source bytes differ")
     frozen_context = context_binding(feature_spec, benchmark_binding)
-    _require(context_hash == digest(frozen_context) and feature["feature_spec_sha256"] == frozen_context["feature_spec_sha256"],
+    _require(feature["feature_spec_sha256"] == frozen_context["feature_spec_sha256"],
              "CONTRACT_MISMATCH", "conversion context identity differs")
     adapter = _context_adapter(feature_spec, benchmark_binding, feature)
     table = _parquet(pair.feature_bytes, adapter._required_columns(),
@@ -345,16 +345,49 @@ def convert_source_pair(pair, feature_spec, benchmark_binding, projection, *, bl
                            "source_point_indices": [index for _, index, _ in kept], "absolute_start_epoch_ns": first_epoch})
     document = {"schema_version": "pirc26-observed-block-v1", "block_id": block_id,
         "coordinate_frame": projection.coordinate_frame, "state_units": ["m", "m", "m/s", "m/s"], "time_unit": "s",
-        "velocity_source": "backward-difference-v1", "train_binding_hash": train_binding_hash,
-        "normalizer_hash": normalizer_hash, "context_hash": context_hash, "segments": segments}
+        "velocity_source": "backward-difference-v1", "segments": segments}
     content = encode(document)
     _require(len(content) <= max_output_bytes, "RESOURCE_PLAN_REJECTED", "converted JSON exceeds frozen byte quota")
     provenance = {"schema_version": "pirc26-dsde-conversion-provenance-v1", "converter_version": VERSION,
         "source_protocol_hash": pair.protocol_hash, "authorization_hash": pair.authorization_hash,
         "feature": feature, "condition": condition, "split_role": role, "purpose": ROLES[role][1],
         "projection": deepcopy(projection.__dict__), "context_binding": frozen_context,
-        "train_binding_hash": train_binding_hash, "normalizer_hash": normalizer_hash,
         "duplicate_policy": duplicate_policy, "removed_duplicate_timestamps": duplicate_count,
         "membership": membership, "content_sha256": hashlib.sha256(content).hexdigest(), "size_bytes": len(content),
         "scientific_qualification": "not-established"}
     return {"document": document, "content": content, "provenance": provenance}
+
+
+def bind_conversion(materialized, *, train_binding_hash, normalizer_hash, context_hash, max_output_bytes=MAX_BYTES):
+    """Finalize geometry with real frozen identities; never fit a normalizer."""
+    _require(all(_hash(v) for v in (train_binding_hash, normalizer_hash, context_hash))
+             and context_hash == digest(materialized["provenance"]["context_binding"]),
+             "CONTRACT_MISMATCH", "conversion context/normalizer bindings differ")
+    _require(type(max_output_bytes) is int and 0 < max_output_bytes <= MAX_BYTES,
+             "RESOURCE_PLAN_REJECTED", "bounded final conversion quota required")
+    document = {**materialized["document"], "train_binding_hash": train_binding_hash,
+                "normalizer_hash": normalizer_hash, "context_hash": context_hash}
+    content = encode(document)
+    _require(len(content) <= max_output_bytes, "RESOURCE_PLAN_REJECTED", "converted JSON exceeds frozen byte quota")
+    provenance = {**materialized["provenance"], "train_binding_hash": train_binding_hash,
+                  "normalizer_hash": normalizer_hash, "content_sha256": hashlib.sha256(content).hexdigest(),
+                  "size_bytes": len(content)}
+    return {"document": document, "content": content, "provenance": provenance}
+
+
+def convert_source_pair(pair, feature_spec, benchmark_binding, projection, *, block_id,
+                        train_binding_hash, normalizer_hash, context_hash,
+                        duplicate_policy="reject", max_observations=16_912, max_output_bytes=MAX_BYTES):
+    """Convert one admitted file with already frozen external bindings.
+
+    This compatibility entry does not fit or qualify a normalizer. Managed
+    multi-file preparation uses materialize_source_pair then bind_conversion.
+    """
+    _require(all(_hash(v) for v in (train_binding_hash, normalizer_hash, context_hash))
+             and context_hash == digest(context_binding(feature_spec, benchmark_binding)),
+             "CONTRACT_MISMATCH", "frozen conversion provenance required")
+    materialized = materialize_source_pair(pair, feature_spec, benchmark_binding, projection,
+        block_id=block_id, duplicate_policy=duplicate_policy, max_observations=max_observations,
+        max_output_bytes=max_output_bytes)
+    return bind_conversion(materialized, train_binding_hash=train_binding_hash, normalizer_hash=normalizer_hash,
+                           context_hash=context_hash, max_output_bytes=max_output_bytes)
