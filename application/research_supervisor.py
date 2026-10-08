@@ -204,6 +204,9 @@ class ResearchSupervisor:
             # Share only this first REQUEST's owned read prefix with a ready
             # SAVE, never an earlier permission/budget decision. Missing IPC
             # must not enter checkpoint publication at all.
+            def check_current_budget():
+                nonlocal budget_stop_requested
+                budget_stop_requested |= self.budget.balance(run["arm_id"])["closed"]
             with ExitStack() as phases:
                 if frame is None:
                     phases.enter_context(self.store._read_transaction())
@@ -215,15 +218,19 @@ class ResearchSupervisor:
                     except ControlError as exc:
                         raise ResearchError("CONTRACT_MISMATCH", str(exc)) from exc
                     if frame is None:
-                        return False
+                        # This first REQUEST already owns a fresh read phase.
+                        # Check current budget here AND after its uncached final
+                        # physical pass, rather than start another independent
+                        # prefix scan before the same poll's native idle wait.
+                        # No checkpoint publication or earlier approval is used.
+                        check_current_budget()
+                        self.store._read_completion(check_current_budget, lambda: None)
+                        return True
                 # Actual ready IPC alone enters publication. Original final
                 # physical/budget/expiry checks finish after this head and
                 # AFTER the outer read phase, before ACK outside both scopes.
                 with self.store._checkpoint_publication():
                     record_checkpoint_request()
-                    def check_current_budget():
-                        nonlocal budget_stop_requested
-                        budget_stop_requested |= self.budget.balance(run["arm_id"])["closed"]
                     check_current_budget()
                     # Hold/closure can change during actual publication. Recheck
                     # after the final uncached physical pass, before any ACK.
