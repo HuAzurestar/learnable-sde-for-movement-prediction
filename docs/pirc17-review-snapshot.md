@@ -42,3 +42,12 @@ The test extra now declares the resource-sampling and document/figure packages
 used by existing tests. CI still runs the original complete pytest command;
 no missing test or evidence is treated as a pass. Dependency repair is not
 a replay of the scientific study, and no live runtime source is changed.
+
+The geometry test packages Shapely 2.1.2 and Rasterio 1.4.4 match the existing
+local provider environment. These packages do **not** provide the separate
+`trajectory` source module used by original geometry tests. That module belongs
+to the paired data-source implementation; installing an unrelated same-named
+package is not a substitute. No private source is vendored and no geometry
+test is excluded, so the complete public CI remains unqualified until that
+cross-repository source dependency is resolved. This is a review environment
+limitation, not a reason to rerun scientific forecasts.

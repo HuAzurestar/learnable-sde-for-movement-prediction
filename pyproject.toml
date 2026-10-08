@@ -30,6 +30,8 @@ test = [
   "PyMuPDF>=1.23",
   "matplotlib>=3.7",
   "Pillow>=9.5",
+  "shapely==2.1.2",
+  "rasterio==1.4.4",
 ]
 benchmark = ["psutil>=5.9", "threadpoolctl>=3"]
 

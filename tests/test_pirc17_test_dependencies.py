@@ -14,7 +14,24 @@ def test_existing_pirc17_imports_are_declared_in_the_test_extra():
     requirements = ast.literal_eval(match.group(1))
     names = {re.split(r'[<>=!~\[]', requirement, maxsplit=1)[0].lower()
              for requirement in requirements}
-    assert {'pytest', 'psutil', 'threadpoolctl', 'pymupdf', 'matplotlib', 'pillow'} <= names
+    assert {'pytest', 'psutil', 'threadpoolctl', 'pymupdf', 'matplotlib',
+            'pillow', 'shapely', 'rasterio'} <= names
+
+
+def test_geometry_dependencies_match_the_existing_local_provider_environment():
+    source = (ROOT / 'pyproject.toml').read_text(encoding='utf-8')
+    assert '"shapely==2.1.2"' in source
+    assert '"rasterio==1.4.4"' in source
+
+
+def test_original_cross_repository_geometry_checks_are_not_replaced():
+    source = (ROOT / 'tests/test_pirc17_geometry_transport_probe.py').read_text(encoding='utf-8')
+    assert 'from trajectory.batched_terrain import BatchedLineIndex' in source
+    assert 'from trajectory.multicell_terrain import MultiCellRawMapQuery' in source
+    assert 'assert new.query(points, pids) == old.query(points, pids)' in source
+    workflow = (ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8')
+    assert '--ignore' not in workflow
+    assert '--deselect' not in workflow
 
 
 def test_ci_installs_the_declared_test_extra_without_dropping_tests():
