@@ -48,6 +48,7 @@ class StudyMethod:
     recovery: bool = False
     mixture_settings: MixtureSettings | None = None
     configuration_id: str | None = None
+    horizon_steps: tuple[tuple[float, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -141,7 +142,14 @@ def _method_manifest(method):
     value = asdict(method)
     if method.configuration_id is None:
         del value["configuration_id"]
+    if not method.horizon_steps:
+        del value["horizon_steps"]
     return value
+
+
+def _steps(method, horizon):
+    # Coverage/order/types have been checked before copying or expansion.
+    return next(n for h, n in method.horizon_steps if h == horizon) if method.horizon_steps else method.steps
 
 
 def _model_manifest(model):
@@ -161,7 +169,7 @@ def _request(design, model, method, functional, horizon, seed, arm_id):
     request_id = "cell-" + content_hash({"paired": paired, "method": _method_manifest(method), "arm": arm_id})
     return PropagationRequest(request_id, model.package.package_hash, model.initial_mean, model.initial_covariance,
         design.origin, design.history_cutoff, (horizon,), functional.kind, seed, coupling_id, arm_id,
-        steps=method.steps, samples=method.samples, chunk_size=method.chunk_size, normal=functional.normal,
+        steps=_steps(method, horizon), samples=method.samples, chunk_size=method.chunk_size, normal=functional.normal,
         threshold=functional.threshold, closed=functional.closed, tolerance=functional.tolerance)
 
 
@@ -266,6 +274,15 @@ def freeze_design(design):
                 or type(method.level_samples) is not tuple or type(method.proposal) is not tuple
                 or len(method.proposal) != 2 or not all(_finite(x) for x in method.proposal)):
             raise DataValidationError("unknown or mutable method configuration")
+        if (type(method.horizon_steps) is not tuple or len(method.horizon_steps) > 64
+                or any(type(pair) is not tuple or len(pair) != 2
+                    or not _finite(pair[0]) or pair[0] <= 0
+                    or type(pair[1]) is not int or not 1 <= pair[1] <= 8192
+                    for pair in method.horizon_steps)):
+            raise DataValidationError("invalid bounded immutable horizon step table")
+        if method.horizon_steps and (tuple(h for h, _ in method.horizon_steps) != design.horizons
+                or method.horizon_steps[0][1] != method.steps):
+            raise DataValidationError("horizon step table must cover the ordered horizon axis and bind first steps")
         if (method.mixture_settings is not None
                 and (type(method.mixture_settings) is not MixtureSettings or method.method != "mixture" or not method.recovery)):
             raise DataValidationError("mixture requires explicit immutable settings and chunk adapter")
@@ -302,6 +319,10 @@ def freeze_design(design):
     for method in design.methods:
         numerical = _method_manifest(method)
         numerical.pop("configuration_id", None)
+        numerical.pop("horizon_steps", None)
+        # Compare actual per-horizon configurations, not table labels or an
+        # implicit-versus-explicit representation of the same constant grid.
+        numerical["steps"] = tuple(_steps(method, h) for h in design.horizons)
         # All fields are already bounded and typed. Numeric equality also
         # identifies int/float zero and signed-zero aliases, unlike JSON hashes.
         if numerical in numerical_configs:
@@ -327,9 +348,9 @@ def freeze_design(design):
         if model_config in model_configs:
             raise DataValidationError("duplicate model configuration under different labels")
         model_configs.append(model_config)
-        for method, functional in product(design.methods, design.functionals):
+        for method, functional, horizon in product(design.methods, design.functionals, design.horizons):
             arm_id = arms[(model.family_id, method.method, functional.kind)]
-            request = _request(design, model, method, functional, design.horizons[0], design.seeds[0], arm_id)
+            request = _request(design, model, method, functional, horizon, design.seeds[0], arm_id)
             request.validate()
             if method.method == "importance" and functional.kind != "endpoint-halfspace":
                 raise DataValidationError("rare-event proposal requires an endpoint probability objective")
@@ -350,11 +371,11 @@ def freeze_design(design):
             else:
                 config = execution_config(request, method.method, level_samples=method.level_samples,
                                           proposal=method.proposal, recovery=method.recovery, synthetic=synthetic)
-            total = (sum(n * (method.steps * 2**level + (method.steps * 2**(level-1) if level else 0))
+            total = (sum(n * (request.steps * 2**level + (request.steps * 2**(level-1) if level else 0))
                          for level, n in enumerate(method.level_samples)) if method.method == "mlmc"
                      else config["work_steps"] if method.method == "mixture"
-                     else 8*method.steps if method.method == "cubature"
-                     else method.steps if method.method in {"exact", "gaussian"} else method.samples*method.steps)
+                     else 8*request.steps if method.method == "cubature"
+                     else request.steps if method.method in {"exact", "gaussian"} else method.samples*request.steps)
             if config["steps"] > 8192 or total > 1_000_000:
                 raise DataValidationError("frozen method grid or total work exceeds quota")
             execution_binding(plugins[key].registry_entry, config, execution_inputs(request), matrix_cells=count)

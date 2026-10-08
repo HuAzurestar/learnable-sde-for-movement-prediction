@@ -222,6 +222,34 @@ malformed declarations and direct owner-plan bypasses.
 matrix and exercises the unchanged paired paper aggregator: all region/method/
 horizon/seed rows and reasons survive, with zero successful independent blocks.
 Those disposable engineering exports are not formal research evidence.
+
+## Frozen horizon-specific grids
+
+`StudyMethod.horizon_steps` optionally fixes an immutable tuple of
+`(horizon_seconds, base_steps)` pairs. It must cover the complete registered
+horizon axis in that exact order; its first step count must equal `steps`.
+Every count is an integer in1..8192. An empty tuple preserves the legacy
+constant-grid shape and request identity; no table is synthesized or inferred.
+For example, `steps=4, horizon_steps=((1.0,4),(10.0,40))` explicitly binds two
+grids. This example is not a qualified timestep recommendation.
+
+All methods, including declared unavailable rows, retain their horizon's actual
+request grid. Owner validation consumes that request; MLMC uses it as the base
+grid and binds the finest level in shared resource metadata. Each horizon's
+configuration, level/work quota and resource binding is checked before the full
+seed matrix is expanded. An admissible first horizon cannot hide an over-quota
+later grid. Implicit and explicit constant tables cannot create duplicate
+numerical configurations under different labels. Original family arms and24h
+budgets remain unchanged; a different grid is not an independent evidence block.
+
+Reload reconstructs the complete table and recompiles every request/resource
+row. Rehashing a changed table or cell does not make it valid compiler output.
+There is no automatic grid refinement, numerical qualification, registration,
+worker, new grant, budget extension or alteration of a published candidate.
+Horizon-appropriate stability/error qualification still has to precede research.
+`tests/test_propagation_horizon_grid.py` covers affine/nonlinear owner bindings,
+all runnable/unavailable methods, pairing, early malformed/later-overwork
+refusals, aliases, reload integrity and closed-arm non-reset.
 `tests/test_research_admission_selection.py` checks exact coverage, immutable
 authority, substituted selection refusal, conservative source visibility,
 resume-command admission, and a two-plugin shared worker/reuse/cost/export

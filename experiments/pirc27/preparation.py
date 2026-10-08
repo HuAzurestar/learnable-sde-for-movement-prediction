@@ -111,9 +111,11 @@ def reload_design(path, *, expected_hash):
                 value.get("configuration_id")))
         methods = []
         for value in _tuple(axes["methods"]):
-            _keys(value, {f.name for f in fields(StudyMethod)} - {"configuration_id"}, {"configuration_id"})
+            _keys(value, {f.name for f in fields(StudyMethod)} - {"configuration_id", "horizon_steps"},
+                {"configuration_id", "horizon_steps"})
             value = {**value, "level_samples": _tuple(value["level_samples"], maximum=9),
-                "proposal": _tuple(value["proposal"], exact=2)}
+                "proposal": _tuple(value["proposal"], exact=2),
+                "horizon_steps": tuple(_tuple(pair, exact=2) for pair in _tuple(value.get("horizon_steps", [])))}
             if value["mixture_settings"] is not None:
                 settings = value["mixture_settings"]
                 _keys(settings, {f.name for f in fields(MixtureSettings)})
