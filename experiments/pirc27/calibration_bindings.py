@@ -116,7 +116,9 @@ class StudyCalibration:
             AffineHalfspaceCalibrationPolicy.from_manifest(pointer["policy"])
             for key in ("source_attempt_id", "source_authorization_id"):
                 identifier(pointer[key])
-            _require(_hash(pointer["source_artifact_id"]), "invalid source artifact")
+            _require(_hash(pointer["source_artifact_id"])
+                or self.status == "FAILED" and pointer["source_artifact_id"] is None,
+                "invalid source artifact; only failed attempts may have no artifact")
             # The shared owner uses an immutable string selector, not an
             # integer revision counter. None selects only the original grant;
             # never stringify another type or silently fall back to None.

@@ -126,11 +126,16 @@ def test_declaration_substitutions_refuse_before_store_access(fault):
         AdmissionGate.prepare(None, spec, cell, None, "not-created")
 
 
-def test_calibrated_study_cannot_disclose_without_independent_export_support(consumers, monkeypatch):
+def test_calibrated_study_cannot_disclose_without_current_source_export_permission(consumers, monkeypatch):
     store, spec, _, grant, *_ = consumers
+    original = store.authorization
+    def authorization(authorization_id, *, version=None):
+        value = original(authorization_id, version=version)
+        return {**value, "purposes": ["evaluate"]} if version == "consumer-v1" else value
+    monkeypatch.setattr(store, "authorization", authorization)
     monkeypatch.setattr(store, "read_artifact", lambda *a, **k: pytest.fail("export read before refusal"))
     before = store.events()
-    with pytest.raises(ResearchError, match="independent calibration export"):
+    with pytest.raises(ResearchError, match="export"):
         export_evidence(store, spec["study_id"], grant)
     assert not any(e["event_kind"] == "MANIFEST" and e["payload"]["object_id"].startswith("bundle-")
         for e in store.events()[len(before):])

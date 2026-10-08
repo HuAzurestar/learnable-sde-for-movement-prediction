@@ -50,6 +50,16 @@ def admission_visibility(manifest, receipt):
         metadata = evidence["source_artifact"]
         labels.append(metadata.get("visibility", "restricted"))
         labels.append(manifest("artifact-"+metadata["artifact_id"])["visibility"])
+    if "probability_calibration" in documents:
+        evidence = documents["probability_calibration"]
+        source = evidence["source_admission"]
+        if "probability_calibration" in source.get("documents", {}):
+            raise ResearchError("CONTRACT_MISMATCH", "nested calibration source admission is unsupported")
+        metadata = evidence["source_artifact"]
+        labels.append(metadata.get("visibility", "restricted"))
+        labels.append(manifest("artifact-"+metadata["artifact_id"])["visibility"])
+        labels.append(study_visibility(manifest, source["spec"]))
+        labels.append(admission_visibility(manifest, source))
     return combine_visibility(labels)
 
 

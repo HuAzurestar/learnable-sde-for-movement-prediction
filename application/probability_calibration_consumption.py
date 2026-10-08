@@ -1,8 +1,8 @@
 """Method consumers of settled geometry, separate from method qualification.
 
 Only bounded saved proof is examined here. All calibration/reference searches
-remain in their originally charged source worker. Independent export support
-is deliberately required before any calibrated study can disclose a bundle.
+remain in their originally charged source worker. Complete table/source/cost
+disclosure has its own independent export contract, not method qualification.
 """
 
 from domain.probability_calibration import halfspace_geometry
@@ -77,9 +77,15 @@ def validate_calibrated_result(store, receipt, spec, cell, result):
 
 def require_calibration_export_support(spec, *, cells=()):
     axes = spec.get("propagation_design", {}).get("axis_manifest", {})
-    if (axes.get("calibrations") or any(f.get("target_probability") is not None
+    declared = (axes.get("calibrations") or any(f.get("target_probability") is not None
             for f in axes.get("functionals", []) if type(f) is dict)
-            or any("calibration_binding" in c for c in spec.get("cells", []))
-            or any("probability_calibration" in (c.get("admission") or {}).get("documents", {})
-                for c in cells)):
-        raise ResearchError("UNQUALIFIED", "independent calibration export support is not yet available")
+            or any("calibration_binding" in c for c in spec.get("cells", [])))
+    if declared:
+        from experiments.pirc27.preparation import registered_design
+        registered_design(spec)
+    for row in cells:
+        receipt = row.get("admission") or {}
+        if "probability_calibration" in receipt.get("documents", {}):
+            if not declared:
+                raise ResearchError("UNQUALIFIED", "independent calibration export refuses an orphan proof")
+            require_consumer_support(spec, receipt["cell"])
