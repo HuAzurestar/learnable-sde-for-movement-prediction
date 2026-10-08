@@ -343,10 +343,6 @@ class ResearchSupervisor:
                     if budget_stop_requested:
                         outcome, error_code = "BUDGET_EXHAUSTED", "BUDGET_EXHAUSTED"
                         break
-                    now = self.monotonic()
-                    if now - last_logged >= 5:
-                        self.store.append("HEARTBEAT", {"attempt_id": attempt_id, "monotonic_elapsed_ms": math.ceil((now - start) * 1000)})
-                        last_logged = now
                     remaining = deadline - self.monotonic()
                     if expired.is_set() or remaining <= 0:
                         outcome, error_code = "TIMEOUT", "TIMEOUT"
@@ -357,6 +353,20 @@ class ResearchSupervisor:
                         process.wait(timeout=min(0.025, remaining))
                     except subprocess.TimeoutExpired:
                         pass
+                    now = self.monotonic()
+                    if now - last_logged >= 5:
+                        # Let the native idle wait happen before periodic owner
+                        # I/O, then give a newly arrived checkpoint its original
+                        # fresh save/budget/physical/deadline checks first. A
+                        # missing response still journals ordinary heartbeats;
+                        # no frame or authority is borrowed by another poll.
+                        collect_checkpoint()
+                        if (saved_checkpoint is not None or budget_stop_requested
+                                or past_deadline() or process.poll() is not None):
+                            continue
+                        now = self.monotonic()
+                        self.store.append("HEARTBEAT", {"attempt_id": attempt_id, "monotonic_elapsed_ms": math.ceil((now - start) * 1000)})
+                        last_logged = now
                 completed_code = process.poll()
                 collect_checkpoint()
                 if budget_stop_requested:
