@@ -33,7 +33,10 @@ tolerance. The caller must choose and freeze its controls before execution.
 3. Bracket the positive normal-tail quantile on `[0,8]` with exactly 48 certified
    bisections at the existing fixed precision. Reject unresolved comparisons;
    no adaptive precision, floating inverse CDF or quota expansion.
-4. Propose a finite floating threshold from the bounded ideal threshold.
+4. Take the normalized interval's rational midpoint, multiply by the exact
+   positive scale under the original temporary-bit cap, and convert that
+   candidate to a finite floating threshold. Do not use the coarse physical
+   interval midpoint when the scale is smaller than the dyadic grid.
 5. Independently recompute the bounded probability for that actual rounded
    threshold. Compare exact rational error/width ratios with the frozen limits.
 
@@ -45,6 +48,10 @@ public recomputation format. Analysis byte quota remains the original reference
 quota; policy pilot cap is at most the original 1800 seconds, requiring original
 worker supervision rather than a timer in this kernel.
 
+Analysis v2 retains the bounded normalized ideal-threshold interval and exact
+original scale as well as outward physical bounds. Positive normal scaling does
+not change geometry eligibility merely because the physical interval is coarse;
+genuine float underflow/representation failure still fails the unchanged controls.
 The bounded ideal-threshold interval is not a claim that the rounded float lies
 inside it: its actual probability is certified separately. Failed numerical
 controls retain the candidate and probability certificate. Nonpositive or

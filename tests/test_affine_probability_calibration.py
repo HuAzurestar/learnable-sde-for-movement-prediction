@@ -12,7 +12,7 @@ from experiments.pirc25.affine import code_hash
 from experiments.pirc27.oracles import affine_package, oracle_suite
 from inference.affine_probability_calibration import calibrate_affine_halfspace
 from inference.affine_reference import (AffineReferenceCertificate, Arithmetic,
-    MAX_OPERATIONS, _bound_affine_reference, _encode, _parse_interval, bound_affine_reference,
+    MAX_OPERATIONS, _bound_affine_reference, _checked, _encode, _parse_interval, bound_affine_reference,
     verify_affine_reference)
 from tests.test_propagation_methods import inputs
 
@@ -218,3 +218,58 @@ def test_late_source_change_cannot_issue_a_passed_calibration(monkeypatch):
 def test_counter_cannot_enlarge_original_quota(limit):
     with pytest.raises(DataValidationError):
         Arithmetic(maximum_operations=limit)
+
+
+@pytest.mark.parametrize("scale", [1e-100, 1e100])
+@pytest.mark.parametrize("direction", [(1., 0., 0., 0.), (-3., 2., 0., 0.)])
+def test_representable_positive_normal_scaling_preserves_probability_geometry(scale, direction):
+    package, template, policy = example()
+    baseline_request = replace(template, normal=direction)
+    baseline_policy = replace(policy, source_request_hash=baseline_request.request_hash)
+    baseline = calibrate_affine_halfspace(package, baseline_request, baseline_policy)
+    assert baseline["status"] == "PASSED"
+    scaled_request = replace(template, normal=tuple(value*scale for value in direction))
+    scaled_policy = replace(policy, source_request_hash=scaled_request.request_hash)
+    # A directly represented equivalent event meets the unchanged controls.
+    direct = replace(scaled_request, threshold=baseline["threshold"]*scale)
+    independent = bound_affine_reference(package, direct).functional_bounds()
+    target = Fraction(policy.target_probability)
+    assert max(abs(independent.lo-target), abs(independent.hi-target))/target <= Fraction(policy.maximum_relative_probability_error)
+    assert (independent.hi-independent.lo)/target <= Fraction(policy.maximum_relative_probability_width)
+    result = calibrate_affine_halfspace(package, scaled_request, scaled_policy)
+    assert result["status"] == "PASSED"
+    actual = replace(scaled_request, threshold=result["threshold"])
+    certificate = AffineReferenceCertificate(_encode(result["probability_certificate"]))
+    verify_affine_reference(certificate, package, actual)
+    assert result["reference_arithmetic_operations"] <= policy.maximum_operations
+
+
+def test_unrepresentable_tiny_threshold_retains_genuine_failure_without_relaxation():
+    package, request, policy = example()
+    request = replace(request, normal=(1e-320, 0., 0., 0.))
+    policy = replace(policy, source_request_hash=request.request_hash)
+    result = calibrate_affine_halfspace(package, request, policy)
+    assert result["status"] == "FAILED"
+    assert result["checks"]["relative_probability_error"] is False
+    assert result["probability_certificate"]["status"] == "BOUNDED"
+    assert result["policy"] == policy.manifest()
+    assert result["admission_status"] == "NOT_ADMITTED"
+    assert policy.maximum_relative_probability_error < result["relative_probability_error_upper"] < .01
+
+
+def test_versioned_normalized_evidence_defines_checked_candidate_without_mutating_request():
+    package, request, policy = example()
+    request = replace(request, normal=(1e-100, 0., 0., 0.))
+    policy = replace(policy, source_request_hash=request.request_hash)
+    request_hash, policy_hash = request.request_hash, policy.policy_hash
+    result = calibrate_affine_halfspace(package, request, policy)
+    assert result["schema_version"] == "affine-halfspace-calibration-analysis-v2"
+    normalized = _parse_interval(result["normalized_ideal_threshold_bounds"])
+    physical = _parse_interval(result["ideal_threshold_bounds"])
+    exact = _checked((normalized.lo+normalized.hi)/2*Fraction(result["threshold_scale"]))
+    assert result["threshold_scale"] == 1e-100
+    assert result["threshold"] == float(exact)
+    assert physical.lo <= exact <= physical.hi
+    assert result["reference_arithmetic_operations"] == sum(result["operation_counts"].values())
+    assert request.request_hash == request_hash and request.threshold == 0.
+    assert policy.policy_hash == policy_hash

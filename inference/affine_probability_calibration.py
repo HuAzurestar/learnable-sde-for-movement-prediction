@@ -12,7 +12,7 @@ from domain.errors import DataValidationError, NumericalError
 from domain.frozen_dynamics import content_hash, _encode
 from domain.probability_calibration import AffineHalfspaceCalibrationPolicy
 from inference.affine_reference import (Arithmetic, Interval, MAX_BYTES,
-    _bound_affine_reference, _cdf, _dot, _interval_manifest, _matmul,
+    _bound_affine_reference, _cdf, _checked, _dot, _interval_manifest, _matmul,
     _parse_interval, _pi)
 
 
@@ -77,7 +77,7 @@ def calibrate_affine_halfspace(package, request, policy):
     projected_mean = _dot(a, normal, mean)
     variance = _dot(a, normal, [row[0] for row in
         _matmul(a, covariance, [[value] for value in normal])])
-    document = {"schema_version": "affine-halfspace-calibration-analysis-v1",
+    document = {"schema_version": "affine-halfspace-calibration-analysis-v2",
         "scope": "declared-affine-Gaussian-spatial-endpoint-law-for-one-template",
         "policy_hash": policy.policy_hash, "policy": policy.manifest(), "code_hash": source,
         "model_package_hash": package.package_hash, "source_request_hash": request.request_hash,
@@ -88,6 +88,8 @@ def calibrate_affine_halfspace(package, request, policy):
         "maximum_quantile_bisections": QUANTILE_BISECTIONS, "executed_quantile_bisections": 0,
         "quantile_bounds": None,
         "quantile_endpoint_tail_bounds": None, "ideal_threshold_bounds": None,
+        "normalized_ideal_threshold_bounds": None,
+        "threshold_scale": max(abs(value) for value in request.normal),
         "maximum_job_seconds": policy.maximum_job_seconds,
         "moment_certificate": moment_document, "moment_certificate_hash": moment_certificate.certificate_hash,
         "projected_mean_bounds": _interval_manifest(projected_mean),
@@ -104,10 +106,14 @@ def calibrate_affine_halfspace(package, request, policy):
     else:
         target = Fraction(policy.target_probability)
         quantile, left, right = _quantile(a, target)
-        ideal_threshold = a.mul(a.add(projected_mean,
-            a.mul(quantile, a.sqrt(variance))), a.box(scale))
+        normalized_threshold = a.add(projected_mean, a.mul(quantile, a.sqrt(variance)))
+        ideal_threshold = a.mul(normalized_threshold, a.box(scale))
         try:
-            threshold = float((ideal_threshold.lo+ideal_threshold.hi)/2)
+            # The physical interval remains outward but can be coarse for tiny
+            # scales. Select the normalized midpoint before exact unit scaling;
+            # keep the original rational bit cap and certify the actual float.
+            candidate = _checked((normalized_threshold.lo+normalized_threshold.hi)/2*scale)
+            threshold = float(candidate)
         except OverflowError as exc:
             raise NumericalError("calibrated threshold exceeds finite float range") from exc
         if not math.isfinite(threshold):
@@ -125,6 +131,7 @@ def calibrate_affine_halfspace(package, request, policy):
             "quantile_bounds": _interval_manifest(quantile),
             "quantile_endpoint_tail_bounds": [_interval_manifest(left), _interval_manifest(right)],
             "ideal_threshold_bounds": _interval_manifest(ideal_threshold),
+            "normalized_ideal_threshold_bounds": _interval_manifest(normalized_threshold),
             "probability_certificate": final_document,
             "probability_certificate_hash": final_certificate.certificate_hash,
             "relative_probability_error_upper": _outward_float(error),
