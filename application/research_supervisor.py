@@ -228,36 +228,36 @@ class ResearchSupervisor:
                     # Hold/closure can change during actual publication. Recheck
                     # after the final uncached physical pass, before any ACK.
                     self.store._read_completion(check_current_budget, lambda: None)
-                if budget_stop_requested or past_deadline():
-                    return True
-                # The response read may publish a closure/hold. The initial
-                # fresh physical pass already includes it; recheck authority
-                # here and after the final pass before any funded save/ACK.
-                check_current_budget()
-                if budget_stop_requested or past_deadline():
-                    return True
-                progress = frame["progress"]
-                if (type(progress) is not dict or set(progress) != {"completed_steps", "total_steps", "throughput_per_second", "eta_seconds"}
-                        or type(progress["completed_steps"]) is not int or type(progress["total_steps"]) is not int
-                        or not 0 <= progress["completed_steps"] <= progress["total_steps"]
-                        or progress["total_steps"] <= 0
-                        or type(progress["throughput_per_second"]) not in {int, float}
-                        or not math.isfinite(progress["throughput_per_second"]) or progress["throughput_per_second"] < 0
-                        or (progress["eta_seconds"] is not None and (type(progress["eta_seconds"]) not in {int, float}
-                            or not math.isfinite(progress["eta_seconds"]) or progress["eta_seconds"] < 0))):
-                    raise ResearchError("CONTRACT_MISMATCH", "worker checkpoint progress is invalid")
-                reference = checkpoint_handler(frame["state"], progress, deadline)
-                if past_deadline():
-                    return True
-                if type(reference) is not dict or set(reference) != {"artifact_id", "resume_level"}:
-                    raise ResearchError("CONTRACT_MISMATCH", "owner checkpoint receipt is invalid")
-                metadata = self.store.manifest("artifact-" + reference["artifact_id"])
-                if metadata["role"] != "checkpoint" or metadata["study_id"] != run["study_id"]:
-                    raise ResearchError("CONTRACT_MISMATCH", "owner checkpoint artifact scope differs")
-                if past_deadline():
-                    return True
-                candidate = {**reference, "progress": progress, "elapsed_ms": math.ceil((self.monotonic() - start) * 1000)}
-                self.store.append("CHECKPOINT_SAVED", {"attempt_id": attempt_id, "request_id": channel.request_id, **candidate})
+                    if budget_stop_requested or past_deadline():
+                        return True
+                    # The response read may publish a closure/hold. The initial
+                    # fresh physical pass already includes it; recheck authority
+                    # here and after the final pass before any funded save/ACK.
+                    check_current_budget()
+                    if budget_stop_requested or past_deadline():
+                        return True
+                    progress = frame["progress"]
+                    if (type(progress) is not dict or set(progress) != {"completed_steps", "total_steps", "throughput_per_second", "eta_seconds"}
+                            or type(progress["completed_steps"]) is not int or type(progress["total_steps"]) is not int
+                            or not 0 <= progress["completed_steps"] <= progress["total_steps"]
+                            or progress["total_steps"] <= 0
+                            or type(progress["throughput_per_second"]) not in {int, float}
+                            or not math.isfinite(progress["throughput_per_second"]) or progress["throughput_per_second"] < 0
+                            or (progress["eta_seconds"] is not None and (type(progress["eta_seconds"]) not in {int, float}
+                                or not math.isfinite(progress["eta_seconds"]) or progress["eta_seconds"] < 0))):
+                        raise ResearchError("CONTRACT_MISMATCH", "worker checkpoint progress is invalid")
+                    reference = checkpoint_handler(frame["state"], progress, deadline)
+                    if past_deadline():
+                        return True
+                    if type(reference) is not dict or set(reference) != {"artifact_id", "resume_level"}:
+                        raise ResearchError("CONTRACT_MISMATCH", "owner checkpoint receipt is invalid")
+                    metadata = self.store.manifest("artifact-" + reference["artifact_id"])
+                    if metadata["role"] != "checkpoint" or metadata["study_id"] != run["study_id"]:
+                        raise ResearchError("CONTRACT_MISMATCH", "owner checkpoint artifact scope differs")
+                    if past_deadline():
+                        return True
+                    candidate = {**reference, "progress": progress, "elapsed_ms": math.ceil((self.monotonic() - start) * 1000)}
+                    self.store.append("CHECKPOINT_SAVED", {"attempt_id": attempt_id, "request_id": channel.request_id, **candidate})
             if budget_stop_requested or past_deadline():
                 return True
             channel.acknowledge(reference["artifact_id"])
