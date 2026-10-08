@@ -73,7 +73,7 @@ def test_mlmc_checkpoint_fixture_calibration_preserves_all_levels_and_work_quota
 
 
 def prepare(tmp_path, method="euler", *, recovery=False, changes=None, level_samples=None, unbound_steps=None,
-            synthetic=False, formal=False, pilot_changes=None):
+            synthetic=False, formal=False, pilot_changes=None, cubature_qualification=False):
     # A disposable test store, not a new scientific ledger or protected input.
     store = ResearchStore(tmp_path, "propagation-unit", initialize=True)
     case = oracle_suite()[0]
@@ -83,9 +83,19 @@ def prepare(tmp_path, method="euler", *, recovery=False, changes=None, level_sam
         case.initial_covariance, 0.0, 0.0, (1.0,), "endpoint-halfspace" if method == "importance" else "endpoint-x", 11, "paired-root", "synthetic-method" if synthetic else "affine-method",
         samples=16, steps=4, chunk_size=8)
     request = replace(request, **(changes or {}))
-    plugin = propagation_plugin(recovery=recovery, synthetic=synthetic)
-    config = execution_config(request, method, level_samples=(level_samples or (8, 8)) if method in {"mlmc", "mlmc-pilot"} else (),
-                              proposal=(1.0, 0.0) if method == "importance" else (0.0, 0.0), recovery=recovery, synthetic=synthetic)
+    if method == "cubature" and not synthetic:
+        from experiments.pirc27.cubature_plugin import cubature_plugin, cubature_config
+        plugin = cubature_plugin(qualification=cubature_qualification)
+        policy = None
+        if cubature_qualification:
+            from domain.cubature_qualification import CubatureQualificationPolicy
+            policy = CubatureQualificationPolicy(request.request_hash, package.package_hash,
+                code_hash(), 1e-8, 1e-8, .5, 100., (10., 10., 1., 1.), 400001, 60.)
+        config = cubature_config(request, policy=policy)
+    else:
+        plugin = propagation_plugin(recovery=recovery, synthetic=synthetic)
+        config = execution_config(request, method, level_samples=(level_samples or (8, 8)) if method in {"mlmc", "mlmc-pilot"} else (),
+                                  proposal=(1.0, 0.0) if method == "importance" else (0.0, 0.0), recovery=recovery, synthetic=synthetic)
     inputs = execution_inputs(request)
     cell = {"arm_id": request.arm_id, "block_id": "generator-v1", "seed": request.seed, "horizon": 1.0,
             "plugin_id": plugin.plugin_id, "capability": {"mlmc": "coupled-level", "mlmc-pilot": "coupled-level", "exact": "exact-transition", "importance": "rare-event"}.get(method, "generic-rollout"),
@@ -97,6 +107,8 @@ def prepare(tmp_path, method="euler", *, recovery=False, changes=None, level_sam
         cell["propagation_request"]["steps"] = unbound_steps
     cell["resource_class"] = "cpu"
     cell["execution"] = execution_binding(plugin.registry_entry, config, inputs, matrix_cells=1)
+    if cubature_qualification:
+        cell.update(execution_role="qualification", cubature_qualification_policy=policy.manifest())
     if method == "mlmc-pilot":
         from tests.test_mlmc_pilot import policy_for
         cell.update(study_role="secondary", execution_role="pilot", mlmc_pilot_policy=asdict(policy_for(request,
@@ -114,12 +126,14 @@ def prepare(tmp_path, method="euler", *, recovery=False, changes=None, level_sam
         recovery_command_builder=propagation_resume_command if recovery else None)
     if method == "mlmc-pilot":
         spec["admission"]["mode"] = "pilot"
+    if cubature_qualification and not formal:
+        spec["admission"]["mode"] = "pilot"
     registry = CapabilityRegistry()
     registry.register(plugin)
     return store, spec, registry
 
 
-@pytest.mark.parametrize("method", ["exact", "euler", "heun", "reversible-heun", "gaussian", "mlmc", "importance"])
+@pytest.mark.parametrize("method", ["exact", "euler", "heun", "reversible-heun", "gaussian", "mlmc", "importance", "cubature"])
 def test_method_uses_shared_supervisor_and_retains_error_and_budget_provenance(tmp_path, method):
     store, spec, registry = prepare(tmp_path, method)
     store.register(spec, digest(spec))

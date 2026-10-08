@@ -187,8 +187,6 @@ def _disposition(model, method):
         return "NOT_IMPLEMENTED", "no versioned qualified implementation in this adapter"
     if isinstance(model.package, FrozenNonlinearPackage) and method.method in {"exact", "gaussian"}:
         return "INELIGIBLE", "affine-only analytic method cannot replace nonlinear dynamics"
-    if isinstance(model.package, FrozenDynamicsPackage) and method.method == "cubature":
-        return "INELIGIBLE", "cubature adapter currently declares synthetic nonlinear input only"
     return "PLANNED", "engineering capability only; shared admission and scientific qualification still required"
 
 
@@ -374,17 +372,23 @@ def freeze_design(design):
             if _disposition(model, method)[0] != "PLANNED":
                 continue
             synthetic = isinstance(model.package, FrozenNonlinearPackage)
-            key = (synthetic, method.recovery, method.method == "mixture")
+            key = (synthetic, method.recovery, method.method == "mixture", method.method == "cubature")
             if key not in plugins:
                 if method.method == "mixture":
                     from .mixture_plugin import mixture_plugin
                     plugins[key] = mixture_plugin(synthetic=synthetic)
+                elif method.method == "cubature" and not synthetic:
+                    from .cubature_plugin import cubature_plugin
+                    plugins[key] = cubature_plugin()
                 else:
                     plugins[key] = propagation_plugin(synthetic=synthetic, recovery=method.recovery)
             # Even restart-only affine work is bounded in the preparation layer;
             # total work must not be hidden behind a temporal-grid-only count.
             if method.method == "mixture":
                 _, config = _mixture_configuration(model, method, request)
+            elif method.method == "cubature" and not synthetic:
+                from .cubature_plugin import cubature_config
+                config = cubature_config(request)
             else:
                 config = execution_config(request, method.method, level_samples=method.level_samples,
                                           proposal=method.proposal, recovery=method.recovery, synthetic=synthetic)
@@ -439,10 +443,13 @@ def freeze_design(design):
             row["cell"].update(instance_id=case.instance_id, input_binding=input_binding(case, design.input_policy))
         if disposition == "PLANNED":
             synthetic = isinstance(model.package, FrozenNonlinearPackage)
-            plugin = plugins[(synthetic, method.recovery, method.method == "mixture")]
+            plugin = plugins[(synthetic, method.recovery, method.method == "mixture", method.method == "cubature")]
             if method.method == "mixture":
                 policy, config = _mixture_configuration(model, method, request)
                 row["cell"]["mixture_policy"] = policy.manifest()
+            elif method.method == "cubature" and not synthetic:
+                from .cubature_plugin import cubature_config
+                config = cubature_config(request)
             else:
                 config = execution_config(request, method.method, level_samples=method.level_samples,
                                           proposal=method.proposal, recovery=method.recovery, synthetic=synthetic)

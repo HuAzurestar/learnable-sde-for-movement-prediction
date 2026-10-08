@@ -1,5 +1,33 @@
 # Frozen synthetic propagation design preparation
 
+## Explicit affine cubature bridge and numerical pilot
+
+Affine designs can select the restart-only `affine-cubature` adapter without
+changing the frozen dynamics package into a nonlinear model. It uses the existing
+eight equal-weight points, Euler pushforward and additive diffusion. The bounded
+registry retains four SI states, an at-least-eight-row workspace and `8*steps`
+point-update work. This is discrete Gaussian closure, not a continuous PDE solver.
+Existing published unavailable rows are never rewritten under a new source hash.
+
+`affine-cubature-qualification` adds a separate frozen per-request
+`CubatureQualificationPolicy` and explicit pilot/qualification role. Inside the
+charged shared worker, independent rational continuous-affine and finite-Euler
+Gaussian certificates bound the actual functional implementation error and time
+bias. Thresholds, scales, operation and job caps are fixed before execution.
+Its resource proxy includes both output/replay point updates and the certifier
+operation allowance; reference work is not a free compiler/preflight calculation.
+Original model/method/objective arms and cumulative budgets are retained.
+
+Failed numerical checks remain saved evidence without automatic refinement or
+retry. Nonlinear packages cannot inherit the affine proof; strict PSD refusal is
+unchanged. Pilot analysis is explicitly not scientific/formal qualification:
+ordinary output keeps its unknown reference/model/closure error fields, and
+formal or test/final-eval admission is refused before grants or protected bytes.
+Dedicated owner consumption and independent paper qualification checks are still
+required before formal cubature studies, as are legitimate source preparation
+and immutable preregistration. No interface here grants data access or launches
+an actual study automatically.
+
 ## Two-dimensional motion and file-based preparation
 
 This study retains position and velocity in a plane: `[x, y, vx, vy]`, with

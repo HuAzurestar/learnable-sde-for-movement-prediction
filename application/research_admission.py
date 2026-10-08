@@ -166,6 +166,16 @@ class AdmissionGate:
             block = selected[0]
             from experiments.pirc27.input_cases import validate_cell_input_binding
             validate_cell_input_binding(cell, protocol_block=block, selection_hash=spec.get("selection_hash"))
+            if plugin.plugin_id in {"affine-cubature", "affine-cubature-qualification"}:
+                # Numerical pilot checks are not a dedicated formal owner proof.
+                # Refuse before grant/package lookup or any protected bytes.
+                if mode == "formal" or block["split_role"] in {"test", "final-eval"}:
+                    raise ResearchError("UNQUALIFIED", "affine cubature requires dedicated held-out owner qualification")
+                if plugin.plugin_id == "affine-cubature-qualification" and (
+                        mode != "pilot" or block["split_role"] not in {"train", "validation"}):
+                    raise ResearchError("UNAUTHORIZED_DATA", "cubature qualification requires train/validation pilot inputs")
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
             if plugin.plugin_id in {"affine-mixture-chunk", "synthetic-mixture-chunk"}:
                 # A generic operator report is not a method-specific qualifier.
                 # Refuse BEFORE grant/package lookup and protected input reads.
@@ -440,6 +450,17 @@ class AdmissionGate:
                 policy = qualification_policy(spec, cell, package, request, config)
                 if budget.category != "pilot" or budget.job_seconds > policy.maximum_job_seconds:
                     raise ResearchError("CONTRACT_MISMATCH", "analytic qualification requires the frozen pilot job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
+        if plugin.plugin_id == "affine-cubature-qualification":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.cubature_plugin import cubature_policy
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                policy = cubature_policy(spec, cell, package, request, config)
+                if budget.category != "pilot" or budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "cubature qualification requires the frozen pilot job budget")
             except ResearchError as exc:
                 self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
                 raise

@@ -45,13 +45,18 @@ def validate_propagation_cell(spec, cell):
     mixture_production = cell["plugin_id"] == "affine-mixture-production-chunk"
     path_qualification = cell["plugin_id"] == "affine-path-qualification"
     path_production = cell["plugin_id"] == "affine-path-production-chunk"
+    from experiments.pirc27.cubature_plugin import PLUGIN_IDS as CUBATURE_IDS, cubature_plugin, cubature_config, cubature_policy
+    cubature = cell["plugin_id"] in CUBATURE_IDS
+    cubature_qualification = cell["plugin_id"] == "affine-cubature-qualification"
     from experiments.pirc27.mixture_plugin import PLUGIN_IDS, mixture_plugin, mixture_policy, mixture_config
     mixture = cell["plugin_id"] in PLUGIN_IDS
-    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk", "affine-mixture-qualification", "affine-mixture-production-chunk", "affine-path-qualification", "affine-path-production-chunk"}|PLUGIN_IDS:
+    if cell["plugin_id"] not in {"affine-propagation", "affine-propagation-chunk", "synthetic-propagation", "synthetic-propagation-chunk", "affine-propagation-qualification", "affine-mlmc-qualification-chunk", "affine-mlmc-production-chunk", "affine-mixture-qualification", "affine-mixture-production-chunk", "affine-path-qualification", "affine-path-production-chunk"}|PLUGIN_IDS|CUBATURE_IDS:
         raise ResearchError("CONTRACT_MISMATCH", "unknown explicit propagation adapter")
     recovery = cell["plugin_id"].endswith("-chunk")
     synthetic = cell["plugin_id"].startswith("synthetic-")
     plugin = propagation_plugin(recovery=recovery, synthetic=synthetic)
+    if cubature:
+        plugin = cubature_plugin(qualification=cubature_qualification)
     if qualification:
         from experiments.pirc27.qualification_plugin import qualification_plugin
         plugin = qualification_plugin()
@@ -86,7 +91,10 @@ def validate_propagation_cell(spec, cell):
     except DataValidationError as exc:
         raise ResearchError("CONTRACT_MISMATCH", "frozen propagation package schema/content/code differs") from exc
     config = cell["execution"]["config"]
-    if path_qualification:
+    if cubature:
+        policy = cubature_policy(spec, cell, package, request, config) if cubature_qualification else None
+        expected = cubature_config(request, policy=policy)
+    elif path_qualification:
         from experiments.pirc27.path_qualification_plugin import path_qualification_policy, path_qualification_config
         policy = path_qualification_policy(spec, cell, package, request, config)
         expected = path_qualification_config(request, policy)
@@ -155,6 +163,8 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
     formal = settings.get("mode") == "formal"
     if formal and admission is None or not formal and admission is not None:
         raise ResearchError("UNQUALIFIED", "formal propagation needs its owner admission, never a caller qualification flag")
+    if formal and plugin.plugin_id in {"affine-cubature", "affine-cubature-qualification"}:
+        raise ResearchError("UNQUALIFIED", "affine cubature numerical pilot is not dedicated formal owner evidence")
     recovery = plugin.resume_level == "chunk"
     if not recovery and (resume_state is not None or checkpoint is not None):
         raise ResearchError("CONTRACT_MISMATCH", "restart-only methods cannot accept chunk state")
@@ -262,6 +272,11 @@ def execute_propagation(spec, cell, *, resume_state=None, checkpoint=None, admis
         policy = qualification_policy(spec, cell, package, request, config)
         output["forecast"]["qualification_analysis"] = analyze_affine_qualification(package, request,
             config["method"], policy, result)
+    if plugin.plugin_id == "affine-cubature-qualification":
+        from experiments.pirc27.cubature_plugin import cubature_policy
+        from inference.cubature_qualification import analyze_affine_cubature
+        policy = cubature_policy(spec, cell, package, request, config)
+        output["forecast"]["cubature_qualification_analysis"] = analyze_affine_cubature(package, request, policy, result)
     if mixture_analysis is not None:
         output["forecast"]["mixture_qualification_analysis"] = mixture_analysis
     if path_analysis is not None:
