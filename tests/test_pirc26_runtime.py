@@ -26,8 +26,9 @@ from tests.test_research_store import spec
 
 # A finite frozen workload for the real80% test, not a production plan change.
 # 600 updates completed before the40s job's soft threshold on a warm machine.
-# This gives more computation margin without faking time/control or relaxing
-# the unchanged 40/100-second test budgets. Qualification remains CPU-scoped.
+# Keep this original workload. The native interruption reservation is now
+# calibrated from actual fit cost, not a machine-dependent fixed40s assumption.
+# Neither numerical work nor the production80%/hard deadline contract changes.
 RECOVERY_STEPS = 1200
 
 
@@ -236,9 +237,16 @@ def test_actual_versioned_worker_reopens_exact_training_and_forecasts_under_new_
     assert expected["state"] == "SUCCEEDED", expected
     target = json.loads((baseline.path / "artifacts" / expected["artifact_id"]).read_bytes())
     assert target["fit"]["steps"] == RECOVERY_STEPS
+    measured = BudgetLedger(baseline).balance("affine")["committed_ms"] / 1000
+    fit_seconds = target["fit"]["wall_seconds"]
+    assert 0 < fit_seconds <= measured
+    # Place the genuine80% request inside the observed fit interval, retaining
+    # startup/publication cost and all1,200 updates. No fake time or delay.
+    stopped_seconds = (measured - .65 * fit_seconds) / .8
+    assert 0 < stopped_seconds < 100
     store, value, _, _, registry, recovery, grant = prepare(tmp_path / "resumed", long_training=True)
     stopped = SharedRunner(store, registry, recovery_registry=recovery).run_cell(
-        value["study_id"], digest(value["cells"][0]), budget=BudgetSpec(40))
+        value["study_id"], digest(value["cells"][0]), budget=BudgetSpec(stopped_seconds))
     prior_cost = BudgetLedger(store).balance("affine")["committed_ms"]
     assert prior_cost > 0  # even an unexpectedly fast complete attempt is charged
     assert stopped["state"] == "FAILED", stopped
@@ -252,7 +260,7 @@ def test_actual_versioned_worker_reopens_exact_training_and_forecasts_under_new_
     assert saved_resources["attempt_id"] == stopped["attempt_id"]
     requests = [event["payload"] for event in store.events() if event["event_kind"] == "CHECKPOINT_REQUESTED"]
     assert len(requests) == 1 and requests[0]["supported"]
-    assert 0 < requests[0]["remaining_seconds"] <= 40 * .2
+    assert 0 < requests[0]["remaining_seconds"] <= stopped_seconds * .2
     reopened = ResearchStore(tmp_path / "resumed", store.store_id)
     result = SharedRecovery(reopened, registry, recovery).resume(stopped["attempt_id"], saves[0]["artifact_id"],
         authorization=grant, budget=BudgetSpec(100))
@@ -264,6 +272,10 @@ def test_actual_versioned_worker_reopens_exact_training_and_forecasts_under_new_
     # separates observations and prevents copying a previous native counter.
     assert observation["attempt_id"] == result["attempt_id"] != saved_resources["attempt_id"]
     assert not observation["includes_previous_attempts"]
+    phase = actual["fit"]["worker_phase_observation"]
+    assert phase["attempt_id"] == result["attempt_id"] and not phase["includes_previous_attempts"]
+    assert [row["origin_index"] for row in phase["forecast"]] == [0]
+    assert all(row["finished_monotonic_seconds"] > row["started_monotonic_seconds"] for row in phase["forecast"])
     assert actual["forecast"] == target["forecast"] and actual["metrics"] == target["metrics"]
     for key in ("checkpoint", "history", "best_train_objective", "steps"):
         assert actual["fit"][key] == target["fit"][key]

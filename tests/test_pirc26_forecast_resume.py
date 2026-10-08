@@ -220,7 +220,6 @@ def test_owned_phase_prepare_validates_before_retry_or_provider_read(tmp_path,mo
                                                        ("forecast",True,torch.float64),("forecast",False,torch.float32)])
 def test_actual_owner_forecast_ack_reopen_and_fresh_cost_preserve_complete_samples_and_moments(tmp_path, operation,two_origins,dtype):
     import json
-    import math
     from application.research_budget import BudgetSpec,BudgetLedger
     from application.research_recovery import SharedRecovery
     from experiments.pirc25.runner import SharedRunner
@@ -230,20 +229,31 @@ def test_actual_owner_forecast_ack_reopen_and_fresh_cost_preserve_complete_sampl
     # Both float32 and post-fit float64 reached the90s reservation's genuine
     # soft stop near/full solver work, so neither is an uninterrupted comparator.
     # Preserve all populations/grids/model and use finite150s baselines/resumes
-    # only here; the1,200-step100/40/100 and production budgets stay fixed.
+    # only here; original scientific work and production budgets stay fixed.
     full_seconds = 150
     baseline,value,_,_,registry,recovery,_ = prepare(tmp_path/"baseline",operation=operation,role=role,long_forecast=True,two_origins=two_origins,dtype=dtype)
     expected = SharedRunner(baseline,registry,recovery_registry=recovery).run_cell(value["study_id"],digest(value["cells"][0]),budget=BudgetSpec(full_seconds))
     assert expected["state"] == "SUCCEEDED",expected
     target = json.loads((baseline.path/"artifacts"/expected["artifact_id"]).read_bytes())
-    # Calibrate a separate finite engineering reservation from observed native
-    # baseline cost. No synthetic time/delay/request/ACK or production budget.
+    # Total-cost ratios confuse startup/admission/scoring with solver work and
+    # may stop before any progress or after completion. Use actual native
+    # solver intervals, with no minimum/floor that masks a fast machine.
     measured = BudgetLedger(baseline).balance("affine")["committed_ms"]/1000
-    # Native source/admission work varies between fresh attempts. A .95 ratio
-    # saved at origin0/ID98 in an observed52.361s baseline, not at the required
-    # completed prefix. Keep both full128-path populations/grid/model; enlarge
-    # only this disposable engineering reservation (80% threshold unchanged).
-    stopped_seconds = max(5,math.floor(measured*(1.2 if two_origins else .75)))
+    phases = target["fit"]["worker_phase_observation"]
+    assert phases["schema_version"] == "pirc26-worker-phase-observation-v1"
+    assert phases["attempt_id"] == expected["attempt_id"] and not phases["includes_previous_attempts"]
+    assert phases["scope"] == "current-attempt-forecast-solver-only" and phases["units"] == "seconds"
+    assert [row["origin_index"] for row in phases["forecast"]] == list(range(2 if two_origins else 1))
+    workers = [e["payload"] for e in baseline.events() if e["event_kind"] == "WORKER_STARTED"]
+    assert len(workers) == 1
+    native_start = workers[0]["deadline_monotonic"] - full_seconds
+    phase = phases["forecast"][1 if two_origins else 0]
+    start, finish = phase["started_monotonic_seconds"], phase["finished_monotonic_seconds"]
+    assert native_start < start < finish < native_start + measured
+    # The two-origin case must reach a completed first-origin prefix. Place
+    # the real80% request within the second solver, not near overall job exit.
+    stopped_seconds = (start - native_start + (finish-start)*(.25 if two_origins else .4)) / .8
+    assert 0 < stopped_seconds < full_seconds
     store,value,_,_,registry,recovery,grant = prepare(tmp_path/"resumed",operation=operation,role=role,long_forecast=True,two_origins=two_origins,dtype=dtype)
     stopped = SharedRunner(store,registry,recovery_registry=recovery).run_cell(value["study_id"],digest(value["cells"][0]),budget=BudgetSpec(stopped_seconds))
     assert stopped["state"] == "FAILED", (stopped,measured,stopped_seconds)
@@ -268,5 +278,9 @@ def test_actual_owner_forecast_ack_reopen_and_fresh_cost_preserve_complete_sampl
     assert all(len(o["sample_ids"]) == (128 if two_origins else 256) for o in actual["forecast"]["origins"])
     assert BudgetLedger(reopened).balance("affine")["committed_ms"] > before
     assert reopened.attempts()[resumed["attempt_id"]]["parent_attempt_id"] == stopped["attempt_id"]
+    fresh_phases = actual["fit"]["worker_phase_observation"]
+    assert fresh_phases["attempt_id"] == resumed["attempt_id"] and not fresh_phases["includes_previous_attempts"]
+    assert [row["origin_index"] for row in fresh_phases["forecast"]] == ([1] if two_origins else [0])
+    assert all(row["finished_monotonic_seconds"] > row["started_monotonic_seconds"] for row in fresh_phases["forecast"])
     requests = [e["payload"] for e in reopened.events() if e["event_kind"] == "CHECKPOINT_REQUESTED"]
     assert requests and 0 < requests[0]["remaining_seconds"] <= stopped_seconds*.2

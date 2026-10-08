@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import sys
+import time
 
 from infrastructure.research_control import WorkerControl, write_frame
 from infrastructure.pirc26_process_resources import process_resources
@@ -71,7 +72,7 @@ def run(output, handoff_hash):
     if control is not None and fit_frame is None:
         fit["producer_attempt_id"] = ownership.attempt_id
         fit_frame = pack_fit(fit, job, cell["execution"]["config"], batch_count)
-    forecasts = []
+    forecasts, forecast_phase_times = [], []
     for index, (recipe, req) in enumerate(zip(job["origins"], requests)):
         if index < origin_index:
             prediction = dict(completed_predictions[index])
@@ -86,6 +87,7 @@ def run(output, handoff_hash):
             managed_forecast = None if control is None else ManagedForecastControl(
                 control, job, fit_frame, completed_predictions, index, ownership.attempt_id,
                 active if index == origin_index else None)
+            phase_started = time.monotonic()
             prediction = parts["predictor"].predict(model, req,
                 cancellation=ownership.requested if control is None else None,
                 resume_state=active if index == origin_index else None,
@@ -93,6 +95,9 @@ def run(output, handoff_hash):
                 checkpoint_handler=None if managed_forecast is None else managed_forecast.save)
             if prediction.get("status") == "CHECKPOINTED":
                 return 85  # Actual control.save has received the owner's ACK.
+            forecast_phase_times.append({"origin_index": index,
+                "started_monotonic_seconds": phase_started,
+                "finished_monotonic_seconds": time.monotonic()})
         completion = prediction.pop("completion_state", None)
         try:
             evaluation = evaluate_forecast(prediction, block.truth(recipe["segment_id"], req),
@@ -116,6 +121,13 @@ def run(output, handoff_hash):
     # telemetry out of exact scientific forecast/history equality comparisons.
     fit["worker_resource_observation"] = {**process_resources("job-payload-before-encoding"),
                                           "attempt_id": ownership.attempt_id}
+    # Honest current-attempt solver intervals, separate from scientific output
+    # and lifetime memory peaks. Reused completed origins contribute no copied
+    # interval; startup/admission, scoring and publication are not solver work.
+    fit["worker_phase_observation"] = {"schema_version": "pirc26-worker-phase-observation-v1",
+        "attempt_id": ownership.attempt_id, "units": "seconds", "clock": "time.monotonic",
+        "scope": "current-attempt-forecast-solver-only", "includes_previous_attempts": False,
+        "forecast": forecast_phase_times}
     payload = {"metrics": aggregate_metric(forecasts, metric), "forecast": {"origins": forecasts, "metric_binding": metric},
         "fit": fit, "source_schema": "pirc26-observed-phase-space-result-v1"}
     result = {"schema_version": "pirc25-result-v1", "status": "SUCCEEDED", "spec_hash": digest(spec),
