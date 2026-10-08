@@ -134,9 +134,10 @@ def population_source(store, reference):
         require(_sources(store, original, arm, [s["selection"] for s in sources]) == sources,
             "training population source authority moved", "UNAUTHORIZED_DATA")
         population = proof["training_population"]
-        require(type(population) is dict and set(population) == {"artifact_id", "provenance"},
+        require(type(population) is dict and set(population) == {"artifact_id", "provenance", "normalizer"},
                 "closed training population receipt required")
         metadata = population["provenance"]
+        normalizer = population["normalizer"]
         artifact = store._manifest("artifact-" + population["artifact_id"])
         require(metadata["schema_version"] == VERSION and metadata["train_binding_hash"] == digest(request["train_binding"])
             and metadata["source_study_id"] == original["study_id"]
@@ -152,6 +153,11 @@ def population_source(store, reference):
             and artifact["role"] == "training-population" and artifact["study_id"] == original["study_id"]
             and artifact["block_ids"] == metadata["independent_block_ids"],
             "training population artifact/member receipt differs", "CORRUPT_ARTIFACT")
+        require(digest(normalizer) == metadata["normalizer_hash"]
+            and normalizer["train_binding_hash"] == metadata["train_binding_hash"]
+            and normalizer["context_hash"] == metadata["context_hash"]
+            and normalizer["independent_block_ids"] == metadata["independent_block_ids"],
+            "actual fitted normalizer receipt differs", "CORRUPT_ARTIFACT")
         entry = {"block_id": metadata["block_id"], "dataset_id": "pirc26-derived-training-population",
             "release_id": VERSION, "source_block_id": metadata["block_id"], "sha256": artifact["sha256"],
             "size_bytes": artifact["size_bytes"], "path": artifact["artifact_id"], "split_role": "train", "fit_scope": True,
@@ -160,4 +166,5 @@ def population_source(store, reference):
             "population_kind": metadata["population_kind"]}
         grants = _completion(store, original, arm, sources)
     _expiry(grants)
-    return {"protocol_entry": entry, "data_root": str(store.path / "artifacts"), "provenance": deepcopy(metadata)}
+    return {"protocol_entry": entry, "data_root": str(store.path / "artifacts"),
+            "provenance": deepcopy(metadata), "normalizer": deepcopy(normalizer)}

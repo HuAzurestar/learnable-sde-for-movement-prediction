@@ -17,7 +17,8 @@ from tests.test_pirc26_dsde import contracts, sources, pair_for
 from tests.test_research_store import spec
 
 
-def prepared_fixture(tmp_path, contracts, *, selection_shift=0., missing_grant=False, cross_role_unit=False):
+def prepared_fixture(tmp_path, contracts, *, selection_shift=0., missing_grant=False, cross_role_unit=False,
+                     consumer_study_ids=(), arm=None):
     store = ResearchStore(tmp_path / "ledger", "managed-preparation-fixture", initialize=True)
     pairs, selections, blocks = [], [], []
     for i, role in enumerate(("train", "train", "selection")):
@@ -46,6 +47,8 @@ def prepared_fixture(tmp_path, contracts, *, selection_shift=0., missing_grant=F
             "output_block_id": "prepared-" + str(i), "purpose": "fit" if role == "train" else "select"})
     value = spec()
     value["study_id"] = "fixture-preparation"
+    if arm is not None:
+        value["arms"] = [deepcopy(arm)]
     value["cells"] = [{"arm_id": "affine", "seed": 1, "block_id": unit, "visibility": "synthetic"}
                       for unit in sorted({b["independent_block_id"] for b in blocks})]
     protocol = {"schema_version": "pirc25-data-protocol-v1", "protocol_id": "fixture-sources",
@@ -55,7 +58,8 @@ def prepared_fixture(tmp_path, contracts, *, selection_shift=0., missing_grant=F
     store.authorize({"authorization_id": "fixture-grant", "study_id": value["study_id"], "protocol_hash": digest(protocol),
         "expires_at": "2099-01-01T00:00:00+00:00", "evidence_hash": digest("synthetic test-only permission"),
         "data_root": str(tmp_path), "block_ids": [b["block_id"] for b in blocks if not missing_grant or b["block_id"] != "conditions-2"],
-        "purposes": ["fit", "select"], "visibilities": ["synthetic"], "test_authorization": False})
+        "purposes": ["fit", "select"], "visibilities": ["synthetic"], "test_authorization": False,
+        "consumer_study_ids": list(consumer_study_ids)})
     store.register(value, digest(value))
     settings = preparation_settings(*contracts, ProjectionSpec("fixture-metric-frame", 20., 110., .1))
     return store, value, selections, settings

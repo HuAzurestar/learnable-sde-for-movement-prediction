@@ -35,6 +35,12 @@ def run(output, handoff_hash):
     model = parts["model"]
     profile = cell["execution"]["inputs"]
     block = decode_block(transport, model, max_observations=profile["observations"])
+    population_evidence = None
+    if plugin.plugin_id.startswith("pirc26-population-"):
+        from application.pirc26_population_runtime import source
+        population, population_evidence = source(receipt)
+        require([s["segment_id"] for s in block.segments] == [s["pooled_segment_id"] for s in population["provenance"]["segments"]],
+                "decoded training population segment identity differs")
     requests = [block.forecast_request(recipe["segment_id"], recipe["origin_index"], recipe["time_grid"],
         sample_count=recipe["sample_count"], brownian_root_id=recipe["brownian_root_id"], chunk_size=recipe["chunk_size"])
         for recipe in job["origins"]]
@@ -58,6 +64,8 @@ def run(output, handoff_hash):
             HorizonTrainingExample(req, block.truth(recipe["segment_id"], req), model.spec.train_binding_hash)
             for recipe, req in zip(job["origins"], requests)]
         batch_count = len(data)
+        if population_evidence is not None:
+            require(batch_count == population_evidence["batch_count"], "complete training batch population differs")
         if plugin.resume_level == "restart-only":
             if restored is not None:
                 raise ResearchError("CHECKPOINT_INCOMPATIBLE", "basis QR cannot resume an optimizer state")
@@ -69,6 +77,11 @@ def run(output, handoff_hash):
             return 85  # save() has received the actual owner ACK.
     elif restored is not None:
         raise ResearchError("CHECKPOINT_INCOMPATIBLE", "training recovery cannot substitute a frozen forecast job")
+    if population_evidence is not None:
+        if forecast_recovery:
+            require(fit.get("training_population") == population_evidence, "recovered training population differs")
+        else:
+            fit["training_population"] = population_evidence
     if control is not None and fit_frame is None:
         fit["producer_attempt_id"] = ownership.attempt_id
         fit_frame = pack_fit(fit, job, cell["execution"]["config"], batch_count)
@@ -138,6 +151,9 @@ def run(output, handoff_hash):
         "metric_units": {"energy_score": "m"}, "metric_definitions": {"energy_score": metric["definition"]},
         "source_identity": transport["source_identity"], **payload}
     content = encode(result)
+    if population_evidence is not None:
+        from application.pirc26_population_runtime import result_validate
+        result_validate(receipt, result)
     if len(content) > receipt["resource_plan"]["limits"]["result_bytes"]:
         raise ResearchError("RESOURCE_PLAN_REJECTED", "actual numerical result exceeds the declared publication quota")
     atomic_write(Path(output), content)

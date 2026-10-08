@@ -392,7 +392,8 @@ class PreparationRunner:
                     if c["block_id"] in population["provenance"]["independent_block_ids"]) else "restricted",
                 block_ids=population["provenance"]["independent_block_ids"], study_id=original["study_id"])
             proof = {"schema_version": "pirc26-preparation-receipt-v2", "computation_ref": reference,
-                "training_population": {"artifact_id": artifact["artifact_id"], "provenance": population["provenance"]},
+                "training_population": {"artifact_id": artifact["artifact_id"], "provenance": population["provenance"],
+                                        "normalizer": value["normalizer"]},
                 "request_hash": digest(request), "result_artifact_id": outcome["artifact_id"], "settlement_event_hash": settled["hash"],
                 "cost": {"arm_id": arm["arm_id"], "charged_ms": settled["payload"]["charged_ms"], "unit": "slot-ms",
                     "scope": "whole-shared-computation-job", "basis": "measured-monotonic"}}

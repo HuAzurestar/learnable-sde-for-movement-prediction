@@ -64,6 +64,19 @@ class ExecutionPlugin:
     component_registries: dict | None = None
     pre_read_validator: object = None
     checkpoint_validator: object = None
+    result_validator: object = None
+    validator_store_context: bool = False
+
+
+def invoke_validator(plugin, name, store, *args):
+    """Opt-in owner context avoids reacquiring an already owned store lock.
+
+    Store context is runtime-only, never serialized into an admission. Legacy
+    validators retain their original argument contract and immutable binding.
+    """
+    validator = getattr(plugin, name)
+    if validator is not None:
+        return validator(*args, **({"store": store} if plugin.validator_store_context else {}))
 
 
 class CapabilityRegistry:
@@ -87,6 +100,8 @@ class CapabilityRegistry:
                 or len(plugin.units) != len(plugin.state_order) or not callable(plugin.command_builder)
                 or plugin.pre_read_validator is not None and not callable(plugin.pre_read_validator)
                 or plugin.checkpoint_validator is not None and not callable(plugin.checkpoint_validator)
+                or plugin.result_validator is not None and not callable(plugin.result_validator)
+                or type(plugin.validator_store_context) is not bool
                 or entry.component_id != plugin.plugin_id or entry.component_kind != "execution-adapter"
                 or entry.capabilities != plugin.capabilities or entry.resume_level != plugin.resume_level
                 or entry.state_order != plugin.state_order or entry.units != plugin.units):

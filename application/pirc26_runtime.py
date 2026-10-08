@@ -164,6 +164,12 @@ def admitted_context(output, spec, cell, *, running=False, recovery=False):
     if recovery and basis_family(config["family"]):
         raise ResearchError("CHECKPOINT_INCOMPATIBLE", "restart-only basis jobs cannot resume old factorization state")
     plugin = execution_plugin(config["objective"], config["family"])
+    population_runtime = None
+    if cell["plugin_id"].startswith("pirc26-population-"):
+        from application import pirc26_population_runtime as population_runtime
+        plugin = population_runtime.execution_plugin(config["family"])
+        if config["objective"] != "O1" or plugin.plugin_id != cell["plugin_id"]:
+            raise ResearchError("CONTRACT_MISMATCH", "population adapter identity differs")
     plan = execution_plan(spec, cell, plugin)
     child_inputs = {k: v for k, v in inputs.items() if k not in ("runtime_root", "store_id")}
     if any(part["config"] != config or part["inputs"] != child_inputs for part in binding["components"].values()):
@@ -183,6 +189,8 @@ def admitted_context(output, spec, cell, *, running=False, recovery=False):
         raise ResearchError("UNAUTHORIZED_DATA", "owner admission is required before dispatch")
     receipt = store.manifest("admission-" + events[0]["admission_hash"])
     expected_command = implementation_hash(resume_command if recovery else command)
+    if population_runtime is not None:
+        expected_command = implementation_hash(population_runtime.resume_command if recovery else population_runtime.command)
     if (receipt["admission_hash"] != digest({k: v for k, v in receipt.items() if k != "admission_hash"})
             or receipt["spec_hash"] != digest(spec) or receipt["cell_hash"] != digest(cell)
             or receipt["spec"] != spec or receipt["cell"] != cell or receipt["attempt_id"] != attempt_id
@@ -192,6 +200,8 @@ def admitted_context(output, spec, cell, *, running=False, recovery=False):
             or receipt["input_kind"] != "registered-protocol"):
         raise ResearchError("CONTRACT_MISMATCH", "actual admission/source/component identity differs")
     job = validate_job(receipt["documents"]["package"]["payload"].get("pirc26_job"), receipt)
+    if population_runtime is not None:
+        population_runtime.pre_read_validate(receipt, store=store)
     return store, receipt, plugin, job
 
 

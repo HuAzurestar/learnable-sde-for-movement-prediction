@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
-from .research_contracts import validate_package, validate_result
+from .research_contracts import validate_package, validate_result, invoke_validator
 from .research_data import EvaluationExposureLedger
 from .research_preregistration import PreregistrationGate, hash_reference, source_identity, validate_preregistration, protocol_binding
 from infrastructure.research_store import ResearchError, digest, encode, utc_now
@@ -39,6 +39,10 @@ def plugin_binding(plugin):
         binding["pre_read_validator_hash"] = command_binding(plugin.pre_read_validator)
     if plugin.checkpoint_validator is not None:
         binding["checkpoint_validator_hash"] = command_binding(plugin.checkpoint_validator)
+    if plugin.result_validator is not None:
+        binding["result_validator_hash"] = command_binding(plugin.result_validator)
+    if plugin.validator_store_context:
+        binding["validator_store_context"] = True
     return digest(binding)
 
 
@@ -203,7 +207,8 @@ class AdmissionGate:
                     pre_read_documents["frozen_model"] = model
                 if upstream_prereg is not None:
                     pre_read_documents["preregistration"] = upstream_prereg
-                plugin.pre_read_validator({**receipt, "mode": mode, "documents": pre_read_documents})
+                invoke_validator(plugin, "pre_read_validator", self.store,
+                    {**receipt, "mode": mode, "documents": pre_read_documents})
             snapshot_evidence = prepare_upstream(self.store, spec, cell, package, upstream_prereg,
                                                 attempt_id=attempt_id, run_id=run["run_id"])
             documents = {"protocol": protocol, "authorization": grant, "package": package,
@@ -297,6 +302,8 @@ class AdmissionGate:
             if result.get("admission_hash", receipt["admission_hash"]) != receipt["admission_hash"]:
                 raise ResearchError("CONTRACT_MISMATCH", "worker substituted another admission")
             result["admission_hash"] = receipt["admission_hash"]
+            if plugin.result_validator is not None:
+                invoke_validator(plugin, "result_validator", self.store, receipt, result)
         return validate
 
     def run(self, attempt_id, spec, cell, plugin, command_builder, budget, *, builtin_fixture=False, recovery_builder=None, checkpoint_handler=None):

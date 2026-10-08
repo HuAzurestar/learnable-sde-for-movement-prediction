@@ -12,7 +12,9 @@ from infrastructure.research_store import ResearchError, digest, encode
 
 
 def verified_reuse(store, attempt, spec, cell, plugin):
-    with store.lock():
+    # Hooks may need fresh authority under this same owned scope. Preserve the
+    # final uncached journal and permission guards; do not reacquire its OS lock.
+    with store._read_transaction():
         request = {"attempt_id": attempt["attempt_id"], "run_id": attempt["run_id"],
                    "artifact_id": attempt.get("artifact_id")}
         store._append("REUSE_CHECK_STARTED", request)

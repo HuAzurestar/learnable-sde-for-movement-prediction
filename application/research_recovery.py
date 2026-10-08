@@ -8,6 +8,7 @@ import time
 
 from .research_budget import BudgetLedger, BudgetSpec
 from .research_admission import AdmissionGate
+from .research_contracts import invoke_validator
 from .research_execution import resolve_execution, execution_plan
 from .research_registry import implementation_hash
 from infrastructure.research_store import ResearchError, ResearchStore, digest
@@ -108,7 +109,7 @@ class SharedRecovery:
                     or plugin.checkpoint_validator is None and progress["total_steps"] > receipt["resource_plan"]["counts"]["steps"]):
                 raise ResearchError("CONTRACT_MISMATCH", "checkpoint differs from the admitted running job")
             if plugin.checkpoint_validator is not None:
-                plugin.checkpoint_validator(receipt, state, progress)
+                invoke_validator(plugin, "checkpoint_validator", self.store, receipt, state, progress)
         adapter = self.recovery.resolve(plugin.plugin_id, plugin.resume_level, plugin.registry_entry.version)
         required = {"step", "data_position", "method_state", "rng_state"}
         from .research_registry import _bounded_json
@@ -179,7 +180,7 @@ class SharedRecovery:
                 raise ResearchError("CONTRACT_MISMATCH", "checkpoint original admission differs")
             # Before retry creation/admission/provider reads, not only after a
             # worker has consumed the data. Validation grants no new authority.
-            plugin.checkpoint_validator(receipt, value["state"], value["progress"])
+            invoke_validator(plugin, "checkpoint_validator", self.store, receipt, value["state"], value["progress"])
         self.store.verify_artifact_read(checkpoint_id, purpose="resume", authorization=authorization)
         return {"run": run, "spec": spec, "cell": cell, "plugin": plugin,
                 "adapter": adapter, "state": value["state"], "checkpoint_id": checkpoint_id}

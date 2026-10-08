@@ -62,7 +62,8 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
                   execution_config=None, execution_inputs=None, recovery_command_builder=None,
                   upstream_ids=(), upstream_inputs=None, accepted_versions=None,
                   upstream_dependencies=None, pirc22_cutover=None, upstream_visibility="synthetic", legacy_upstream=True,
-                  execution_components=None, input_content=None, package_payload=None, split_role=None):
+                  execution_components=None, input_content=None, package_payload=None, split_role=None,
+                  input_block_metadata=None, input_data_root=None):
     bind_fixture_execution(value, plugin, execution_config, execution_inputs, execution_components)
     # Explicit engineering-only frozen metadata. These synthetic attestations
     # never claim acceptance of real PIRC-19--22 inputs or grant data access.
@@ -106,6 +107,9 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
                "fit_scope": not formal and split_role in (None, "train"),
                **({"size_bytes": len(content)} if input_content is not None else {})}
               for block in sorted({cell["block_id"] for cell in value["cells"]})]
+    if input_block_metadata is not None:
+        assert len(blocks) == 1 and input_block_metadata["block_id"] == blocks[0]["block_id"]
+        blocks = [dict(input_block_metadata)]
     protocol = {"schema_version": "pirc25-data-protocol-v1", "protocol_id": "inputs",
                 "study_id": value["study_id"], "blocks": blocks}
     if formal:
@@ -129,7 +133,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
     value.update(code_hash=code_hash(), protocol_hash=digest(protocol), data_hash=data_binding(protocol))
     grant = {"authorization_id": "execution-fixture", "study_id": value["study_id"],
         "expires_at": "2099-01-01T00:00:00+00:00", "evidence_hash": digest("explicit synthetic operator grant"),
-        "protocol_hash": digest(protocol), "data_root": str(root), "test_authorization": formal,
+        "protocol_hash": digest(protocol), "data_root": str(root if input_data_root is None else input_data_root), "test_authorization": formal,
         "purposes": ["fit", "select", "validate", "execute", "evaluate", "preview", "export", "resume"],
         "visibilities": sorted({"synthetic", package_visibility}), "block_ids": [b["block_id"] for b in blocks]}
     store.authorize(grant)
