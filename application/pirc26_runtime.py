@@ -157,7 +157,7 @@ def validate_restored_state(receipt, state):
         "total_steps":total,"throughput_per_second":0.,"eta_seconds":0.})
 
 
-def admitted_context(output, spec, cell, *, running=False, recovery=False):
+def admitted_context(output, spec, cell, *, running=False, recovery=False, store=None):
     """Resolve only the store and attempt already owned by this output path."""
     binding = cell["execution"]
     config, inputs = binding["config"], binding["inputs"]
@@ -179,7 +179,11 @@ def admitted_context(output, spec, cell, *, running=False, recovery=False):
     child_inputs = {k: v for k, v in inputs.items() if k not in ("runtime_root", "store_id")}
     if any(part["config"] != config or part["inputs"] != child_inputs for part in binding["components"].values()):
         raise ResearchError("CONTRACT_MISMATCH", "adapter and actual component recipes differ")
-    store = ResearchStore(Path(inputs["runtime_root"]), inputs["store_id"])
+    if store is None:
+        store = ResearchStore(Path(inputs["runtime_root"]), inputs["store_id"])
+    elif (store.store_id != inputs["store_id"]
+            or store.path != Path(inputs["runtime_root"]).resolve() / "pirc25"):
+        raise ResearchError("CONTRACT_MISMATCH", "provided owner store differs from admitted runtime")
     output = Path(output).absolute()
     if (output.name != "result.json" or output.parent.parent != store.path / "artifacts"
             or not output.parent.name.startswith(".attempt-")):
@@ -211,7 +215,18 @@ def admitted_context(output, spec, cell, *, running=False, recovery=False):
 
 
 def _dispatch(output, spec, cell, state, recovery):
-    store, receipt, _, _ = admitted_context(output, spec, cell, recovery=recovery)
+    if cell["plugin_id"].startswith(("pirc26-population-", "pirc26-selection-")):
+        inputs = cell["execution"]["inputs"]
+        store = ResearchStore(Path(inputs["runtime_root"]), inputs["store_id"])
+        # Original source/model and consumer guards span ALL attachment,
+        # derived-data and handoff I/O, not just the initial metadata lookup.
+        with store._read_transaction():
+            return _dispatch_owned(output, spec, cell, state, recovery, store=store)
+    return _dispatch_owned(output, spec, cell, state, recovery)
+
+
+def _dispatch_owned(output, spec, cell, state, recovery, *, store=None):
+    store, receipt, _, _ = admitted_context(output, spec, cell, recovery=recovery, store=store)
     if recovery:
         validate_restored_state(receipt,state)
     if cell["plugin_id"].startswith("pirc26-selection-"):

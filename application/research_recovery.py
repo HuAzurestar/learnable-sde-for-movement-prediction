@@ -142,7 +142,18 @@ class SharedRecovery:
         return artifact["artifact_id"]
 
     def prepare(self, attempt_id, checkpoint_id, *, authorization):
-        attempt, run, spec, cell, plugin = self._context(attempt_id)
+        context = self._context(attempt_id)
+        if not context[-1].validator_store_context:
+            return self._prepare(attempt_id, checkpoint_id, authorization=authorization, context=context)
+        # Opt-in source validators register guards on this SAME owned scope.
+        # The state cannot leave after a later checkpoint I/O outlives a raw
+        # source/model grant. Legacy callbacks retain their original scope.
+        with self.store._read_transaction():
+            return self._prepare(attempt_id, checkpoint_id, authorization=authorization,
+                context=self._context(attempt_id))
+
+    def _prepare(self, attempt_id, checkpoint_id, *, authorization, context):
+        attempt, run, spec, cell, plugin = context
         adapter = self.recovery.resolve(plugin.plugin_id, plugin.resume_level, plugin.registry_entry.version)
         if attempt["state"] not in {"FAILED", "INTERRUPTED"}:
             raise ResearchError("CONTRACT_MISMATCH", "only a stopped failed attempt may resume")
