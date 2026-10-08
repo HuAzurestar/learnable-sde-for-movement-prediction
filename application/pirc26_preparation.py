@@ -64,7 +64,7 @@ def validate_settings(settings):
     require(len(encode(settings)) <= 1024 * 1024, "preparation settings byte quota", "RESOURCE_PLAN_REJECTED")
 
 
-def _sources(store, original, arm, selections):
+def _sources(store, original, arm, selections, *, require_train=True):
     """Fresh live authority for all pairs before opening any scientific bytes."""
     require(type(selections) is list and 1 <= len(selections) <= MAX_PAIRS,
             "bounded explicit source population required", "RESOURCE_PLAN_REJECTED")
@@ -111,7 +111,8 @@ def _sources(store, original, arm, selections):
             "condition": deepcopy(condition), "protocol_hash": digest(protocol),
             "authorization_hash": digest(grant), "source_identity": list(identity),
             "split_role": role, "independent_block_id": unit})
-    require(any(d["split_role"] == "train" for d in selected), "train population required to fit normalizer", "UNAUTHORIZED_DATA")
+    require(not require_train or any(d["split_role"] == "train" for d in selected),
+            "train population required to fit normalizer", "UNAUTHORIZED_DATA")
     return selected
 
 
@@ -247,12 +248,12 @@ def _expiry(grants):
             "preparation source permission expired at disclosure", "UNAUTHORIZED_DATA")
 
 
-def _completion(store, original, arm, sources):
+def _completion(store, original, arm, sources, *, require_train=True):
     """Preserve shared final physical-scope authority and post-I/O expiry."""
     selections = [s["selection"] for s in sources]
     grants = [store.authorization(s["authorization_id"], version=s["authorization_version"]) for s in selections]
     store._read_completion(
-        lambda: require(_sources(store, original, arm, selections) == sources,
+        lambda: require(_sources(store, original, arm, selections, require_train=require_train) == sources,
                         "preparation source authority moved at disclosure", "UNAUTHORIZED_DATA"),
         lambda: _expiry(grants))
     return grants
@@ -391,9 +392,20 @@ class PreparationRunner:
                 visibility="synthetic" if all(c.get("visibility") == "synthetic" for c in original["cells"]
                     if c["block_id"] in population["provenance"]["independent_block_ids"]) else "restricted",
                 block_ids=population["provenance"]["independent_block_ids"], study_id=original["study_id"])
+            from application.pirc26_selection import selection_populations
+            selection_artifacts = []
+            for selected in selection_populations(value["blocks"], value["normalizer"], study_id=original["study_id"]):
+                unit = selected["provenance"]["independent_block_id"]
+                selected_artifact = self.store.artifact(encode(selected["document"]), role="selection-population",
+                    visibility="synthetic" if all(c.get("visibility") == "synthetic" for c in original["cells"]
+                        if c["block_id"] == unit) else "restricted",
+                    block_ids=[unit], study_id=original["study_id"])
+                selection_artifacts.append({"artifact_id": selected_artifact["artifact_id"],
+                                            "provenance": selected["provenance"]})
             proof = {"schema_version": "pirc26-preparation-receipt-v2", "computation_ref": reference,
                 "training_population": {"artifact_id": artifact["artifact_id"], "provenance": population["provenance"],
                                         "normalizer": value["normalizer"]},
+                "selection_populations": selection_artifacts,
                 "request_hash": digest(request), "result_artifact_id": outcome["artifact_id"], "settlement_event_hash": settled["hash"],
                 "cost": {"arm_id": arm["arm_id"], "charged_ms": settled["payload"]["charged_ms"], "unit": "slot-ms",
                     "scope": "whole-shared-computation-job", "basis": "measured-monotonic"}}

@@ -18,10 +18,10 @@ from tests.test_research_store import spec
 
 
 def prepared_fixture(tmp_path, contracts, *, selection_shift=0., missing_grant=False, cross_role_unit=False,
-                     consumer_study_ids=(), arm=None):
+                     consumer_study_ids=(), arm=None, selection_files=1):
     store = ResearchStore(tmp_path / "ledger", "managed-preparation-fixture", initialize=True)
     pairs, selections, blocks = [], [], []
-    for i, role in enumerate(("train", "train", "selection")):
+    for i, role in enumerate(("train", "train", *(["selection"] * selection_files))):
         feature, condition, entry = sources(contracts, role=role)
         unit = "train-unit" if role == "train" or cross_role_unit else "selection-unit"
         file_id = "fixture-file-" + str(i)
