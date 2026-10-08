@@ -80,11 +80,13 @@ PUBLIC_NEX326_REFERENCES = {
     Path("tests/test_terrain_benchmark.py"),
 }
 
-# These two adapters consume the same already-public four-dimensional model.
+# These adapters consume models/features from the already-public package.
 # Permit only that exact public package name, not other internal lineage IDs.
 PUBLIC_PHASE_SPACE_ADAPTER_REFERENCES = {
     Path("application/pirc26_dynamics.py"),
     Path("tests/test_pirc26_dynamics_adapters.py"),
+    Path("application/pirc26_dsde.py"),
+    Path("tests/test_pirc26_dsde.py"),
 }
 
 
