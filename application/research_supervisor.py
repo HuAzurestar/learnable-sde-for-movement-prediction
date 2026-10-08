@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 import threading
+from contextlib import ExitStack
 
 from infrastructure.process_tree import ProcessTree
 from infrastructure.research_store import ResearchError, ResearchStore
@@ -200,20 +201,13 @@ class ResearchSupervisor:
             if frame is None and warned:
                 record_checkpoint_request()
                 return False
-            # REQUEST, fresh budget and ready-response/save share one short
-            # initial/final physical scope, never an idle/poll approval. Ordinary
-            # REQUEST keeps its immediate durable head. The checkpoint-only
-            # MANIFEST/CHECKPOINT/SAVED heads still finish before uncached final
-            # checks. Every event fsync remains real; ACK stays outside.
-            with self.store._checkpoint_publication():
-                record_checkpoint_request()
+            # Share only this first REQUEST's owned read prefix with a ready
+            # SAVE, never an earlier permission/budget decision. Missing IPC
+            # must not enter checkpoint publication at all.
+            with ExitStack() as phases:
                 if frame is None:
-                    # Only the first durable REQUEST needs this phase when
-                    # IPC was initially absent. Its immediate head is unchanged.
-                    # Receive afresh after publication, then share this OWNED
-                    # phase's physical prefix, never an earlier budget decision.
-                    # All original final physical/authority guards still finish
-                    # before ACK, including when this response changes authority.
+                    phases.enter_context(self.store._read_transaction())
+                    record_checkpoint_request()  # Immediate durable head.
                     if past_deadline():
                         return False
                     try:
@@ -222,13 +216,18 @@ class ResearchSupervisor:
                         raise ResearchError("CONTRACT_MISMATCH", str(exc)) from exc
                     if frame is None:
                         return False
-                def check_current_budget():
-                    nonlocal budget_stop_requested
-                    budget_stop_requested |= self.budget.balance(run["arm_id"])["closed"]
-                check_current_budget()
-                # Hold/closure can change during actual publication. Recheck
-                # after the final uncached physical pass, before any ACK.
-                self.store._read_completion(check_current_budget, lambda: None)
+                # Actual ready IPC alone enters publication. Original final
+                # physical/budget/expiry checks finish after this head and
+                # AFTER the outer read phase, before ACK outside both scopes.
+                with self.store._checkpoint_publication():
+                    record_checkpoint_request()
+                    def check_current_budget():
+                        nonlocal budget_stop_requested
+                        budget_stop_requested |= self.budget.balance(run["arm_id"])["closed"]
+                    check_current_budget()
+                    # Hold/closure can change during actual publication. Recheck
+                    # after the final uncached physical pass, before any ACK.
+                    self.store._read_completion(check_current_budget, lambda: None)
                 if budget_stop_requested or past_deadline():
                     return True
                 # The response read may publish a closure/hold. The initial

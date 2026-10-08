@@ -1,10 +1,10 @@
-"""First durable request shares its owned save phase, not a budget decision.
+"""REQUEST is a read scope; only actual ready IPC starts checkpoint publication.
 
-Retain the existing independently registered600-step/6s ordering control with
-its one explicitly suppressed first IPC poll. No clock/native result/authority
-is replaced. Original300-step/3s/6s acceptance remains untouched.
+The initial ce85 control overconstrained REQUEST to checkpoint_head presence.
+This stricter separation retains shared physical-prefix identity and requires
+that REQUEST be durable WITHOUT granting checkpoint publication. Original
+missing/invalid/closed/hold/native300-step tests are untouched.
 """
-from application.research_budget import BudgetSpec
 from infrastructure.research_control import CheckpointExchange
 from infrastructure.research_store import ResearchStore
 from tests.test_research_checkpoint_request_rereceive import (
@@ -12,7 +12,7 @@ from tests.test_research_checkpoint_request_rereceive import (
 )
 
 
-def test_first_missing_response_request_uses_the_original_owned_save_phase(tmp_path, monkeypatch):
+def test_first_missing_response_request_uses_the_original_owned_read_scope(tmp_path, monkeypatch):
     original_append = ResearchStore._append
     original_ack = CheckpointExchange.acknowledge
     requests, saved, acknowledged = [], [], []
@@ -28,8 +28,6 @@ def test_first_missing_response_request_uses_the_original_owned_save_phase(tmp_p
         return result
 
     def acknowledge(exchange, artifact_id):
-        # Actual durable request and save must have completed their original
-        # final physical pass before the real ACK, not inside a retained scope.
         assert requests and saved
         assert requests[0][0]._read_snapshot() is None
         acknowledged.append(artifact_id)
@@ -39,14 +37,14 @@ def test_first_missing_response_request_uses_the_original_owned_save_phase(tmp_p
     monkeypatch.setattr(CheckpointExchange, "acknowledge", acknowledge)
     original_control(tmp_path, monkeypatch, "ready")
 
-    # Assert only AFTER the original native stop/settlement and its ordering,
-    # costs/one-request checks; never abort the worker to manufacture success.
+    # AFTER actual native stop, real funded settlement and original order/
+    # refusal checks: do not manufacture any native result to satisfy this.
     assert len(requests) == len(saved) == len(acknowledged) == 1
     request, checkpoint = requests[0], saved[0]
-    assert request[1] is not None and request[2] is not None, (
-        "first durable REQUEST made a separate prefix read before the actual save phase")
-    assert request[1] is checkpoint[1] and request[2] is checkpoint[2], (
-        "first REQUEST and actual SAVE did not share one owned physical phase")
+    assert request[1] is not None, "first REQUEST lost its owned physical read prefix"
+    assert request[1] is checkpoint[1], "REQUEST/SAVE repeated independent physical prefixes"
+    assert request[2] is None, "missing-response REQUEST incorrectly started checkpoint publication"
+    assert checkpoint[2] is not None, "actual ready SAVE lost its checkpoint publication scope"
     store = request[0]
     events = store.events()
     assert [event["payload"]["artifact_id"] for event in events
