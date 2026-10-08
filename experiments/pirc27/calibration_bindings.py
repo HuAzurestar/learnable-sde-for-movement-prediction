@@ -154,15 +154,24 @@ class StudyCalibration:
 
 
 def require_consumer_support(spec, cell):
-    """Temporary fail-closed boundary until settled consumer/export is wired.
-
-    Reject stripped bindings as well as present ones before store access. A
-    declared numeric threshold must not enter the legacy generic admission.
-    """
+    """Validate declarations pre-store; hashes never grant source authority."""
     from infrastructure.research_store import ResearchError
     axes = spec.get("propagation_design", {}).get("axis_manifest", {})
     functionals = axes.get("functionals", [])
     calibrated = any(type(f) is dict and f.get("functional_id") == cell.get("functional_id")
         and f.get("target_probability") is not None for f in functionals)
-    if "calibration_binding" in cell or calibrated:
-        raise ResearchError("UNQUALIFIED", "calibrated geometry requires settled consumer and independent export support")
+    if "calibration_binding" not in cell and not calibrated:
+        return None
+    try:
+        _require(calibrated and "calibration_binding" in cell, "stripped or orphan calibrated binding")
+        from .preparation import registered_design
+        registered_design(spec)
+        _require(sum(c == cell for c in spec["cells"]) == 1, "consumer cell absent or duplicated")
+        entry = StudyCalibration.from_manifest(cell["calibration_binding"]).manifest()
+        _require(entry["status"] == "CALIBRATED" and entry["consumer_study_id"] == spec["study_id"],
+            "complete calibrated consumer required")
+        return entry
+    except (KeyError, TypeError, ValueError, OverflowError, RecursionError) as exc:
+        if isinstance(exc, ResearchError):
+            raise
+        raise ResearchError("UNQUALIFIED", "calibrated consumer declaration malformed") from exc

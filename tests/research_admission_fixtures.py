@@ -62,8 +62,14 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
                   upstream_ids=(), upstream_inputs=None, accepted_versions=None,
                   upstream_dependencies=None, pirc22_cutover=None, upstream_visibility="synthetic", legacy_upstream=True,
                   fixture_prefix="", input_content=b"explicit synthetic plugin input", primary_metrics=None,
-                  preregistration_extra=None, package_payload=None):
-    bind_fixture_execution(value, plugin, execution_config, execution_inputs)
+                  preregistration_extra=None, package_payload=None, preserve_execution=False):
+    if preserve_execution:
+        from application.research_execution import execution_plan
+        for cell in value["cells"]:
+            if cell.get("plugin_id") == plugin.plugin_id:
+                execution_plan(value, cell, plugin)
+    else:
+        bind_fixture_execution(value, plugin, execution_config, execution_inputs)
     # Explicit engineering-only frozen metadata. These synthetic attestations
     # never claim acceptance of real PIRC-19--22 inputs or grant data access.
     if upstream_inputs is None:

@@ -164,6 +164,8 @@ def _require_current_export_grants(store, grants):
 
 def _fresh_export_authority(store, bundle, authorization):
     spec = store.manifest("study-" + bundle["study_id"])["spec"]
+    from .probability_calibration_consumption import require_calibration_export_support
+    require_calibration_export_support(spec)
     if spec != bundle["registered_spec"] or digest(spec) != bundle["spec_hash"]:
         raise ResearchError("CORRUPT_ARTIFACT", "export study source binding changed")
     if not {cell["block_id"] for cell in spec["cells"]} <= set(authorization["block_ids"]):
@@ -202,6 +204,8 @@ def authorize_evidence_publication(store, bundle, authorization):
 
 def _assemble_evidence(store, study_id, authorization):
     spec = store.manifest("study-" + study_id)["spec"]
+    from .probability_calibration_consumption import require_calibration_export_support
+    require_calibration_export_support(spec)
     if not {c["block_id"] for c in spec["cells"]} <= set(authorization["block_ids"]):
         raise ResearchError("UNAUTHORIZED_DATA", "export does not cover the complete study matrix")
     require_export_visibility(store, spec, [], authorization)

@@ -119,7 +119,9 @@ class AdmissionGate:
         from experiments.pirc25.upstream import audit_inputs
         from experiments.pirc27.calibration_bindings import require_consumer_support
 
-        require_consumer_support(spec, cell)
+        calibration = require_consumer_support(spec, cell)
+        if calibration is not None and builtin_fixture:
+            raise ResearchError("UNQUALIFIED", "calibrated geometry requires a settled consumer, not the builtin fixture")
 
         if spec["code_hash"] != code_hash():
             raise ResearchError("CONTRACT_MISMATCH", "execution code differs from registered code hash")
@@ -284,6 +286,10 @@ class AdmissionGate:
                 documents["preregistration_event"] = next(event for event in self.store.events()
                     if event["event_kind"] == "MANIFEST" and
                     event["payload"]["object_id"] == "preregistration-" + protocol["preregistration_hash"])
+            from .probability_calibration_consumption import prepare_calibrated_consumer
+            if calibration is not None:
+                documents["probability_calibration"] = prepare_calibrated_consumer(
+                    self.store, spec, cell, preregistration=documents.get("preregistration"))
             if mode == "formal":
                 if (block["split_role"] not in {"test", "final-eval"} or gate_evidence["test_mode"] != "blind"
                         or package.get("preregistration_hash") != protocol["preregistration_hash"]
@@ -346,6 +352,10 @@ class AdmissionGate:
                 qualified = documents["propagation_qualification"]
                 self.store.verify_artifact_read(qualified["source_artifact"]["artifact_id"],
                     purpose="evaluate", authorization=qualified["authorization"])
+            if "probability_calibration" in documents:
+                calibrated = documents["probability_calibration"]
+                self.store.verify_artifact_read(calibrated["source_artifact"]["artifact_id"],
+                    purpose="evaluate", authorization=calibrated["authorization"])
         receipt["admission_hash"] = digest(receipt)
         self.store.publish("admission-" + receipt["admission_hash"], receipt)
         self.store.append("ADMISSION", {"attempt_id": attempt_id, "run_id": run["run_id"],
@@ -376,6 +386,8 @@ class AdmissionGate:
                     raise ResearchError("UNQUALIFIED", "result metric definition/unit differs from frozen adjudication policy")
             if result.get("qualification") != receipt["qualification"]:
                 raise ResearchError("UNQUALIFIED", "worker cannot change admitted qualification")
+            from .probability_calibration_consumption import validate_calibrated_result
+            validate_calibrated_result(self.store, receipt, spec, cell, result)
             if "propagation_qualification" in receipt.get("documents", {}):
                 if plugin.plugin_id == "affine-cubature":
                     from .cubature_qualification_admission import validate_formal_cubature_result

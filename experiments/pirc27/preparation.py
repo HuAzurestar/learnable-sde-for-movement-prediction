@@ -93,67 +93,97 @@ def reload_design(path, *, expected_hash):
             and document["qualification"] == "preparation-only-not-scientific", "unsupported frozen design schema")
         from experiments.pirc25.affine import code_hash
         _require(document["code_hash"] == code_hash(), "frozen design current source hash differs")
-        axes = document["axis_manifest"]
-        _keys(axes, {"models", "methods", "functionals", "horizons", "seeds", "origin", "history_cutoff",
-            "state_names", "time_unit", "coordinate_system"}, {"input_cases", "input_policy", "calibrations"})
-        _require(("input_cases" in axes) == ("input_policy" in axes), "complete source case/policy axis required")
-        cases = tuple(_restore(StudyInputCase, value) for value in _tuple(axes.get("input_cases", [])))
-        policy = _restore(StudyInputPolicy, axes["input_policy"]) if "input_policy" in axes else None
-        _require(axes["state_names"] == ["x", "y", "vx", "vy"] and axes["time_unit"] == "s"
-            and axes["coordinate_system"] == "local-cartesian", "only two-dimensional four-state SI motion is supported")
-        models = []
-        for value in _tuple(axes["models"]):
-            _keys(value, {"family_id", "package", "initial_mean", "initial_covariance"}, {"configuration_id"})
-            package = value["package"]
-            _require(type(package) is dict, "explicit frozen synthetic package required")
-            package_type = {"frozen-affine-dynamics-v1": FrozenDynamicsPackage,
-                "frozen-tanh-dynamics-v1": FrozenNonlinearPackage}.get(package.get("schema_version"))
-            _require(package_type is not None, "unsupported frozen synthetic package")
-            models.append(StudyModel(value["family_id"],
-                package_type.from_manifest(package, expected_hash=content_hash(package)),
-                _tuple(value["initial_mean"], exact=4),
-                tuple(_tuple(row, exact=4) for row in _tuple(value["initial_covariance"], exact=4)),
-                value.get("configuration_id")))
-        methods = []
-        for value in _tuple(axes["methods"]):
-            _keys(value, {f.name for f in fields(StudyMethod)} - {"configuration_id", "horizon_steps"},
-                {"configuration_id", "horizon_steps"})
-            value = {**value, "level_samples": _tuple(value["level_samples"], maximum=9),
-                "proposal": _tuple(value["proposal"], exact=2),
-                "horizon_steps": tuple(_tuple(pair, exact=2) for pair in _tuple(value.get("horizon_steps", [])))}
-            if value["mixture_settings"] is not None:
-                settings = value["mixture_settings"]
-                _keys(settings, {f.name for f in fields(MixtureSettings)})
-                value["mixture_settings"] = MixtureSettings(**{**settings,
-                    "state_scales": _tuple(settings["state_scales"], exact=4)})
-            methods.append(StudyMethod(**value))
-        functionals = []
-        for value in _tuple(axes["functionals"]):
-            _keys(value, {f.name for f in fields(StudyFunctional)} - {"target_probability"}, {"target_probability"})
-            functionals.append(StudyFunctional(**{**value, "normal": _tuple(value["normal"], exact=4)}))
-        arms = []
-        for value in _tuple(document["arms"], maximum=10000):
-            _keys(value, {f.name for f in fields(StudyArm)} | {"budget_seconds"})
-            _require(type(value["budget_seconds"]) is int and value["budget_seconds"] == 86400,
-                "original cumulative arm budget differs")
-            arms.append(StudyArm(**{k: v for k, v in value.items() if k != "budget_seconds"}))
         count = document["expected_cells"]
         _require(type(count) is int and 0 < count <= 10000 and type(document["matrix"]) is list
             and len(document["matrix"]) == count, "complete bounded registered matrix required")
-        design = PropagationStudyDesign(document["study_id"], document["experiment_id"], document["comparison_family"],
-            tuple(models), tuple(methods), tuple(functionals), _tuple(axes["horizons"]), _tuple(axes["seeds"]),
-            tuple(arms), *(document[k] for k in ("protocol_hash", "data_hash", "feature_hash", "selection_hash")),
-            origin=axes["origin"], history_cutoff=axes["history_cutoff"], stopping_rule=document["stopping_rule"],
-            primary_metrics=_tuple(document["primary_metrics"]), input_cases=cases, input_policy=policy,
-            calibrations=tuple(StudyCalibration.from_manifest(value)
-                for value in _tuple(axes.get("calibrations", []), maximum=10000)))
-        frozen = freeze_design(design)
+        frozen = freeze_design(_design_from_document(document))
         _require(frozen.manifest_hash == expected_hash, "frozen design differs from regenerated compiler output")
         return frozen
     except (KeyError, TypeError, ValueError, OverflowError, RecursionError) as exc:
         if isinstance(exc, ResearchError):
             raise
         raise ResearchError("CONTRACT_MISMATCH", "invalid complete four-state frozen design") from exc
+
+
+def _design_from_document(document):
+    """Restore typed axes for both file reload and registered consumers."""
+    axes = document["axis_manifest"]
+    _keys(axes, {"models", "methods", "functionals", "horizons", "seeds", "origin", "history_cutoff",
+        "state_names", "time_unit", "coordinate_system"}, {"input_cases", "input_policy", "calibrations"})
+    _require(("input_cases" in axes) == ("input_policy" in axes), "complete source case/policy axis required")
+    cases = tuple(_restore(StudyInputCase, value) for value in _tuple(axes.get("input_cases", [])))
+    policy = _restore(StudyInputPolicy, axes["input_policy"]) if "input_policy" in axes else None
+    _require(axes["state_names"] == ["x", "y", "vx", "vy"] and axes["time_unit"] == "s"
+        and axes["coordinate_system"] == "local-cartesian", "only two-dimensional four-state SI motion is supported")
+    models = []
+    for value in _tuple(axes["models"]):
+        _keys(value, {"family_id", "package", "initial_mean", "initial_covariance"}, {"configuration_id"})
+        package = value["package"]
+        _require(type(package) is dict, "explicit frozen synthetic package required")
+        package_type = {"frozen-affine-dynamics-v1": FrozenDynamicsPackage,
+            "frozen-tanh-dynamics-v1": FrozenNonlinearPackage}.get(package.get("schema_version"))
+        _require(package_type is not None, "unsupported frozen synthetic package")
+        models.append(StudyModel(value["family_id"],
+            package_type.from_manifest(package, expected_hash=content_hash(package)),
+            _tuple(value["initial_mean"], exact=4),
+            tuple(_tuple(row, exact=4) for row in _tuple(value["initial_covariance"], exact=4)),
+            value.get("configuration_id")))
+    methods = []
+    for value in _tuple(axes["methods"]):
+        _keys(value, {f.name for f in fields(StudyMethod)} - {"configuration_id", "horizon_steps"},
+            {"configuration_id", "horizon_steps"})
+        value = {**value, "level_samples": _tuple(value["level_samples"], maximum=9),
+            "proposal": _tuple(value["proposal"], exact=2),
+            "horizon_steps": tuple(_tuple(pair, exact=2) for pair in _tuple(value.get("horizon_steps", [])))}
+        if value["mixture_settings"] is not None:
+            settings = value["mixture_settings"]
+            _keys(settings, {f.name for f in fields(MixtureSettings)})
+            value["mixture_settings"] = MixtureSettings(**{**settings,
+                "state_scales": _tuple(settings["state_scales"], exact=4)})
+        methods.append(StudyMethod(**value))
+    functionals = []
+    for value in _tuple(axes["functionals"]):
+        _keys(value, {f.name for f in fields(StudyFunctional)} - {"target_probability"}, {"target_probability"})
+        functionals.append(StudyFunctional(**{**value, "normal": _tuple(value["normal"], exact=4)}))
+    arms = []
+    for value in _tuple(document["arms"], maximum=10000):
+        _keys(value, {f.name for f in fields(StudyArm)} | {"budget_seconds"})
+        _require(type(value["budget_seconds"]) is int and value["budget_seconds"] == 86400,
+            "original cumulative arm budget differs")
+        arms.append(StudyArm(**{k: v for k, v in value.items() if k != "budget_seconds"}))
+    return PropagationStudyDesign(document["study_id"], document["experiment_id"], document["comparison_family"],
+        tuple(models), tuple(methods), tuple(functionals), _tuple(axes["horizons"]), _tuple(axes["seeds"]),
+        tuple(arms), *(document[k] for k in ("protocol_hash", "data_hash", "feature_hash", "selection_hash")),
+        origin=axes["origin"], history_cutoff=axes["history_cutoff"], stopping_rule=document["stopping_rule"],
+        primary_metrics=_tuple(document["primary_metrics"]), input_cases=cases, input_policy=policy,
+        calibrations=tuple(StudyCalibration.from_manifest(value)
+            for value in _tuple(axes.get("calibrations", []), maximum=10000)))
+
+
+def registered_design(spec):
+    """Regenerate the complete registered matrix before consuming a region."""
+    from application.probability_calibration_admission import _bounded
+    from infrastructure.research_store import encode
+    design = spec["propagation_design"]
+    _bounded(design, nodes=2000000, depth_limit=30, string_limit=16384)
+    _bounded(spec["cells"], nodes=2000000, depth_limit=30, string_limit=16384)
+    _bounded(spec["arms"], nodes=100000, depth_limit=8, string_limit=256)
+    _require(len(encode(design)) + len(encode(spec["cells"])) + len(encode(spec["arms"])) <= MAX_MANIFEST_BYTES,
+        "registered calibrated design exceeds byte quota")
+    _keys(design, {"schema_version", "axis_manifest", "expected_cells", "stopping_rule", "primary_metrics"})
+    _require(design["schema_version"] == "propagation-study-manifest-v1"
+        and type(design["expected_cells"]) is int and 0 < design["expected_cells"] <= 10000
+        and type(spec["cells"]) is list and len(spec["cells"]) == design["expected_cells"],
+        "complete bounded registered calibrated matrix required")
+    document = {**design, **{key: spec[key] for key in ("study_id", "experiment_id", "comparison_family",
+        "protocol_hash", "data_hash", "feature_hash", "selection_hash", "arms")}}
+    frozen = freeze_design(_design_from_document(document))
+    _require(frozen.manifest_hash == spec.get("propagation_design_hash"),
+        "registered calibrated design differs from regenerated compiler output")
+    expected = frozen.study_spec(expected_hash=frozen.manifest_hash)
+    _require(all(spec.get(key) == value for key, value in expected.items()),
+        "registered calibrated cells/axes differ from complete compiler output")
+    return frozen
 
 
 def load_connection(path, *, expected_hash):
