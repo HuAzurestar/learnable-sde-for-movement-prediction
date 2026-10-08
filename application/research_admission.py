@@ -164,6 +164,8 @@ class AdmissionGate:
             if len(selected) != 1:
                 raise ResearchError("MISSING_INPUT", "cell block absent from frozen protocol")
             block = selected[0]
+            from experiments.pirc27.input_cases import validate_cell_input_binding
+            validate_cell_input_binding(cell, protocol_block=block, selection_hash=spec.get("selection_hash"))
             if plugin.plugin_id in {"affine-mixture-chunk", "synthetic-mixture-chunk"}:
                 # A generic operator report is not a method-specific qualifier.
                 # Refuse BEFORE grant/package lookup and protected input reads.

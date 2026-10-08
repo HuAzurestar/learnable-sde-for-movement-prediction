@@ -77,6 +77,8 @@ def validate_propagation_cell(spec, cell):
         plugin = path_production_plugin()
     execution_plan(spec, cell, plugin)
     request = request_from_manifest(cell["propagation_request"])
+    from experiments.pirc27.input_cases import validate_cell_input_binding
+    validate_cell_input_binding(cell, request=request, selection_hash=spec.get("selection_hash"))
     package_type = FrozenNonlinearPackage if synthetic else FrozenDynamicsPackage
     try:
         package = package_type.from_manifest(cell["frozen_dynamics"], expected_hash=request.model_package_hash)

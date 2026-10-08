@@ -223,6 +223,43 @@ matrix and exercises the unchanged paired paper aggregator: all region/method/
 horizon/seed rows and reasons survive, with zero successful independent blocks.
 Those disposable engineering exports are not formal research evidence.
 
+## Frozen source blocks and one preselected input instance
+
+`PropagationStudyDesign.input_cases` optionally binds up to64 immutable
+`StudyInputCase` declarations and one `StudyInputPolicy`. Each declaration
+retains dataset/release, original source-block/content digest, block/instance
+identity, exact four-state initial law and origin/history cutoff. The complete
+policy binds initialization/origin procedures and the study's selection hash.
+Only `one-preselected-instance-per-source-block` is currently supported: several
+windows of one source are refused, including release/dataset renames caught by
+the shared conservative source-identity rule. No extra independent units or
+budget arms are created by seeds, configurations or instances.
+
+With explicit cases, the case supplies each request's actual initial law and
+origin (model/default design initializations remain legacy defaults only).
+Comparison strata explicitly use the frozen common initialization/origin policy,
+not an unannounced deletion of case identity. Dataset/release/source kind/split
+remain population strata; exact input values remain in the immutable case and
+request. Method coupling and request identity bind the complete case/policy.
+The original model/method/objective arm and86400s cumulative cap are unchanged.
+
+The complete model×method×functional×horizon×seed×case matrix is bounded before
+copying/expansion, including a larger conservative byte allowance for cases.
+Owner validation checks case/request/dimensions/selection identity; actual
+shared admission additionally matches the original protocol source before grant,
+package or data access. Reload reconstructs every case, policy and matrix row,
+not just a rehashed declaration. Empty optional case fields are omitted for
+legacy manifest/request compatibility.
+
+These are `declared-only-not-scientific` inputs: metadata and matching hashes
+do not establish independence, lawful access, causal past-only initialization,
+unknown exposure history or numerical qualification. `private-past-prefix`
+declarations are restricted, explicit INELIGIBLE rows until a real admitted
+past-only adapter exists. They are never relabeled synthetic or executed by the
+current synthetic adapter; method-specific unavailability such as PDE is retained.
+`synthetic-recipe` declarations still require ordinary registration, grants,
+preregistration and method-specific owner qualification before research.
+
 ## Frozen horizon-specific grids
 
 `StudyMethod.horizon_steps` optionally fixes an immutable tuple of

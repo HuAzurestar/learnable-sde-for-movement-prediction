@@ -21,6 +21,7 @@ from infrastructure.research_store import identifier
 
 from .oracles import matrix_cardinality
 from .plugin import propagation_plugin, execution_config, execution_inputs
+from .input_cases import StudyInputCase, StudyInputPolicy, validate_cases, input_binding
 
 
 METHODS = frozenset({"exact", "gaussian", "euler", "heun", "mlmc", "importance",
@@ -88,6 +89,8 @@ class PropagationStudyDesign:
     history_cutoff: float = 0.0
     stopping_rule: str = "fixed-design-no-auto-expansion"
     primary_metrics: tuple[str, ...] = ("functional-estimate", "sampling-uncertainty", "charged-slot-ms")
+    input_cases: tuple[StudyInputCase, ...] = ()
+    input_policy: StudyInputPolicy | None = None
 
 
 @dataclass(frozen=True)
@@ -160,15 +163,19 @@ def _model_manifest(model):
     return value
 
 
-def _request(design, model, method, functional, horizon, seed, arm_id):
+def _request(design, model, method, functional, horizon, seed, arm_id, case=None):
+    initial = case if case is not None else model
+    origin, cutoff = (case.origin, case.history_cutoff) if case is not None else (design.origin, design.history_cutoff)
     paired = {"model_package_hash": model.package.package_hash,
-              "initial_mean": model.initial_mean, "initial_covariance": model.initial_covariance,
-              "origin": design.origin, "history_cutoff": design.history_cutoff,
+              "initial_mean": initial.initial_mean, "initial_covariance": initial.initial_covariance,
+              "origin": origin, "history_cutoff": cutoff,
               "horizon": horizon, "functional": asdict(functional), "seed": seed}
+    if case is not None:
+        paired["input_binding_hash"] = input_binding(case, design.input_policy)["binding_hash"]
     coupling_id = "paired-" + content_hash(paired)
     request_id = "cell-" + content_hash({"paired": paired, "method": _method_manifest(method), "arm": arm_id})
-    return PropagationRequest(request_id, model.package.package_hash, model.initial_mean, model.initial_covariance,
-        design.origin, design.history_cutoff, (horizon,), functional.kind, seed, coupling_id, arm_id,
+    return PropagationRequest(request_id, model.package.package_hash, initial.initial_mean, initial.initial_covariance,
+        origin, cutoff, (horizon,), functional.kind, seed, coupling_id, arm_id,
         steps=_steps(method, horizon), samples=method.samples, chunk_size=method.chunk_size, normal=functional.normal,
         threshold=functional.threshold, closed=functional.closed, tolerance=functional.tolerance)
 
@@ -202,19 +209,24 @@ def freeze_design(design):
         values = getattr(design, name)
         if type(values) is not tuple or not 0 < len(values) <= 64:
             raise DataValidationError("invalid bounded immutable " + name + " axis")
+    if type(design.input_cases) is not tuple or len(design.input_cases) > 64:
+        raise DataValidationError("bounded immutable input case axis required")
     count = matrix_cardinality(tuple(len(getattr(design, name)) for name in
-                                    ("models", "methods", "functionals", "horizons", "seeds")))
+                                    ("models", "methods", "functionals", "horizons", "seeds"))
+                                + (len(design.input_cases) or 1,))
     # The byte quota is independent of cell count. Conservative per-cell bound
     # includes the repeated package and bounded request/execution/row metadata.
     if any(type(model.package) not in (FrozenDynamicsPackage, FrozenNonlinearPackage) for model in design.models):
         raise DataValidationError("only explicit frozen synthetic packages are supported")
-    if count * (max(len(model.package._document) for model in design.models) + 8192) > MAX_MANIFEST_BYTES:
+    per_cell_bytes = 12288 if design.input_cases else 8192
+    if count * (max(len(model.package._document) for model in design.models) + per_cell_bytes) > MAX_MANIFEST_BYTES:
         raise DataValidationError("design exceeds bounded manifest byte quota before expansion")
     for value in (design.study_id, design.experiment_id, design.comparison_family):
         identifier(value)
     if any(not _hash(getattr(design, key)) for key in
            ("protocol_hash", "data_hash", "feature_hash", "selection_hash")):
         raise DataValidationError("study requires explicit frozen input/protocol hashes")
+    validate_cases(design.input_cases, design.input_policy, selection_hash=design.selection_hash)
     if (not _finite(design.origin) or not _finite(design.history_cutoff) or design.history_cutoff > design.origin
             or design.stopping_rule != "fixed-design-no-auto-expansion"
             or type(design.primary_metrics) is not tuple or not 0 < len(design.primary_metrics) <= 16):
@@ -334,6 +346,10 @@ def freeze_design(design):
     import numpy as np
     plugins = {}
     model_configs = []
+    for case in design.input_cases:
+        covariance = _covariance(case.initial_covariance, "frozen case covariance").numpy()
+        if np.linalg.eigvalsh(covariance).min() < 0:
+            raise DataValidationError("input covariance requires projection; design refuses it")
     for model in design.models:
         validator = validate_nonlinear_input if isinstance(model.package, FrozenNonlinearPackage) else validate_oracle_input
         validator(model.package, expected_package_hash=model.package.package_hash)
@@ -344,7 +360,8 @@ def freeze_design(design):
         # bounded validated inputs numerically so initial scalar aliases cannot
         # disguise repeated configurations of the exact same frozen package.
         model_config = (model.family_id, model.package.package_hash,
-                        model.initial_mean, model.initial_covariance)
+                        None if design.input_cases else model.initial_mean,
+                        None if design.input_cases else model.initial_covariance)
         if model_config in model_configs:
             raise DataValidationError("duplicate model configuration under different labels")
         model_configs.append(model_config)
@@ -381,11 +398,13 @@ def freeze_design(design):
             execution_binding(plugins[key].registry_entry, config, execution_inputs(request), matrix_cells=count)
     from experiments.pirc25.affine import code_hash
     rows = []
-    for model, method, functional, horizon, seed in product(design.models, design.methods, design.functionals,
-                                                          design.horizons, design.seeds):
+    for model, method, functional, horizon, seed, case in product(design.models, design.methods, design.functionals,
+                                                          design.horizons, design.seeds, design.input_cases or (None,)):
         arm_id = arms[(model.family_id, method.method, functional.kind)]
-        request = _request(design, model, method, functional, horizon, seed, arm_id)
+        request = _request(design, model, method, functional, horizon, seed, arm_id, case)
         disposition, reason = _disposition(model, method)
+        if case is not None and case.source_kind == "private-past-prefix" and disposition == "PLANNED":
+            disposition, reason = "INELIGIBLE", "no admitted past-only source initialization adapter; source declaration is not read authority"
         row = {"row_id": request.request_id, "model_family_id": model.family_id, "method": method.method,
                "functional_id": functional.functional_id, "horizon": horizon, "seed": seed,
                "arm_id": arm_id, "disposition": disposition, "reason": reason,
@@ -403,10 +422,21 @@ def freeze_design(design):
         if configured_models:
             row["model_configuration_id"] = model.configuration_id
             dimensions["model_configuration"] = model.configuration_id
-        row["cell"] = {"arm_id": arm_id, "block_id": model.family_id, "seed": seed, "horizon": horizon,
-                       "visibility": "synthetic", "frozen_dynamics": model.package.manifest(),
+        if case is not None:
+            dimensions.update(input_policy=design.input_policy.policy_hash,
+                initialization={"policy_hash": design.input_policy.initialization_policy_hash},
+                prediction_origin={"policy_hash": design.input_policy.origin_policy_hash},
+                input_population={"dataset_id": case.dataset_id, "release_id": case.release_id,
+                    "source_kind": case.source_kind, "split_role": case.split_role})
+        row["cell"] = {"arm_id": arm_id, "block_id": case.block_id if case is not None else model.family_id,
+                       "seed": seed, "horizon": horizon,
+                       "visibility": "restricted" if case is not None and case.source_kind == "private-past-prefix" else "synthetic",
+                       "frozen_dynamics": model.package.manifest(),
                        "propagation_request": json.loads(_encode(asdict(request))), "resource_class": "cpu",
                        "functional_id": functional.functional_id, "comparison_dimensions": dimensions}
+        if case is not None:
+            row["input_case_id"] = case.instance_id
+            row["cell"].update(instance_id=case.instance_id, input_binding=input_binding(case, design.input_policy))
         if disposition == "PLANNED":
             synthetic = isinstance(model.package, FrozenNonlinearPackage)
             plugin = plugins[(synthetic, method.recovery, method.method == "mixture")]
@@ -434,6 +464,9 @@ def freeze_design(design):
             "horizons": design.horizons, "seeds": design.seeds, "origin": design.origin, "history_cutoff": design.history_cutoff,
             "state_names": ("x", "y", "vx", "vy"), "time_unit": "s", "coordinate_system": "local-cartesian"},
         "arms": [{**asdict(arm), "budget_seconds": 86400} for arm in design.arms], "matrix": rows}
+    if design.input_cases:
+        document["axis_manifest"].update(input_cases=[case.manifest() for case in design.input_cases],
+            input_policy=design.input_policy.manifest())
     encoded = _encode(document)
     if len(encoded) > MAX_MANIFEST_BYTES:
         raise DataValidationError("compiled manifest exceeds byte quota")
