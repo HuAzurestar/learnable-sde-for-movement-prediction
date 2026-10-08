@@ -45,6 +45,21 @@ def admission_visibility(manifest, receipt):
     if "upstream_snapshot" in documents:
         upstream = documents["upstream_snapshot"]
         labels.append(upstream_metadata_visibility(upstream["snapshot"], upstream["acceptance_catalog"]))
+    if "propagation_qualification" in documents:
+        evidence = documents["propagation_qualification"]
+        metadata = evidence["source_artifact"]
+        labels.append(metadata.get("visibility", "restricted"))
+        labels.append(manifest("artifact-"+metadata["artifact_id"])["visibility"])
+    if "probability_calibration" in documents:
+        evidence = documents["probability_calibration"]
+        source = evidence["source_admission"]
+        if "probability_calibration" in source.get("documents", {}):
+            raise ResearchError("CONTRACT_MISMATCH", "nested calibration source admission is unsupported")
+        metadata = evidence["source_artifact"]
+        labels.append(metadata.get("visibility", "restricted"))
+        labels.append(manifest("artifact-"+metadata["artifact_id"])["visibility"])
+        labels.append(study_visibility(manifest, source["spec"]))
+        labels.append(admission_visibility(manifest, source))
     return combine_visibility(labels)
 
 
@@ -63,21 +78,35 @@ def study_visibility(manifest, spec):
                 if digest(snapshot) != snapshot_hash or digest(catalog) != catalog_hash:
                     raise ResearchError("CONTRACT_MISMATCH", "source upstream metadata binding differs")
                 labels.append(upstream_metadata_visibility(snapshot, catalog))
-        reference = settings.get("package_hash")
-        seen = set()
-        while reference:
-            if reference in seen or len(seen) >= 32:
-                raise ResearchError("CONTRACT_MISMATCH", "source lineage is cyclic or too deep")
-            seen.add(reference)
-            package = manifest("package-" + reference)
-            if digest(package) != reference:
-                raise ResearchError("CONTRACT_MISMATCH", "source package binding differs")
-            labels.append(package.get("visibility", "restricted"))
-            if package.get("qualification_hash"):
-                report = manifest("qualification-" + package["qualification_hash"])
-                if digest(report) != package["qualification_hash"]:
-                    raise ResearchError("CONTRACT_MISMATCH", "source qualification binding differs")
-                for check in report.get("checks", []):
-                    labels.append(manifest("artifact-" + check["artifact_id"])["visibility"])
-            reference = package.get("model_hash") if package.get("requires_frozen_model") else None
+        from .research_admission_selection import admission_package_references
+        visits = 0
+        for reference in admission_package_references(spec):
+            seen = set()
+            while reference:
+                visits += 1
+                if visits > 10000:
+                    raise ResearchError("TOO_LARGE", "study package lineage exceeds bounded metadata visits")
+                reference = _package_lineage_visibility(manifest, reference, seen, labels)
     return combine_visibility(labels)
+
+
+def _package_lineage_visibility(manifest, reference, seen, labels):
+    if reference in seen or len(seen) >= 32:
+        raise ResearchError("CONTRACT_MISMATCH", "source lineage is cyclic or too deep")
+    seen.add(reference)
+    package = manifest("package-" + reference)
+    if digest(package) != reference:
+        raise ResearchError("CONTRACT_MISMATCH", "source package binding differs")
+    labels.append(package.get("visibility", "restricted"))
+    pointer = package.get("payload", {}).get("managed_analytic_qualification")
+    if pointer is not None:
+        if type(pointer) is not dict or not isinstance(pointer.get("source_artifact_id"), str):
+            raise ResearchError("CONTRACT_MISMATCH", "analytic qualification lineage pointer malformed")
+        labels.append(manifest("artifact-"+pointer["source_artifact_id"])["visibility"])
+    if package.get("qualification_hash"):
+        report = manifest("qualification-" + package["qualification_hash"])
+        if digest(report) != package["qualification_hash"]:
+            raise ResearchError("CONTRACT_MISMATCH", "source qualification binding differs")
+        for check in report.get("checks", []):
+            labels.append(manifest("artifact-" + check["artifact_id"])["visibility"])
+    return package.get("model_hash") if package.get("requires_frozen_model") else None

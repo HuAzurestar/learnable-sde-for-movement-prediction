@@ -63,6 +63,12 @@ class BudgetLedger:
                 raise ResearchError("MISSING_INPUT", "attempt not registered")
             attempt = attempts[attempt_id]
             run = self.store._manifest("run-" + attempt["run_id"])
+            from .research_disposition import declared_execution_disposition
+            declaration = declared_execution_disposition(run["cell"])
+            if declaration is not None:
+                if attempt["state"] == "REGISTERED":
+                    self.store._transition(attempt_id, "PREFLIGHT_FAILED", error_code=declaration["status"])
+                raise ResearchError(declaration["status"], "registered cell is declared non-executable")
             reservation_id = digest([self.store.store_id, attempt_id])
             requested = math.ceil(budget.job_seconds * 1000)
             reservations, _ = self._state()

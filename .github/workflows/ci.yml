@@ -42,7 +42,11 @@ jobs:
     # Keep these check names aligned with the required status contexts on main.
     name: test (${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Covers dependency installation plus the complete version-specific suite.
+    # The preceding matrix's test steps alone took 24-25 minutes, before the
+    # additional source-owner, independent-reader and formal-restore controls.
+    # Shared research/fixture worker budgets and watchdog deadlines are separate.
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: PSDE-SDE
@@ -58,7 +62,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: HuAzurestar/learnable-sde-paper-to-predict-movement
-          ref: 260b6c78d6f6ba5198471fc2e2edbd0c71ca442e
+          ref: c88ca3ff2b04f7c0390edbf6bbab1b3765b6758f
           path: TSDE-SDE
           persist-credentials: false
       - uses: actions/setup-python@v7

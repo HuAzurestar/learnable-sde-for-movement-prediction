@@ -14,6 +14,7 @@ from .research_contracts import validate_package, validate_result
 from .research_data import EvaluationExposureLedger
 from .research_preregistration import PreregistrationGate, hash_reference, source_identity, validate_preregistration, protocol_binding
 from infrastructure.research_store import ResearchError, digest, encode, utc_now
+from infrastructure.research_admission_selection import select_admission_package, verify_admission_selection
 
 
 def data_binding(protocol):
@@ -116,6 +117,11 @@ class AdmissionGate:
     def prepare(self, spec, cell, plugin, attempt_id, *, builtin_fixture=False, recovery_builder=None):
         from experiments.pirc25.affine import ROOT, code_hash, fixture_spec
         from experiments.pirc25.upstream import audit_inputs
+        from experiments.pirc27.calibration_bindings import require_consumer_support
+
+        calibration = require_consumer_support(spec, cell)
+        if calibration is not None and builtin_fixture:
+            raise ResearchError("UNQUALIFIED", "calibrated geometry requires a settled consumer, not the builtin fixture")
 
         if spec["code_hash"] != code_hash():
             raise ResearchError("CONTRACT_MISMATCH", "execution code differs from registered code hash")
@@ -148,7 +154,9 @@ class AdmissionGate:
             receipt.update(mode="fixture", qualification="fixture", input_kind="builtin-affine-generator",
                            upstream=audit_inputs(ROOT, required))
         else:
-            settings = spec.get("admission") or {}
+            settings, selection = select_admission_package(spec, cell)
+            if selection is not None:
+                receipt["admission_selection"] = selection
             mode = settings.get("mode")
             if mode not in {"fixture", "pilot", "formal"}:
                 raise ResearchError("MISSING_INPUT", "explicit execution admission mode required")
@@ -161,6 +169,68 @@ class AdmissionGate:
             if len(selected) != 1:
                 raise ResearchError("MISSING_INPUT", "cell block absent from frozen protocol")
             block = selected[0]
+            from experiments.pirc27.input_cases import validate_cell_input_binding
+            validate_cell_input_binding(cell, protocol_block=block, selection_hash=spec.get("selection_hash"))
+            if plugin.plugin_id in {"affine-cubature", "affine-cubature-qualification"}:
+                # A numerical qualifier never becomes a formal target. Ordinary
+                # affine targets need the dedicated owner proof below, pre-read.
+                if (plugin.plugin_id == "affine-cubature-qualification" and
+                        (mode == "formal" or block["split_role"] in {"test", "final-eval"})) or (
+                        plugin.plugin_id == "affine-cubature" and mode != "formal"
+                        and block["split_role"] in {"test", "final-eval"}):
+                    raise ResearchError("UNQUALIFIED", "affine cubature requires dedicated held-out owner qualification")
+                if plugin.plugin_id == "affine-cubature-qualification" and (
+                        mode != "pilot" or block["split_role"] not in {"train", "validation"}):
+                    raise ResearchError("UNAUTHORIZED_DATA", "cubature qualification requires train/validation pilot inputs")
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
+            if plugin.plugin_id in {"affine-mixture-chunk", "synthetic-mixture-chunk"}:
+                # A generic operator report is not a method-specific qualifier.
+                # Refuse BEFORE grant/package lookup and protected input reads.
+                if mode == "formal" or block["split_role"] in {"test", "final-eval"}:
+                    raise ResearchError("UNQUALIFIED", "bounded mixture has no dedicated held-out qualification")
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
+            if plugin.plugin_id == "affine-propagation-qualification":
+                # Numerical qualification is real pilot computation, never
+                # free preflight work and never exposure to held-out test data.
+                if mode != "pilot" or block["split_role"] not in {"train", "validation"}:
+                    raise ResearchError("UNAUTHORIZED_DATA", "analytic qualification cannot consume test/final-eval inputs")
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
+            if plugin.plugin_id == "affine-halfspace-calibration":
+                # Refuse before any grant lookup, qualification attachment or
+                # protected input. Geometry calibration is charged pilot work.
+                if mode != "pilot" or block["split_role"] not in {"train", "validation"}:
+                    raise ResearchError("UNAUTHORIZED_DATA", "probability calibration cannot consume test/final-eval inputs")
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
+            if plugin.plugin_id == "affine-mixture-qualification":
+                if mode != "pilot" or block["split_role"] not in {"train", "validation"}:
+                    raise ResearchError("UNAUTHORIZED_DATA", "mixture qualification cannot consume test/final-eval inputs")
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
+            if plugin.plugin_id == "affine-path-qualification":
+                if mode != "pilot" or block["split_role"] not in {"train", "validation"}:
+                    raise ResearchError("UNAUTHORIZED_DATA", "path qualification cannot consume test/final-eval inputs")
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
+            if plugin.plugin_id == "affine-mixture-production-chunk":
+                # Dedicated producer does not make generic/fixture mixtures
+                # eligible; validate its frozen formal registration pre-read.
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
+            if plugin.plugin_id == "affine-path-production-chunk":
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
+            if (plugin.plugin_id in {"affine-propagation-chunk", "synthetic-propagation-chunk", "affine-mlmc-qualification-chunk"}
+                    and cell.get("execution", {}).get("config", {}).get("method") == "mlmc-pilot"):
+                # BEFORE qualification artifacts or input exposure, including
+                # a caller that bypasses the propagation command builder.
+                if mode != "pilot" or block["split_role"] not in {"train", "validation"}:
+                    raise ResearchError("UNAUTHORIZED_DATA", "MLMC pilot cannot consume test/final-eval inputs")
+                from .propagation_execution import validate_propagation_cell
+                validate_propagation_cell(spec, cell)
             grant = self.store.authorization(settings["authorization_id"], version=settings.get("authorization_version"))
             if (grant["study_id"] != spec["study_id"] or grant.get("protocol_hash") != spec["protocol_hash"]
                     or "execute" not in grant["purposes"] or cell["block_id"] not in grant["block_ids"]
@@ -216,6 +286,10 @@ class AdmissionGate:
                 documents["preregistration_event"] = next(event for event in self.store.events()
                     if event["event_kind"] == "MANIFEST" and
                     event["payload"]["object_id"] == "preregistration-" + protocol["preregistration_hash"])
+            from .probability_calibration_consumption import prepare_calibrated_consumer
+            if calibration is not None:
+                documents["probability_calibration"] = prepare_calibrated_consumer(
+                    self.store, spec, cell, preregistration=documents.get("preregistration"))
             if mode == "formal":
                 if (block["split_role"] not in {"test", "final-eval"} or gate_evidence["test_mode"] != "blind"
                         or package.get("preregistration_hash") != protocol["preregistration_hash"]
@@ -228,8 +302,31 @@ class AdmissionGate:
                             or plan.get("adjudication_hash") != digest(policy)
                             or prereg.get("adjudication_spec") != policy):
                         raise ResearchError("UNQUALIFIED", "adjudication policy differs from pre-read frozen preregistration")
+                # Missing method proof must fail before even the generic
+                # qualification attachment is read, not just before target data.
+                if plugin.plugin_id == "affine-cubature":
+                    from .cubature_qualification_admission import prepare_managed_cubature
+                    documents["propagation_qualification"] = prepare_managed_cubature(
+                        self.store, spec, cell, package, prereg)
                 report, evidence = self._qualification(package, prereg, grant)
                 documents.update(qualification=report, qualification_evidence=evidence)
+                if plugin.plugin_id in {"affine-propagation", "affine-propagation-chunk",
+                        "synthetic-propagation", "synthetic-propagation-chunk"}:
+                    from .propagation_qualification_admission import prepare_managed_qualification
+                    documents["propagation_qualification"] = prepare_managed_qualification(
+                        self.store, spec, cell, package, prereg)
+                elif plugin.plugin_id == "affine-mlmc-production-chunk":
+                    from .mlmc_qualification_admission import prepare_managed_mlmc
+                    documents["propagation_qualification"] = prepare_managed_mlmc(
+                        self.store, spec, cell, package, prereg)
+                elif plugin.plugin_id == "affine-mixture-production-chunk":
+                    from .mixture_qualification_admission import prepare_managed_mixture
+                    documents["propagation_qualification"] = prepare_managed_mixture(
+                        self.store, spec, cell, package, prereg)
+                elif plugin.plugin_id == "affine-path-production-chunk":
+                    from .path_qualification_admission import prepare_managed_paths
+                    documents["propagation_qualification"] = prepare_managed_paths(
+                        self.store, spec, cell, package, prereg)
             purpose = settings.get("purpose")
             root = grant.get("data_root")
             if not isinstance(root, str) or not Path(root).is_absolute():
@@ -251,6 +348,14 @@ class AdmissionGate:
             for permission in (documents["authorization"], documents.get("model_authorization", documents["authorization"])):
                 if datetime.fromisoformat(permission["expires_at"]) <= datetime.fromisoformat(receipt["admitted_at"]):
                     raise ResearchError("UNAUTHORIZED_DATA", "execution permission expired during input admission")
+            if "propagation_qualification" in documents:
+                qualified = documents["propagation_qualification"]
+                self.store.verify_artifact_read(qualified["source_artifact"]["artifact_id"],
+                    purpose="evaluate", authorization=qualified["authorization"])
+            if "probability_calibration" in documents:
+                calibrated = documents["probability_calibration"]
+                self.store.verify_artifact_read(calibrated["source_artifact"]["artifact_id"],
+                    purpose="evaluate", authorization=calibrated["authorization"])
         receipt["admission_hash"] = digest(receipt)
         self.store.publish("admission-" + receipt["admission_hash"], receipt)
         self.store.append("ADMISSION", {"attempt_id": attempt_id, "run_id": run["run_id"],
@@ -259,6 +364,8 @@ class AdmissionGate:
 
     def result_validator(self, receipt, spec, cell, plugin):
         def validate(result):
+            if "cell_packages" in (spec.get("admission") or {}) or receipt.get("input_kind") == "registered-protocol":
+                verify_admission_selection(spec, cell, receipt)
             from .research_execution import execution_plan
             from .research_registry import validate_value
             plan = execution_plan(spec, cell, plugin)
@@ -279,12 +386,150 @@ class AdmissionGate:
                     raise ResearchError("UNQUALIFIED", "result metric definition/unit differs from frozen adjudication policy")
             if result.get("qualification") != receipt["qualification"]:
                 raise ResearchError("UNQUALIFIED", "worker cannot change admitted qualification")
+            from .probability_calibration_consumption import validate_calibrated_result
+            calibrated = validate_calibrated_result(self.store, receipt, spec, cell, result)
+            if "propagation_qualification" in receipt.get("documents", {}):
+                if plugin.plugin_id == "affine-cubature":
+                    from .cubature_qualification_admission import validate_formal_cubature_result
+                    validate_formal_cubature_result(receipt, spec, cell, result)
+                elif plugin.plugin_id == "affine-path-production-chunk":
+                    from .path_qualification_admission import validate_formal_path_result
+                    validate_formal_path_result(receipt, spec, cell, result)
+                elif plugin.plugin_id == "affine-mixture-production-chunk":
+                    from .mixture_qualification_admission import validate_formal_mixture_result
+                    validate_formal_mixture_result(receipt, spec, cell, result)
+                elif plugin.plugin_id == "affine-mlmc-production-chunk":
+                    from .mlmc_qualification_admission import validate_formal_mlmc_result
+                    validate_formal_mlmc_result(receipt, spec, cell, result)
+                else:
+                    from .propagation_qualification_admission import validate_formal_analytic_result
+                    validate_formal_analytic_result(receipt, spec, cell, result)
             if result.get("admission_hash", receipt["admission_hash"]) != receipt["admission_hash"]:
                 raise ResearchError("CONTRACT_MISMATCH", "worker substituted another admission")
+            if calibrated is not None:
+                # Own method-output validation can perform additional I/O.
+                # Revalidate the source physically/at current expiry last.
+                self.store.verify_artifact_read(calibrated["source_artifact"]["artifact_id"],
+                    purpose="evaluate", authorization=calibrated["authorization"])
             result["admission_hash"] = receipt["admission_hash"]
         return validate
 
     def run(self, attempt_id, spec, cell, plugin, command_builder, budget, *, builtin_fixture=False, recovery_builder=None, checkpoint_handler=None):
+        if plugin.plugin_id == "affine-path-production-chunk":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.path_production_plugin import production_policies
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                _, policy = production_policies(spec, cell, package, request, config)
+                if budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "path target exceeds the frozen independent production job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
+        if plugin.plugin_id == "affine-mixture-production-chunk":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.mixture_production_plugin import production_policies
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                _, policy = production_policies(spec, cell, package, request, config)
+                if budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "mixture target exceeds the frozen qualification job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
+        if plugin.plugin_id == "affine-path-qualification":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.path_qualification_plugin import path_qualification_policy
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                policy = path_qualification_policy(spec, cell, package, request, config)
+                if budget.category != "pilot" or budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "path qualification requires the frozen pilot job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
+        if plugin.plugin_id == "affine-mixture-qualification":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.mixture_qualification_plugin import mixture_qualification_policies
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                _, policy = mixture_qualification_policies(spec, cell, package, request, config)
+                if budget.category != "pilot" or budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "mixture qualification requires the frozen pilot job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
+        if plugin.plugin_id in {"affine-mixture-chunk", "synthetic-mixture-chunk"}:
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.mixture_plugin import mixture_policy
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                policy = mixture_policy(spec, cell, package, request, config)
+                if budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "mixture exceeds frozen job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
+        if plugin.plugin_id == "affine-mlmc-production-chunk":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.mlmc_production_plugin import production_policy
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                policy = production_policy(spec, cell, package, request, config)
+                if budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "MLMC production exceeds frozen job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
+        if plugin.plugin_id == "affine-propagation-qualification":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.qualification_plugin import qualification_policy
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                policy = qualification_policy(spec, cell, package, request, config)
+                if budget.category != "pilot" or budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "analytic qualification requires the frozen pilot job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
+        if plugin.plugin_id == "affine-halfspace-calibration":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.calibration_plugin import calibration_policy
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                policy = calibration_policy(spec, cell, package, request, config)
+                if budget.category != "pilot" or budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "probability calibration requires the frozen pilot job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
+        if plugin.plugin_id == "affine-cubature-qualification":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.cubature_plugin import cubature_policy
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                policy = cubature_policy(spec, cell, package, request, config)
+                if budget.category != "pilot" or budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "cubature qualification requires the frozen pilot job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
+        if plugin.plugin_id == "affine-mlmc-qualification-chunk":
+            from .propagation_execution import validate_propagation_cell
+            from experiments.pirc27.mlmc_qualification_plugin import mlmc_reference_policy
+            try:
+                package, request, config, _ = validate_propagation_cell(spec, cell)
+                policy = mlmc_reference_policy(spec, cell, package, request, config)
+                if budget.category != "pilot" or budget.job_seconds > policy.maximum_job_seconds:
+                    raise ResearchError("CONTRACT_MISMATCH", "MLMC reference work requires the frozen pilot job budget")
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
+        if (plugin.plugin_id in {"affine-propagation-chunk", "synthetic-propagation-chunk", "affine-mlmc-qualification-chunk"}
+                and cell.get("execution", {}).get("config", {}).get("method") == "mlmc-pilot"
+                and budget.category != "pilot"):
+            self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code="CONTRACT_MISMATCH")
+            raise ResearchError("CONTRACT_MISMATCH", "MLMC pilot must use the existing pilot budget category")
         from .research_supervisor import ResearchSupervisor
         admitted = {}
         resource_plan = {}
@@ -301,7 +546,10 @@ class AdmissionGate:
                 if isinstance(exc, ResearchError):
                     raise
                 raise ResearchError("CONTRACT_MISMATCH", "incomplete execution admission evidence") from exc
-            return command_builder(output)
+            command = command_builder(output)
+            if "propagation_qualification" in admitted.get("documents", {}):
+                command = [*command, "--admission-hash", admitted["admission_hash"]]
+            return command
         def validate(result):
             return self.result_validator(admitted, spec, cell, plugin)(result)
         def checkpoint(state, progress, deadline):

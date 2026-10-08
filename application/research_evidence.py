@@ -17,7 +17,7 @@ from application.research_dimensions import comparison_dimensions
 from application.research_cost import frozen_cost
 
 
-def evidence_visibility(store, spec, cells):
+def evidence_visibility(store, spec, cells, *, calibration=None):
     """Source artifact metadata cannot be declassified by a synthetic cell."""
     from infrastructure.research_visibility import study_visibility, admission_visibility, combine_visibility
     labels = [study_visibility(store.manifest, spec)]
@@ -26,6 +26,8 @@ def evidence_visibility(store, spec, cells):
             labels.append(store.manifest("artifact-" + cell["artifact_id"])["visibility"])
         if cell.get("admission"):
             labels.append(admission_visibility(store.manifest, cell["admission"]))
+    if calibration is not None:
+        labels.extend(source["visibility"] for source in calibration["sources"])
     return combine_visibility(labels)
 
 
@@ -83,8 +85,8 @@ def require_unexpired_disclosure(store, study_id, authorization, purpose):
         raise ResearchError('UNAUTHORIZED_DATA', 'study disclosure authorization expired')
 
 
-def require_export_visibility(store, spec, cells, authorization):
-    visibility = evidence_visibility(store, spec, cells)
+def require_export_visibility(store, spec, cells, authorization, *, calibration=None):
+    visibility = evidence_visibility(store, spec, cells, calibration=calibration)
     if visibility not in authorization["visibilities"]:
         store.append("DISCLOSURE_DENIED", {"study_id": spec["study_id"], "purpose": "export",
                    "authorization_hash": digest(authorization), "required_visibility": visibility})
@@ -138,6 +140,12 @@ def _export_data_snapshot(store, *, after=(), publication=None):
 
 def _export_grants(bundle, authorization):
     grants = {digest(authorization): authorization}
+    if bundle.get("probability_calibration") is not None:
+        for source in bundle["probability_calibration"]["sources"]:
+            for grant in [source["authorization"], *source["extra_authorizations"]]:
+                if grant["study_id"] != bundle["study_id"] and bundle["study_id"] not in grant.get("consumer_study_ids", []):
+                    raise ResearchError("UNAUTHORIZED_DATA", "calibration export consumer differs")
+                grants[digest(grant)] = grant
     for cell in bundle["cells"]:
         documents = cell.get("admission", {}).get("documents", {})
         if documents.get("model_qualification_evidence"):
@@ -145,6 +153,11 @@ def _export_grants(bundle, authorization):
             if (grant["study_id"] != bundle["study_id"]
                     and bundle["study_id"] not in grant.get("consumer_study_ids", [])):
                 raise ResearchError("UNAUTHORIZED_DATA", "model evidence export consumer differs")
+            grants[digest(grant)] = grant
+        if documents.get("propagation_qualification"):
+            grant = documents["propagation_qualification"]["authorization"]
+            if grant["study_id"] != bundle["study_id"] and bundle["study_id"] not in grant.get("consumer_study_ids", []):
+                raise ResearchError("UNAUTHORIZED_DATA", "analytic qualification export consumer differs")
             grants[digest(grant)] = grant
     return list(grants.values())
 
@@ -159,11 +172,16 @@ def _require_current_export_grants(store, grants):
 
 def _fresh_export_authority(store, bundle, authorization):
     spec = store.manifest("study-" + bundle["study_id"])["spec"]
+    from .probability_calibration_consumption import require_calibration_export_support
+    require_calibration_export_support(spec, cells=bundle["cells"])
     if spec != bundle["registered_spec"] or digest(spec) != bundle["spec_hash"]:
         raise ResearchError("CORRUPT_ARTIFACT", "export study source binding changed")
     if not {cell["block_id"] for cell in spec["cells"]} <= set(authorization["block_ids"]):
         raise ResearchError("UNAUTHORIZED_DATA", "export does not cover the complete study matrix")
-    require_export_visibility(store, spec, bundle["cells"], authorization)
+    from .probability_calibration_export import verify_calibration_export
+    verify_calibration_export(store, spec, bundle.get("probability_calibration"), authorization)
+    require_export_visibility(store, spec, bundle["cells"], authorization,
+        calibration=bundle.get("probability_calibration"))
     grants = _export_grants(bundle, authorization)
     for index, grant in enumerate(grants):
         study_id = bundle["study_id"] if index == 0 else grant["study_id"]
@@ -197,9 +215,13 @@ def authorize_evidence_publication(store, bundle, authorization):
 
 def _assemble_evidence(store, study_id, authorization):
     spec = store.manifest("study-" + study_id)["spec"]
+    from .probability_calibration_consumption import require_calibration_export_support
+    require_calibration_export_support(spec)
     if not {c["block_id"] for c in spec["cells"]} <= set(authorization["block_ids"]):
         raise ResearchError("UNAUTHORIZED_DATA", "export does not cover the complete study matrix")
     require_export_visibility(store, spec, [], authorization)
+    from .probability_calibration_export import prepare_calibration_export
+    calibration = prepare_calibration_export(store, spec, authorization)
     with store.lock():
         attempts = store._attempts()
         cost_events = store._events()
@@ -239,11 +261,18 @@ def _assemble_evidence(store, study_id, authorization):
                         or admission["attempt_id"] != latest["attempt_id"] or admission["run_id"] != latest["run_id"]
                         or admission["qualification"] != result["qualification"]):
                     raise ResearchError("UNQUALIFIED", "result admission identity differs from authoritative attempt")
+                if "cell_packages" in (spec.get("admission") or {}) or "admission_selection" in admission:
+                    from infrastructure.research_admission_selection import verify_admission_selection
+                    verify_admission_selection(spec, cell, admission)
                 require_export_visibility(store, spec, [{"admission": admission}], authorization)
                 # Qualification attachments are additional disclosures, not
                 # automatically public because execution was authorized.
                 documents = admission.get("documents", {})
-                from infrastructure.research_store import encode
+                require_calibration_export_support(spec, cells=[{"admission": admission}])
+                if "calibration_binding" in cell:
+                    from .probability_calibration_consumption import validate_calibrated_result
+                    validate_calibrated_result(store, admission, spec, cell, result)
+                    row.update(result=result, result_artifact=store.manifest("artifact-"+latest["artifact_id"]))
                 for attachment in documents.get("qualification_evidence", []):
                     content = store.read_artifact(attachment["artifact"]["artifact_id"], purpose="export", authorization=authorization)
                     if content != encode(attachment["content"]):
@@ -257,11 +286,24 @@ def _assemble_evidence(store, study_id, authorization):
                         content = store.read_artifact(attachment["artifact"]["artifact_id"], purpose="export", authorization=model_grant)
                         if content != encode(attachment["content"]):
                             raise ResearchError("CORRUPT_ARTIFACT", "model qualification export binding changed")
+                if documents.get("propagation_qualification"):
+                    evidence = documents["propagation_qualification"]
+                    # The independent reader needs the actual target bytes,
+                    # not a row of copied metric/pass fields. Both attachments
+                    # are already covered by the target artifact export grant.
+                    row.update(result=result, result_artifact=store.manifest("artifact-"+latest["artifact_id"]))
+                    source_grant = evidence["authorization"]
+                    if source_grant["study_id"] != study_id and study_id not in source_grant.get("consumer_study_ids", []):
+                        raise ResearchError("UNAUTHORIZED_DATA", "analytic qualification export consumer differs")
+                    content = store.read_artifact(evidence["source_artifact"]["artifact_id"],
+                        purpose="export", authorization=source_grant)
+                    if content != encode(evidence["source_result"]):
+                        raise ResearchError("CORRUPT_ARTIFACT", "analytic qualification export binding changed")
                 row.update(admission=admission, admission_hash=result["admission_hash"])
-            elif result["qualification"] == "qualified":
-                raise ResearchError("UNQUALIFIED", "qualified result lacks execution admission evidence")
+            elif result["qualification"] == "qualified" or "cell_packages" in (spec.get("admission") or {}):
+                raise ResearchError("UNQUALIFIED", "qualified or per-cell-bound result lacks execution admission evidence")
         cells.append(row)
-    visibility = require_export_visibility(store, spec, cells, authorization)
+    visibility = require_export_visibility(store, spec, cells, authorization, calibration=calibration)
     payload = {"schema_version": "pirc25-evidence-bundle-v1", "study_id": study_id,
                "spec_hash": digest(spec), "protocol_hash": spec["protocol_hash"], "data_hash": spec["data_hash"],
                "code_hash": spec["code_hash"], "feature_hash": spec["feature_hash"], "selection_hash": spec["selection_hash"],
@@ -272,7 +314,13 @@ def _assemble_evidence(store, study_id, authorization):
                "expected_cells": [{"cell_hash": digest(c), "arm_id": c["arm_id"], "block_id": c["block_id"], "seed": c["seed"],
                                    "comparison_dimensions": comparison_dimensions(c)} for c in spec["cells"]],
                "cells": cells, "disclosure_scope": "authorized-local-export"}
+    if calibration is not None:
+        from .probability_calibration_export import calibration_recorded_at
+        payload.update(probability_calibration=calibration,
+            recorded_at=calibration_recorded_at(store, spec, cells, calibration, authorization))
     bundle = {**payload, "bundle_hash": digest(payload)}
+    if len(encode(bundle)) > 64*1024*1024:
+        raise ResearchError("TOO_LARGE", "complete evidence bundle exceeds fixed export byte quota")
     return bundle
 
 
@@ -304,7 +352,7 @@ def accept_aggregate(store, aggregate, study_id):
         from application.research_computation import verified_computation
         verified_computation(store, aggregate["computation_ref"], aggregate=aggregate)
     from infrastructure.research_store import encode
-    visibility = evidence_visibility(store, spec, bundle["cells"])
+    visibility = evidence_visibility(store, spec, bundle["cells"], calibration=bundle.get("probability_calibration"))
     return store.artifact(encode(aggregate), role="aggregate", visibility=visibility,
                           block_ids=[c["block_id"] for c in spec["cells"]], study_id=study_id)
 
@@ -314,20 +362,27 @@ def expected_metrics_csv(aggregate):
     stream = io.StringIO(newline="")
     writer = csv.writer(stream, lineterminator="\n")
     extra = [name for name in ("adjudication", "computation_ref") if name in aggregate]
-    writer.writerow(["aggregate_hash", "arm_id", "metric", "value", "unit", "independent_n", "expected_cells", "successful_cells", "status", "stratum_id", "comparison_dimensions", "charged_ms", "reserved_ms", "measured_ms", "cost_unit", "cost_scope", "status_rates", *extra])
+    eligibility_fields = ("comparison_eligible_cells", "path_output_dispositions")
+    current_eligibility = ("comparison_eligible_cell_count" in aggregate or "path_output_dispositions" in aggregate
+                          or any(name in arm for arm in aggregate["arms"] for name in eligibility_fields))
+    if current_eligibility and any(not all(name in arm for name in eligibility_fields) for arm in aggregate["arms"]):
+        raise ResearchError("CONTRACT_MISMATCH", "incomplete frozen CSV eligibility fields")
+    columns = list(eligibility_fields) if current_eligibility else []
+    writer.writerow(["aggregate_hash", "arm_id", "metric", "value", "unit", "independent_n", "expected_cells", "successful_cells", "status", "stratum_id", "comparison_dimensions", "charged_ms", "reserved_ms", "measured_ms", "cost_unit", "cost_scope", "status_rates", *columns, *extra])
     frozen = [encode(aggregate[name]).decode() for name in extra]
     for arm in aggregate["arms"]:
         costs = [arm["cost"][key] for key in ("charged_ms", "reserved_ms", "measured_ms", "unit", "scope")]
         rates = encode(arm.get("status_rates")).decode()
         dimensions = encode(arm["comparison_dimensions"]).decode()
+        eligibility = [arm["comparison_eligible_cells"], encode(arm["path_output_dispositions"]).decode()] if current_eligibility else []
         if not arm["metrics"]:
             writer.writerow([aggregate["aggregate_hash"], arm["arm_id"], "", "", "", arm["independent_n"],
                              arm["expected_cells"], arm["successful_cells"], arm["status"], arm["stratum_id"],
-                             dimensions, *costs, rates, *frozen])
+                             dimensions, *costs, rates, *eligibility, *frozen])
         for metric, value in sorted(arm["metrics"].items()):
             writer.writerow([aggregate["aggregate_hash"], arm["arm_id"], metric, value, arm["metric_units"][metric],
                              arm["independent_n"], arm["expected_cells"], arm["successful_cells"], arm["status"],
-                             arm["stratum_id"], dimensions, *costs, rates, *frozen])
+                             arm["stratum_id"], dimensions, *costs, rates, *eligibility, *frozen])
     return stream.getvalue().encode()
 
 
