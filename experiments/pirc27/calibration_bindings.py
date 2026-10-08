@@ -156,13 +156,18 @@ class StudyCalibration:
 def require_consumer_support(spec, cell):
     """Validate declarations pre-store; hashes never grant source authority."""
     from infrastructure.research_store import ResearchError
-    axes = spec.get("propagation_design", {}).get("axis_manifest", {})
-    functionals = axes.get("functionals", [])
-    calibrated = any(type(f) is dict and f.get("functional_id") == cell.get("functional_id")
-        and f.get("target_probability") is not None for f in functionals)
-    if "calibration_binding" not in cell and not calibrated:
-        return None
     try:
+        declaration = spec.get("propagation_design", {})
+        _require(type(declaration) is dict, "invalid design declaration")
+        axes = declaration.get("axis_manifest", {})
+        _require(type(axes) is dict, "invalid axis declaration")
+        functionals = axes.get("functionals", [])
+        _require(type(functionals) is list and len(functionals) <= 64
+            and all(type(f) is dict for f in functionals), "invalid bounded functional axis")
+        calibrated = any(f.get("functional_id") == cell.get("functional_id")
+            and f.get("target_probability") is not None for f in functionals)
+        if "calibration_binding" not in cell and not calibrated:
+            return None
         _require(calibrated and "calibration_binding" in cell, "stripped or orphan calibrated binding")
         from .preparation import registered_design
         registered_design(spec)

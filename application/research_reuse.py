@@ -12,7 +12,11 @@ from infrastructure.research_store import ResearchError, digest, encode
 
 
 def verified_reuse(store, attempt, spec, cell, plugin):
-    with store.lock():
+    # A calibrated target revalidates a settled source under the same actual
+    # OS lock. Use the existing PID/thread-owned verified read scope; nested
+    # owner reads must not independently acquire the non-reentrant writer lock.
+    # Legacy consumers retain their original locking and verification path.
+    with store._read_transaction() if "calibration_binding" in cell else store.lock():
         request = {"attempt_id": attempt["attempt_id"], "run_id": attempt["run_id"],
                    "artifact_id": attempt.get("artifact_id")}
         store._append("REUSE_CHECK_STARTED", request)

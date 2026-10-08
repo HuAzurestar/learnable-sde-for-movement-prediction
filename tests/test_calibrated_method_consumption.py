@@ -134,3 +134,108 @@ def test_calibrated_study_cannot_disclose_without_independent_export_support(con
         export_evidence(store, spec["study_id"], grant)
     assert not any(e["event_kind"] == "MANIFEST" and e["payload"]["object_id"].startswith("bundle-")
         for e in store.events()[len(before):])
+
+
+@pytest.mark.parametrize("fault", ["consumer", "purpose", "expiry", "version"])
+def test_current_selected_source_permission_is_required_before_any_artifact_read(consumers, monkeypatch, fault):
+    from application.probability_calibration_consumption import prepare_calibrated_consumer
+    store, spec, *_ = consumers
+    original = store.authorization
+    def permission(authorization_id, *, version=None):
+        grant = original(authorization_id, version=version)
+        if version == "consumer-v1":
+            grant = deepcopy(grant)
+            key, value = {"consumer": ("consumer_study_ids", []), "purpose": ("purposes", []),
+                "expiry": ("expires_at", "2000-01-01T00:00:00+00:00"), "version": ("version", "other-version")}[fault]
+            grant[key] = value
+        return grant
+    monkeypatch.setattr(store, "authorization", permission)
+    monkeypatch.setattr(store, "read_artifact", lambda *a, **k: pytest.fail("read before source permission"))
+    with pytest.raises(ResearchError, match="permission"):
+        prepare_calibrated_consumer(store, spec, spec["cells"][0])
+
+
+@pytest.mark.parametrize("fault", ["missing", "hash-only", "subset", "hash"])
+def test_formal_region_table_must_be_frozen_in_full_before_source_disclosure(consumers, monkeypatch, fault):
+    from application.probability_calibration_consumption import prepare_calibrated_consumer
+    store, spec, *_ = consumers
+    table = spec["propagation_design"]["axis_manifest"]["calibrations"]
+    prereg = {"probability_calibration_bindings": deepcopy(table),
+        "probability_calibration_bindings_hash": digest(table)}
+    if fault == "missing":
+        prereg = {}
+    elif fault == "hash-only":
+        prereg.pop("probability_calibration_bindings")
+    elif fault == "subset":
+        prereg["probability_calibration_bindings"].pop()
+    else:
+        prereg["probability_calibration_bindings_hash"] = "0"*64
+    monkeypatch.setattr(store, "read_artifact", lambda *a, **k: pytest.fail("source read before table freeze"))
+    with pytest.raises(ResearchError, match="preregistration"):
+        prepare_calibrated_consumer(store, spec, spec["cells"][0], preregistration=prereg)
+
+
+@pytest.mark.parametrize("fault", ["evidence", "geometry"])
+def test_resealed_declaration_is_not_a_substitute_for_actual_settled_owner(consumers, fault):
+    from application.probability_calibration_consumption import prepare_calibrated_consumer
+    from experiments.pirc27.preparation import _design_from_document
+    store, spec, *_ = consumers
+    document = {**spec, **spec["propagation_design"]}
+    design = _design_from_document(document)
+    entry = design.calibrations[0]
+    if fault == "evidence":
+        entry = replace(entry, source_evidence_hash="a"*64)
+    else:
+        geometry = deepcopy(entry.manifest()["geometry"])
+        geometry["threshold"] += 1
+        entry = replace(entry, geometry_document=encode(geometry))
+    frozen = freeze_design(replace(design, calibrations=(entry,)))
+    substituted = frozen.study_spec(expected_hash=frozen.manifest_hash)
+    # Every derived request/hash is legitimately regenerated, but native source
+    # evidence still owns the threshold. No target data or worker is consumed.
+    with pytest.raises(ResearchError, match="fresh settled owner"):
+        prepare_calibrated_consumer(store, substituted, substituted["cells"][0])
+
+
+@pytest.mark.parametrize("fault", ["missing-proof", "request", "model"])
+def test_saved_receipt_and_current_output_cannot_strip_or_swap_geometry_provenance(consumers, fault):
+    store, spec, registry, grant, *_ = consumers
+    cell = spec["cells"][0]
+    outcome = SharedRunner(store, registry).run_cell(spec["study_id"], digest(cell))
+    assert outcome["reused"]
+    result = json.loads(store.read_artifact(outcome["artifact_id"], purpose="evaluate", authorization=grant))
+    receipt = store.manifest("admission-"+result["admission_hash"])
+    if fault == "missing-proof":
+        receipt["documents"].pop("probability_calibration")
+    else:
+        result["forecast"]["request_hash" if fault == "request" else "model_package_hash"] = "a"*64
+        result["output_hash"] = digest({k: result[k] for k in ("metrics", "forecast", "fit", "source_schema")})
+    with pytest.raises(ResearchError, match="geometry admission|current output"):
+        AdmissionGate(store).result_validator(receipt, spec, cell, propagation_plugin())(result)
+
+
+def test_calibration_proof_does_not_replace_formal_method_qualification(consumers, monkeypatch):
+    from application.propagation_qualification_admission import prepare_managed_qualification
+    store, spec, _, _, _, _, proof = consumers
+    package = store.manifest("package-"+spec["admission"]["package_hash"])
+    package["payload"]["probability_calibration"] = deepcopy(proof)
+    monkeypatch.setattr(store, "read_artifact", lambda *a, **k: pytest.fail("read without method-specific source"))
+    with pytest.raises(ResearchError):
+        prepare_managed_qualification(store, spec, spec["cells"][0], package, {})
+
+
+@pytest.mark.parametrize("fault", ["axes", "functionals", "cycle", "too-many-functionals"])
+def test_malformed_or_unbounded_consumer_axes_refuse_before_store_access(fault):
+    frozen = freeze_design(declared_design())
+    spec = frozen.study_spec(expected_hash=frozen.manifest_hash)
+    axes = spec["propagation_design"]["axis_manifest"]
+    if fault == "axes":
+        spec["propagation_design"]["axis_manifest"] = None
+    elif fault == "functionals":
+        axes["functionals"] = None
+    elif fault == "cycle":
+        axes["calibrations"].append(axes)
+    else:
+        axes["functionals"] *= 65
+    with pytest.raises(ResearchError):
+        AdmissionGate.prepare(None, spec, spec["cells"][0], None, "not-created")
