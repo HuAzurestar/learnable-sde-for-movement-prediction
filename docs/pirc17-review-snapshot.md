@@ -35,3 +35,10 @@ do not establish scientific validity. No new predictions, fits, scores,
 resampling, experiments or map queries were launched for the publication.
 No acceptance, authorship verification, public route permission, deployment,
 merge or finished-paper release is implied.
+
+## Test environment
+
+The test extra now declares the resource-sampling and document/figure packages
+used by existing tests. CI still runs the original complete pytest command;
+no missing test or evidence is treated as a pass. Dependency repair is not
+a replay of the scientific study, and no live runtime source is changed.

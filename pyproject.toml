@@ -23,7 +23,14 @@ Repository = "https://github.com/HuAzurestar/learnable-sde-for-movement-predicti
 Issues = "https://github.com/HuAzurestar/learnable-sde-for-movement-prediction/issues"
 
 [project.optional-dependencies]
-test = ["pytest>=7.4"]
+test = [
+  "pytest>=7.4",
+  "psutil>=5.9",
+  "threadpoolctl>=3",
+  "PyMuPDF>=1.23",
+  "matplotlib>=3.7",
+  "Pillow>=9.5",
+]
 benchmark = ["psutil>=5.9", "threadpoolctl>=3"]
 
 [project.scripts]
