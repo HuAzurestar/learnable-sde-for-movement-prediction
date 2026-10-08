@@ -82,6 +82,13 @@ class BudgetLedger:
                               if r["arm_id"] == run["arm_id"] and r["settled"])
                 final = balance["closed"] or requested > 86400000 - charged
                 code = "BUDGET_EXHAUSTED" if final else "BUDGET_BUSY"
+                if final and not balance["closed"]:
+                    # The durable fuse must precede terminal persistence: a
+                    # rejected job has no SETTLE event to preserve closure if
+                    # recording its terminal attempt is interrupted.
+                    self.store._append("ARM_CLOSED",
+                        {"arm_id": run["arm_id"], "reason": code},
+                        "refusal-close-" + reservation_id)
                 self.store._transition(attempt_id,
                     "BUDGET_EXHAUSTED" if final else "PREFLIGHT_FAILED", error_code=code)
                 raise ResearchError(code, "arm budget cannot fund this job" if final else
