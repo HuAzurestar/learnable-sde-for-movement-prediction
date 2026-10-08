@@ -1,5 +1,7 @@
 """Independent arithmetic on synthetic full-clock saved paths, not authority."""
 from copy import deepcopy
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -64,3 +66,42 @@ def test_final_audit_cannot_shrink_the_registered_matrix(scored, prepared, tmp_p
     producer.saved.work.pop(next(iter(producer.saved.work)))
     with pytest.raises(ValueError, match='full11659'):
         module.require_complete(producer.saved, {'blocks':{}})
+
+
+@pytest.mark.parametrize('relative_argument', [True, False])
+def test_analysis_binding_is_absolute_and_reused_after_cwd_changes(tmp_path, monkeypatch, relative_argument):
+    """Synthetic pointer transport only; no scientific scorer or inference."""
+    index_sha = module.digest('SOFTWARE score index')
+    computed = []
+    root = tmp_path / 'checkpoint'
+    root.mkdir()
+    monkeypatch.chdir(tmp_path)
+    def load(directory):
+        assert Path(directory).is_absolute() and Path(directory) == root
+        return {}, {}
+    def sources(directory):
+        cache_root = Path(directory) / 'offline-scores' / 'software'
+        cache_root.mkdir(parents=True, exist_ok=True)
+        return SimpleNamespace(), SimpleNamespace(cache_root=cache_root,
+            cache_identity={'sha256': module.digest('SOFTWARE cache')}), {'blocks': {}}
+    class SoftwareAnalysis:
+        def __init__(self, *, scores):
+            self.work = {'software': {}}
+        def compute(self, work):
+            computed.append(work)
+            return {'saved_score_index_sha256': index_sha, 'software_fixture_only': True}
+    monkeypatch.setattr(module, 'load', load)
+    monkeypatch.setattr(module, 'start_access', lambda *a: {'sha256': module.digest('SOFTWARE access')})
+    monkeypatch.setattr(module, 'sources', sources)
+    monkeypatch.setattr(module, 'CheckpointScores', lambda **k: SimpleNamespace(identity={'sha256': index_sha}))
+    monkeypatch.setattr(module, 'AnalysisConsumers', SoftwareAnalysis)
+    binding = module.analyze(Path('checkpoint') if relative_argument else root)
+    assert Path(binding['path']).is_absolute()
+    assert Path(binding['path']).is_relative_to(root)
+    old_bytes = Path(binding['path']).read_bytes()
+    elsewhere = tmp_path / 'elsewhere'
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert module.analyze(root) == binding
+    assert Path(binding['path']).read_bytes() == old_bytes
+    assert len(computed) == 1

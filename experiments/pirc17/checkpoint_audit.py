@@ -98,6 +98,8 @@ def sources(directory):
 
 def analyze(directory):
     """Original inference with an honest access receipt and immutable pointer."""
+    # Published pointers must not depend on the caller's working directory.
+    directory = Path(directory).resolve()
     settings, _ = load(directory)
     access = start_access(directory, settings)
     saved, cache, state = sources(directory)
