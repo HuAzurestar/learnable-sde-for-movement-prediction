@@ -6,6 +6,7 @@ withholding. All work is metadata-only within the original funded attempt.
 """
 
 from application.research_admission import command_binding, data_binding, plugin_binding
+from application.research_budget import BudgetLedger
 from application.research_evidence import authorize_study, require_unexpired_disclosure
 from application.research_execution import execution_plan
 from application.research_preregistration import hash_reference
@@ -15,6 +16,7 @@ from .approximation import RECIPE_SCHEMA
 from .evidence import _preregistration, _run_id, study_definition_binding
 from .qualification import IdentifiabilitySpec
 from .runtime import command, resume_command, switching_plugin
+from .source_metadata import SourceMetadata
 from .study import MAXIMUM_DEFINITION_BYTES, SCHEMA_V2, SyntheticStudyDefinition
 
 
@@ -23,11 +25,32 @@ def _require(condition, code, message):
         raise ResearchError(code, message)
 
 
+def _current_authority(store, study, cell, attempt, admissions, reserve, prefix):
+    """Fresh mutable authority only; no whole-matrix reconstruction here."""
+    events = store.events()
+    _require(len(events) >= len(prefix) and (not prefix
+        or events[len(prefix)-1]['hash'] == prefix[-1]['hash']),
+        'CORRUPT_ARTIFACT', 'pre-fit authoritative prefix changed between phases')
+    _require(store.attempts().get(attempt['attempt_id']) == attempt,
+        'IDENTITY_CONFLICT', 'pre-fit original attempt is no longer running')
+    _require([event for event in events if event['event_kind'] == 'ADMISSION'
+        and event['payload'].get('attempt_id') == attempt['attempt_id']] == admissions
+        and [event for event in events if event['event_kind'] == 'RESERVE'
+        and event['payload'].get('attempt_id') == attempt['attempt_id']] == [reserve]
+        and not any(event['event_kind'] == 'SETTLE'
+        and event['payload'].get('attempt_id') == attempt['attempt_id'] for event in events),
+        'UNQUALIFIED', 'pre-fit original admission/funding changed between phases')
+    _require(not (store.path/'recovery-hold.json').exists(),
+        'RECOVERY_REQUIRED', 'authoritative recovery holds scientific work')
+    _require(not BudgetLedger(store).balance(cell['arm_id'])['closed'],
+        'BUDGET_EXHAUSTED', 'original scientific arm is closed')
+
+
 def validate_scientific_source(store, study, cell, attempt, *, check_budget):
     """Revalidate canonical original metadata before any generated/fitted data."""
     _require(callable(check_budget), 'CONTRACT_MISMATCH', 'explicit pre-fit deadline poll required')
     check_budget()
-    with store._read_transaction():
+    with SourceMetadata(store, check_budget, 4*MAXIMUM_DEFINITION_BYTES) as metadata:
         _require(study.get('admission', {}).get('mode') == 'pilot'
             and study.get('admission', {}).get('purpose') == 'fit'
             and study.get('switching_recipe', {}).get('schema_version') == RECIPE_SCHEMA,
@@ -35,7 +58,7 @@ def validate_scientific_source(store, study, cell, attempt, *, check_budget):
         _require(study.get('code_hash') == code_hash() and study.get('runtime_binding') ==
             {'root': str(store.path.parent), 'store_id': store.store_id},
             'IDENTITY_CONFLICT', 'pre-fit source code/original shared store differs')
-        canonical = store.manifest('study-'+study['study_id'])
+        canonical = metadata.manifest('study-'+study['study_id'])
         _require(digest(canonical['spec']) == digest(study) and canonical['spec_hash'] == digest(study)
             and sum(digest(value) == digest(cell) for value in study['cells']) == 1,
             'IDENTITY_CONFLICT', 'pre-fit source/cell differs from canonical registration')
@@ -83,9 +106,23 @@ def validate_scientific_source(store, study, cell, attempt, *, check_budget):
                 'study_id': study['study_id'], 'arm_id': cell['arm_id'],
                 'reservation_id': digest([store.store_id, attempt['attempt_id']])}.items()),
             'UNQUALIFIED', 'pre-fit funding belongs to a different source/arm/stage')
+        # Refuse a borrowed grant before pinning an otherwise self-consistent
+        # receipt. Only immutable matrix metadata may use the detached view.
+        settings = study['admission']
+        grant = store.authorization(settings['authorization_id'], version=settings.get('authorization_version'))
+        documents = receipt.get('documents', {})
+        _require(documents.get('authorization') == grant
+            and digest(documents.get('package')) == settings['package_hash']
+            and grant.get('protocol_hash') == study['protocol_hash']
+            and cell['block_id'] in grant['block_ids'] and 'synthetic' in grant['visibilities'],
+            'UNAUTHORIZED_DATA', 'pre-fit admission grant/package scope differs')
+        _require(metadata.manifest('admission-'+admission_hash) == receipt,
+            'IDENTITY_CONFLICT', 'pre-fit original receipt changed between phases')
+        with store._read_transaction():
+            _current_authority(store, study, cell, attempt, admissions, reserve, events)
         reference = study.get('pirc28_study_definition_hash')
         _require(hash_reference(reference), 'NEEDS_PREREGISTRATION', 'complete pre-fit master required')
-        master = SyntheticStudyDefinition.from_dict(store.manifest('pirc28-study-definition-'+reference))
+        master = SyntheticStudyDefinition.from_dict(metadata.manifest('pirc28-study-definition-'+reference))
         value = master.to_dict()
         _require(master.definition_hash == reference and value['schema_version'] == SCHEMA_V2,
             'IDENTITY_CONFLICT', 'pre-fit master identity/approximation schema differs')
@@ -93,8 +130,8 @@ def validate_scientific_source(store, study, cell, attempt, *, check_budget):
         studies, protocols, consumed = [], {}, len(master.content)+len(encode(receipt))
         for study_id in master.study_ids:
             check_budget()
-            source = store.manifest('study-'+study_id)['spec']
-            protocol = store.manifest('protocol-'+source['admission']['protocol_id'])
+            source = metadata.manifest('study-'+study_id)['spec']
+            protocol = metadata.manifest('protocol-'+source['admission']['protocol_id'])
             consumed += len(encode(source))+len(encode(protocol))
             _require(consumed <= 4*MAXIMUM_DEFINITION_BYTES, 'RESOURCE_LIMIT',
                 'pre-fit complete source/protocol metadata exceeds quota')
@@ -104,13 +141,13 @@ def validate_scientific_source(store, study, cell, attempt, *, check_budget):
                 'IDENTITY_CONFLICT', 'pre-fit source stage/protocol identities differ')
             studies.append(source)
             protocols[study_id] = protocol
-        _require(study_definition_binding(store, studies, definition, events=events) == reference,
+        _require(study_definition_binding(metadata, studies, definition, events=events) == reference,
             'NEEDS_PREREGISTRATION', 'complete master must precede every original admission')
         expected = master.preregistration_fields(protocols)
         for source in studies:
             check_budget()
-            preregistration = _preregistration(store, source, definition, source['cells'][0], events)
-            prereg = store.manifest('preregistration-'+preregistration)
+            preregistration = _preregistration(metadata, source, definition, source['cells'][0], events)
+            prereg = metadata.manifest('preregistration-'+preregistration)
             consumed += len(encode(prereg))
             _require(consumed <= 4*MAXIMUM_DEFINITION_BYTES, 'RESOURCE_LIMIT',
                 'pre-fit preregistration/admission metadata exceeds quota')
@@ -121,18 +158,21 @@ def validate_scientific_source(store, study, cell, attempt, *, check_budget):
                 'candidate_arm_ids': [value['arms']['2']['arm_id']],
                 'preregistration_hash': preregistration, 'failure_policy': 'retain-and-exclude-incomplete-blocks'},
                 'NEEDS_PREREGISTRATION', 'original paired comparison/failure policy differs')
-        settings = study['admission']
-        grant = store.authorization(settings['authorization_id'], version=settings.get('authorization_version'))
-        documents = receipt.get('documents', {})
-        _require(documents.get('authorization') == grant
-            and documents.get('protocol') == protocols[study['study_id']]
-            and digest(documents.get('package')) == settings['package_hash']
-            and grant.get('protocol_hash') == study['protocol_hash']
-            and cell['block_id'] in grant['block_ids'] and 'synthetic' in grant['visibilities'],
-            'UNAUTHORIZED_DATA', 'pre-fit admission grant/package/protocol differs')
-        authorize_study(store, study['study_id'], grant, 'execute')
-        authorize_study(store, study['study_id'], grant, 'fit')
+        _require(documents.get('protocol') == protocols[study['study_id']],
+            'UNAUTHORIZED_DATA', 'pre-fit admission protocol differs')
         check_budget()
+        # Pure full-matrix reconstruction above never owns the global OS lock.
+        # This last short phase rechecks real authority, journals disclosure,
+        # then completes original pinned files AFTER the fresh physical chain
+        # and all grant I/O. No immutable view can answer permission questions.
+        with store._read_transaction():
+            _current_authority(store, study, cell, attempt, admissions, reserve, events)
+            authorize_study(store, study['study_id'], grant, 'execute')
+            authorize_study(store, study['study_id'], grant, 'fit')
+            store._read_completion(
+                lambda: _current_authority(store, study, cell, attempt, admissions, reserve, events),
+                lambda: None)
+            store._read_completion(metadata.finish, lambda: None)
     # No metadata/journal I/O after the final immutable-grant clock guard.
     check_budget()
     require_unexpired_disclosure(store, study['study_id'], grant, 'execute')
