@@ -112,12 +112,16 @@ def test_grant_expiring_during_pure_phase_is_durably_denied(isolated_source, mon
     from application import research_evidence
     store, _, study, cell, attempt = isolated_source
     real_clock = research_evidence.datetime
+    settings = study['admission']
+    expiry = real_clock.fromisoformat(store.authorization(settings['authorization_id'],
+        version=settings.get('authorization_version'))['expires_at'])
+    assert expiry > real_clock.now(expiry.tzinfo)
     original_binding = source_preflight.study_definition_binding
 
     class FutureClock(real_clock):
         @classmethod
         def now(cls, timezone=None):
-            return real_clock.now(timezone)+timedelta(days=3650)
+            return (expiry+timedelta(seconds=1)).astimezone(timezone)
 
     def binding(*args, **kwargs):
         value = original_binding(*args, **kwargs)
