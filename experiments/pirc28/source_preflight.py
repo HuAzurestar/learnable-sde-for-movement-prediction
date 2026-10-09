@@ -49,6 +49,8 @@ def _current_authority(store, study, cell, attempt, admissions, reserve, prefix)
 def validate_scientific_source(store, study, cell, attempt, *, check_budget):
     """Revalidate canonical original metadata before any generated/fitted data."""
     _require(callable(check_budget), 'CONTRACT_MISMATCH', 'explicit pre-fit deadline poll required')
+    _require(store._read_snapshot() is None, 'CONTRACT_MISMATCH',
+        'pre-fit validation cannot inherit an outer writer lock')
     check_budget()
     with SourceMetadata(store, check_budget, 4*MAXIMUM_DEFINITION_BYTES) as metadata:
         _require(study.get('admission', {}).get('mode') == 'pilot'

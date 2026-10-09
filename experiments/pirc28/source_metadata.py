@@ -44,7 +44,10 @@ class SourceMetadata:
                 'study-', 'protocol-', 'preregistration-', 'pirc28-study-definition-', 'admission-')):
             raise ResearchError('CONTRACT_MISMATCH', 'immutable source metadata scope required')
         if object_id in self.values:
-            self.verifiers[object_id]()
+            try:
+                self.verifiers[object_id]()
+            except OSError as error:
+                raise ResearchError('CORRUPT_ARTIFACT', 'pinned source metadata disappeared') from error
             return copy.deepcopy(self.values[object_id])
         # This callback may take time or hand control to another owner. It must
         # never run while we own the shared writer lock.
@@ -71,8 +74,10 @@ class SourceMetadata:
             self.consumed += size
             self.values[object_id], self.verifiers[object_id] = value, verify
             return copy.deepcopy(value)
-        except OSError as error:
-            raise ResearchError('CORRUPT_ARTIFACT', 'original source metadata disappeared') from error
+        except ResearchError:
+            raise
+        except (OSError, ValueError) as error:
+            raise ResearchError('CORRUPT_ARTIFACT', 'invalid original source metadata') from error
 
     def finish(self):
         """All original physical guards, while final real authority is locked."""

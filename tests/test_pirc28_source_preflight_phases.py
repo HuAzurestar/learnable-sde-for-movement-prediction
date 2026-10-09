@@ -6,6 +6,7 @@ worker, production authorization or evidence of scientific qualification.
 """
 
 import copy
+from datetime import timedelta
 import hashlib
 import os
 import threading
@@ -85,11 +86,58 @@ def test_all_pure_matrix_phases_and_polls_release_writer_lock(admitted_sources, 
     assert len(polls) > 2*len(master.study_ids)
 
 
+def test_inherited_outer_writer_lock_is_refused_before_poll(admitted_sources):
+    store, _, _, sources = admitted_sources
+    polls = []
+    with store._read_transaction():
+        with pytest.raises(ResearchError) as error:
+            source_preflight.validate_scientific_source(store, *sources[0], check_budget=lambda: polls.append(True))
+        assert error.value.code == 'CONTRACT_MISMATCH'
+    assert not polls
+
+
+def test_malformed_first_physical_read_has_typed_refusal(isolated_source):
+    store, _, study, cell, attempt = isolated_source
+    path = store.path/'manifests'/('study-'+study['study_id']+'.json')
+    with path.open('r+b') as stream:
+        stream.write(b'!')
+        stream.flush()
+        os.fsync(stream.fileno())
+    with pytest.raises(ResearchError) as error:
+        source_preflight.validate_scientific_source(store, study, cell, attempt, check_budget=lambda: None)
+    assert error.value.code == 'CORRUPT_ARTIFACT'
+
+
+def test_grant_expiring_during_pure_phase_is_durably_denied(isolated_source, monkeypatch):
+    from application import research_evidence
+    store, _, study, cell, attempt = isolated_source
+    real_clock = research_evidence.datetime
+    original_binding = source_preflight.study_definition_binding
+
+    class FutureClock(real_clock):
+        @classmethod
+        def now(cls, timezone=None):
+            return real_clock.now(timezone)+timedelta(days=3650)
+
+    def binding(*args, **kwargs):
+        value = original_binding(*args, **kwargs)
+        monkeypatch.setattr(research_evidence, 'datetime', FutureClock)
+        return value
+
+    monkeypatch.setattr(source_preflight, 'study_definition_binding', binding)
+    with pytest.raises(ResearchError) as error:
+        source_preflight.validate_scientific_source(store, study, cell, attempt, check_budget=lambda: None)
+    assert error.value.code == 'UNAUTHORIZED_DATA'
+    assert any(event['event_kind'] == 'DISCLOSURE_DENIED'
+        and event['payload']['study_id'] == study['study_id'] for event in store.events())
+
+
 @pytest.mark.parametrize('damage,code', [
     ('attempt', 'IDENTITY_CONFLICT'), ('settlement', 'UNQUALIFIED'),
     ('closure', 'BUDGET_EXHAUSTED'), ('hold', 'RECOVERY_REQUIRED'),
     ('grant', 'UNAUTHORIZED_DATA'), ('source', 'CORRUPT_ARTIFACT'),
-    ('restored-source', 'CORRUPT_ARTIFACT'), ('events', 'CORRUPT_ARTIFACT')])
+    ('restored-source', 'CORRUPT_ARTIFACT'), ('events', 'CORRUPT_ARTIFACT'),
+    ('missing-protocol', 'CORRUPT_ARTIFACT'), ('missing-source', 'CORRUPT_ARTIFACT')])
 def test_between_phase_mutations_veto_handoff(isolated_source, monkeypatch, damage, code):
     store, _, study, cell, attempt = isolated_source
     original_binding = source_preflight.study_definition_binding
@@ -108,6 +156,10 @@ def test_between_phase_mutations_veto_handoff(isolated_source, monkeypatch, dama
             store.append('ARM_CLOSED', {'arm_id': cell['arm_id'], 'reason': 'SIMULATED_CONTROL'})
         elif damage == 'hold':
             (store.path/'recovery-hold.json').write_bytes(encode({'reason': 'SIMULATED_CONTROL'}))
+        elif damage in ('missing-protocol', 'missing-source'):
+            name = ('protocol-'+study['admission']['protocol_id'] if damage == 'missing-protocol'
+                else 'study-'+study['study_id'])
+            (store.path/'manifests'/(name+'.json')).unlink()
         elif damage == 'grant':
             original = store.authorization
 
@@ -153,12 +205,16 @@ def test_physical_completion_follows_final_authority_io(isolated_source, monkeyp
     store, _, study, cell, attempt = isolated_source
     original = store._events
     changed = []
+    baseline = sum(event['event_kind'] == 'DISCLOSURE_ALLOWED'
+        and event['payload']['study_id'] == study['study_id'] for event in store.events())
 
     def events():
         values = original()
         allowed = [event for event in values if event['event_kind'] == 'DISCLOSURE_ALLOWED'
             and event['payload']['study_id'] == study['study_id']]
-        if store._read_snapshot() is None and len(allowed) >= 2 and not changed:
+        completions = getattr(store._read_scope, 'completions', ())
+        if (store._read_snapshot() is None and len(completions) == 4
+                and len(allowed) == baseline+2 and not changed):
             path = store.path/'manifests'/('study-'+study['study_id']+'.json')
             content = path.read_bytes()
             # The original prefix has just been physically checked. Corrupt an
@@ -168,14 +224,14 @@ def test_physical_completion_follows_final_authority_io(isolated_source, monkeyp
                 stream.write(b' ')
                 stream.flush()
                 os.fsync(stream.fileno())
-            changed.append(True)
+            changed.append((len(completions), len(allowed)-baseline))
         return values
 
     monkeypatch.setattr(store, '_events', events)
     with pytest.raises(ResearchError) as error:
         source_preflight.validate_scientific_source(store, study, cell, attempt, check_budget=lambda: None)
     assert error.value.code == 'CORRUPT_ARTIFACT'
-    assert changed == [True]
+    assert changed == [(4, 2)]
 
 
 def test_frozen_full_64_matrix_allows_original_timeout_owner_heartbeats(tmp_path, monkeypatch):
