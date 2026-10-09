@@ -442,6 +442,19 @@ damaged bytes cannot be allocated without that bound or produce a new success.
 The UI displays the frozen aggregate and downloads the original CSV; it does not
 implement another statistics calculation. Raw trajectories never enter TSDE.
 
+Calibrated matrices retain the original shared preparation separately as
+`calibration_cost`, `calibration_evidence_hash` and `calibration_status_counts`
+in the aggregate and at the top level of the paper evidence index. Import binds
+all three to the immutable source bundle; rehashing a substituted or incomplete
+summary does not authorize it. CSV has one `shared-calibration-preparation`
+`row_kind` for the whole study, with empty arm/metric/independent-n fields and
+the complete frozen cost JSON, including failed attempts. Method rows have
+`row_kind=method-metric` and empty calibration fields: preparation is not charged
+again per arm, stratum or metric. Unknown totals remain empty scalar cells and
+JSON null, not zero. The read-only UI shows the same whole-study source attempts
+without recalculation or horizon subsetting. Old uncalibrated versions keep
+their original CSV/index bytes and do not acquire invented preparation costs.
+
 After publishing a preview/export grant, open the printed local session link:
 
 ```console

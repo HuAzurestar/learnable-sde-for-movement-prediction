@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime, timezone
 import csv
 import errno
@@ -336,6 +337,15 @@ def accept_aggregate(store, aggregate, study_id):
     if (bundle["spec_hash"] != digest(spec) or aggregate.get("expected_cell_count") != len(spec["cells"])
             or aggregate.get("cell_dispositions") != bundle["cells"]):
         raise ResearchError("CONTRACT_MISMATCH", "aggregate is not bound to the frozen complete matrix")
+    header = bundle.get("probability_calibration")
+    declared = spec.get("propagation_design", {}).get("axis_manifest", {}).get("calibrations", [])
+    if declared and header is None:
+        raise ResearchError("CONTRACT_MISMATCH", "frozen bundle omits registered calibration preparation")
+    expected_calibration = {} if header is None else {
+        "calibration_cost": header["cost"], "calibration_evidence_hash": header["evidence_hash"],
+        "calibration_status_counts": dict(Counter(slot["status"] for slot in header["slots"]))}
+    if encode(_calibration_summary(aggregate)) != encode(expected_calibration):
+        raise ResearchError("CONTRACT_MISMATCH", "aggregate calibration differs from the frozen source bundle")
     # Four-file descriptive inputs are not proof of a supervised statistical
     # result. Removing both proof fields must never promote a fixture or an
     # operator-rehashed summary to formal evidence.
@@ -351,10 +361,25 @@ def accept_aggregate(store, aggregate, study_id):
             raise ResearchError("CONTRACT_MISMATCH", "managed adjudication requires its computation reference")
         from application.research_computation import verified_computation
         verified_computation(store, aggregate["computation_ref"], aggregate=aggregate)
-    from infrastructure.research_store import encode
     visibility = evidence_visibility(store, spec, bundle["cells"], calibration=bundle.get("probability_calibration"))
     return store.artifact(encode(aggregate), role="aggregate", visibility=visibility,
                           block_ids=[c["block_id"] for c in spec["cells"]], study_id=study_id)
+
+
+def _calibration_summary(aggregate):
+    """Transport the complete shared summary, without inventing old-version cost."""
+    names = ("calibration_cost", "calibration_evidence_hash", "calibration_status_counts")
+    if not any(name in aggregate for name in names):
+        return {}
+    if not all(name in aggregate for name in names):
+        raise ResearchError("CONTRACT_MISMATCH", "incomplete frozen calibration summary")
+    cost, evidence, counts = (aggregate[name] for name in names)
+    if (not isinstance(cost, dict) or not isinstance(evidence, str) or len(evidence) != 64
+            or any(c not in "0123456789abcdef" for c in evidence) or not isinstance(counts, dict)
+            or not counts or any(state not in {"CALIBRATED", "FAILED", "UNAVAILABLE"}
+                or type(count) is not int or count <= 0 for state, count in counts.items())):
+        raise ResearchError("CONTRACT_MISMATCH", "invalid frozen calibration summary")
+    return {name: aggregate[name] for name in names}
 
 
 def expected_metrics_csv(aggregate):
@@ -362,13 +387,17 @@ def expected_metrics_csv(aggregate):
     stream = io.StringIO(newline="")
     writer = csv.writer(stream, lineterminator="\n")
     extra = [name for name in ("adjudication", "computation_ref") if name in aggregate]
+    calibration = _calibration_summary(aggregate)
+    shared_columns = ["row_kind", *calibration] if calibration else []
+    arm_shared = ["method-metric", "", "", ""] if calibration else []
     eligibility_fields = ("comparison_eligible_cells", "path_output_dispositions")
     current_eligibility = ("comparison_eligible_cell_count" in aggregate or "path_output_dispositions" in aggregate
                           or any(name in arm for arm in aggregate["arms"] for name in eligibility_fields))
     if current_eligibility and any(not all(name in arm for name in eligibility_fields) for arm in aggregate["arms"]):
         raise ResearchError("CONTRACT_MISMATCH", "incomplete frozen CSV eligibility fields")
     columns = list(eligibility_fields) if current_eligibility else []
-    writer.writerow(["aggregate_hash", "arm_id", "metric", "value", "unit", "independent_n", "expected_cells", "successful_cells", "status", "stratum_id", "comparison_dimensions", "charged_ms", "reserved_ms", "measured_ms", "cost_unit", "cost_scope", "status_rates", *columns, *extra])
+    fields = ["aggregate_hash", "arm_id", "metric", "value", "unit", "independent_n", "expected_cells", "successful_cells", "status", "stratum_id", "comparison_dimensions", "charged_ms", "reserved_ms", "measured_ms", "cost_unit", "cost_scope", "status_rates", *columns, *shared_columns, *extra]
+    writer.writerow(fields)
     frozen = [encode(aggregate[name]).decode() for name in extra]
     for arm in aggregate["arms"]:
         costs = [arm["cost"][key] for key in ("charged_ms", "reserved_ms", "measured_ms", "unit", "scope")]
@@ -378,11 +407,22 @@ def expected_metrics_csv(aggregate):
         if not arm["metrics"]:
             writer.writerow([aggregate["aggregate_hash"], arm["arm_id"], "", "", "", arm["independent_n"],
                              arm["expected_cells"], arm["successful_cells"], arm["status"], arm["stratum_id"],
-                             dimensions, *costs, rates, *eligibility, *frozen])
+                             dimensions, *costs, rates, *eligibility, *arm_shared, *frozen])
         for metric, value in sorted(arm["metrics"].items()):
             writer.writerow([aggregate["aggregate_hash"], arm["arm_id"], metric, value, arm["metric_units"][metric],
                              arm["independent_n"], arm["expected_cells"], arm["successful_cells"], arm["status"],
-                             arm["stratum_id"], dimensions, *costs, rates, *eligibility, *frozen])
+                             arm["stratum_id"], dimensions, *costs, rates, *eligibility, *arm_shared, *frozen])
+    if calibration:
+        cost = calibration["calibration_cost"]
+        # One study-level row, even when every target is missing. It is neither
+        # an arm metric nor scientific n; JSON preserves failed/unknown source
+        # attempts while scalar columns remain null when unknown.
+        shared = {"aggregate_hash": aggregate["aggregate_hash"], "row_kind": "shared-calibration-preparation",
+            "charged_ms": cost["charged_ms"], "reserved_ms": cost["reserved_ms"],
+            "measured_ms": cost["measured_ms"], "cost_unit": cost["unit"], "cost_scope": cost["scope"],
+            **{name: encode(value).decode() if name != "calibration_evidence_hash" else value
+               for name, value in calibration.items()}}
+        writer.writerow([shared.get(name, "") for name in fields])
     return stream.getvalue().encode()
 
 
@@ -403,6 +443,7 @@ def expected_paper_index(aggregate, table, figure_index=None):
             "aggregate_hash": aggregate["aggregate_hash"], "table_sha256": hashlib.sha256(table).hexdigest(),
             "code_hash": aggregate["code_hash"], "evidence_status": "active", "relation": None,
             "disclosure_scope": aggregate["disclosure_scope"], "claims": claims,
+            **_calibration_summary(aggregate),
             **({"figure_index_hash": digest(figure_index)} if figure_index is not None else {}),
             **{name: aggregate[name] for name in ("adjudication", "computation_ref") if name in aggregate}}
 
