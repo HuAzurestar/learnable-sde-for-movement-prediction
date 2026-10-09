@@ -9,9 +9,17 @@ Attempts, grants, reservations and arm balances must always use the real store.
 
 import copy
 from contextlib import ExitStack
+from time import sleep as _handoff_wait
 
 from infrastructure.research_json import read_json
 from infrastructure.research_store import ResearchError, _opened_metadata_directory, digest, identifier
+
+
+# file_lock retries nonblocking ownership every10ms; immediately reacquiring
+# after a short read can repeatedly beat an already waiting owner. Two original
+# poll intervals give it a bounded scheduling window OUTSIDE the OS lock. This
+# time remains inside the caller's original funded deadline, never extra grace.
+READER_HANDOFF_SECONDS = 0.02
 
 
 class SourceMetadata:
@@ -73,6 +81,14 @@ class SourceMetadata:
                     raise ResearchError('CORRUPT_ARTIFACT', 'source metadata differs at its physical read')
             self.consumed += size
             self.values[object_id], self.verifiers[object_id] = value, verify
+            # Only actual cold-read phases yield, not every cached document or
+            # numerical iteration. Neither authority nor lock ownership is
+            # retained across this handoff. Cancellation/expiry cannot be hidden
+            # behind an uncharged wait; final current authority and all original
+            # pinned physical identities still complete before disclosure.
+            self.check_budget()
+            _handoff_wait(READER_HANDOFF_SECONDS)
+            self.check_budget()
             return copy.deepcopy(value)
         except ResearchError:
             raise
