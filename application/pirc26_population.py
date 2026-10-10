@@ -107,7 +107,7 @@ def validate_population(value, blocks, train_binding, normalizer, *, study_id):
             "complete training population geometry/membership substituted", "CORRUPT_ARTIFACT")
 
 
-def population_source(store, reference):
+def population_source(store, reference, *, continuation=None):
     """Fresh metadata-only lookup of the separately published train artifact.
 
     Caller must independently register a consumer protocol and lawful grant,
@@ -118,6 +118,10 @@ def population_source(store, reference):
     from application.research_computation import _verify_job_cost
     from experiments.pirc25.affine import code_hash
     with store._read_transaction():
+        bridge = None
+        if continuation is not None:
+            from application.pirc26_model_continuation import continuation_context
+            bridge = continuation_context(store, continuation)
         proof = store._manifest(reference["manifest_id"])
         request = store._manifest(reference["request_manifest_id"])
         attempt = store._attempts().get(reference["attempt_id"])
@@ -133,12 +137,14 @@ def population_source(store, reference):
         require(derived["arms"] == [arm] and derived["preparation_origin"] == request["preparation_origin"]
             and request["preparation_origin"]["spec_hash"] == digest(original)
             and run["spec_hash"] == reference["computation_spec_hash"]
-            and derived["code_hash"] == request["runtime_code_hash"] == code_hash(),
+            and derived["code_hash"] == request["runtime_code_hash"]
+            == (code_hash() if bridge is None else bridge["historical_code_hash"]),
             "training population original arm/code binding differs", "CORRUPT_ARTIFACT")
         _verify_reads(store, request)
         _verify_job_cost(store, reference, run, proof)
         sources = [s for s in request["sources"] if s["split_role"] == "train"]
-        require(_sources(store, original, arm, [s["selection"] for s in sources]) == sources,
+        renewals = None if bridge is None else bridge["renewals"]
+        require(_sources(store, original, arm, [s["selection"] for s in sources], renewals=renewals) == sources,
             "training population source authority moved", "UNAUTHORIZED_DATA")
         population = proof["training_population"]
         require(type(population) is dict and set(population) == {"artifact_id", "provenance", "normalizer"},
@@ -173,7 +179,7 @@ def population_source(store, reference):
             "training_population_ref": deepcopy(reference), "training_population_hash": digest(metadata),
             "independent_block_ids": metadata["independent_block_ids"],
             "population_kind": metadata["population_kind"]}
-        grants = _completion(store, original, arm, sources)
+        grants = _completion(store, original, arm, sources, renewals=renewals)
     _expiry(grants)
     return {"protocol_entry": entry, "data_root": str(store.path / "artifacts"),
             "provenance": deepcopy(metadata), "normalizer": deepcopy(normalizer)}

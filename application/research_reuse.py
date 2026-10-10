@@ -20,6 +20,22 @@ def verified_success_metadata(store, attempt, spec, cell, plugin):
     """
     with store._read_transaction():
         execution_plan(spec, cell, plugin)
+        return _success_metadata(store, attempt, spec, cell, plugin=plugin)
+
+
+def verified_historical_success_metadata(store, attempt, spec, cell, *, admission_hash):
+    """Verify an immutable past execution, not current executable qualification.
+
+    The caller must bind this exact admission hash from the original published
+    result/attachment and separately verify current permission/code compatibility.
+    This path never runs an old plugin or upgrades its scientific qualification.
+    """
+    with store._read_transaction():
+        return _success_metadata(store, attempt, spec, cell, historical_admission=admission_hash)
+
+
+def _success_metadata(store, attempt, spec, cell, *, plugin=None, historical_admission=None):
+    with store._read_transaction():
         current = store._attempts().get(attempt["attempt_id"])
         run = store._manifest("run-" + attempt["run_id"])
         if (current != attempt or attempt["state"] != "SUCCEEDED"
@@ -51,10 +67,14 @@ def verified_success_metadata(store, attempt, spec, cell, plugin):
                 or receipt.get("attempt_id") != attempt["attempt_id"] or receipt.get("run_id") != run["run_id"]
                 or receipt.get("spec") != spec or receipt.get("cell") != cell
                 or receipt.get("spec_hash") != digest(spec) or receipt.get("cell_hash") != digest(cell)
-                or receipt.get("plugin_hash") != plugin_binding(plugin)):
+                or (plugin is not None and receipt.get("plugin_hash") != plugin_binding(plugin))
+                or (plugin is None and (reference != historical_admission
+                    or receipt.get("documents", {}).get("package", {}).get("code_hash") != spec["code_hash"]))):
             raise ResearchError("UNQUALIFIED", "reused admission bindings differ")
         execution_kind = receipt.get("execution_kind")
-        if execution_kind == "run":
+        if plugin is None:
+            expected_command = receipt.get("command_hash") if execution_kind in {"run", "resume"} else None
+        elif execution_kind == "run":
             expected_command = command_binding(plugin.command_builder)
         elif execution_kind == "resume":
             expected_command = receipt.get("documents", {}).get("package", {}).get("recovery_command_hash")

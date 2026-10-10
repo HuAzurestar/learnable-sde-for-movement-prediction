@@ -71,7 +71,7 @@ def validate_settings(settings):
     require(len(encode(settings)) <= 1024 * 1024, "preparation settings byte quota", "RESOURCE_PLAN_REJECTED")
 
 
-def _sources(store, original, arm, selections, *, require_train=True):
+def _sources(store, original, arm, selections, *, require_train=True, renewals=None):
     """Fresh live authority for all pairs before opening any scientific bytes."""
     require(type(selections) is list and 1 <= len(selections) <= MAX_PAIRS,
             "bounded explicit source population required", "RESOURCE_PLAN_REJECTED")
@@ -95,6 +95,10 @@ def _sources(store, original, arm, selections, *, require_train=True):
         require(bool(cells), "source independent unit absent from original arm", "UNAUTHORIZED_DATA")
         require(roles.setdefault(unit, role) == role, "independent unit occurs across source roles", "UNAUTHORIZED_DATA")
         grant = store.authorization(selection["authorization_id"], version=selection["authorization_version"])
+        historical_grant = grant
+        if renewals is not None:
+            from application.research_continuation import renewed_source_grant
+            grant = renewed_source_grant(store, historical_grant, renewals)
         require(type(grant.get("data_root")) is str and Path(grant["data_root"]).is_absolute(),
                 "explicit authorized preparation root required", "UNAUTHORIZED_DATA")
         root = Path(grant["data_root"])
@@ -103,7 +107,7 @@ def _sources(store, original, arm, selections, *, require_train=True):
             require(not relative.is_absolute() and (root / relative).resolve().is_relative_to(root.resolve()),
                     "paired source escapes authorized root", "UNAUTHORIZED_DATA")
             allowed, _, _ = ledger._read_authority(protocol, block, selection["purpose"],
-                selection["authorization_id"], expected=grant, authorization_version=selection["authorization_version"])
+                selection["authorization_id"], expected=grant, authorization_version=grant.get("version"))
             require(allowed and all(c.get("visibility", "restricted") in grant["visibilities"] for c in cells),
                     "paired-source authority/visibility differs or expired", "UNAUTHORIZED_DATA")
         output_id = selection["output_block_id"]
@@ -116,7 +120,7 @@ def _sources(store, original, arm, selections, *, require_train=True):
         require(total <= MAX_SOURCE_BYTES, "joint paired-source byte quota", "RESOURCE_PLAN_REJECTED")
         selected.append({"selection": deepcopy(selection), "feature": deepcopy(feature),
             "condition": deepcopy(condition), "protocol_hash": digest(protocol),
-            "authorization_hash": digest(grant), "source_identity": list(identity),
+            "authorization_hash": digest(historical_grant), "source_identity": list(identity),
             "split_role": role, "independent_block_id": unit})
     require(not require_train or any(d["split_role"] == "train" for d in selected),
             "train population required to fit normalizer", "UNAUTHORIZED_DATA")
@@ -262,12 +266,15 @@ def _expiry(grants):
             "preparation source permission expired at disclosure", "UNAUTHORIZED_DATA")
 
 
-def _completion(store, original, arm, sources, *, require_train=True):
+def _completion(store, original, arm, sources, *, require_train=True, renewals=None):
     """Preserve shared final physical-scope authority and post-I/O expiry."""
     selections = [s["selection"] for s in sources]
     grants = [store.authorization(s["authorization_id"], version=s["authorization_version"]) for s in selections]
+    if renewals is not None:
+        from application.research_continuation import renewed_source_grant
+        grants = [renewed_source_grant(store, grant, renewals) for grant in grants]
     store._read_completion(
-        lambda: require(_sources(store, original, arm, selections, require_train=require_train) == sources,
+        lambda: require(_sources(store, original, arm, selections, require_train=require_train, renewals=renewals) == sources,
                         "preparation source authority moved at disclosure", "UNAUTHORIZED_DATA"),
         lambda: _expiry(grants))
     return grants
