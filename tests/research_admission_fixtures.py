@@ -50,18 +50,22 @@ def synthetic_plugin(plugin_id, capabilities, state_order, units, resume_level, 
     return ExecutionPlugin(plugin_id, capabilities, state_order, units, resume_level, builder, entry)
 
 
-def bind_fixture_execution(value, plugin, config=None, inputs=None):
+def bind_fixture_execution(value, plugin, config=None, inputs=None, components=None):
     for cell in value["cells"]:
         if cell.get("plugin_id") == plugin.plugin_id:
             cell["resource_class"] = plugin.registry_entry.resource_class
-            cell["execution"] = execution_binding(plugin.registry_entry, config or {}, inputs or {}, matrix_cells=len(value["cells"]))
+            cell["execution"] = execution_binding(plugin.registry_entry, config or {}, inputs or {}, matrix_cells=len(value["cells"]),
+                components=components, component_registries=plugin.component_registries)
 
 
 def admit_fixture(store, value, plugin, root, *, formal=False, package_visibility="synthetic",
                   execution_config=None, execution_inputs=None, recovery_command_builder=None,
                   upstream_ids=(), upstream_inputs=None, accepted_versions=None,
-                  upstream_dependencies=None, pirc22_cutover=None, upstream_visibility="synthetic", legacy_upstream=True):
-    bind_fixture_execution(value, plugin, execution_config, execution_inputs)
+                  upstream_dependencies=None, pirc22_cutover=None, upstream_visibility="synthetic", legacy_upstream=True,
+                  execution_components=None, input_content=None, package_payload=None, split_role=None,
+                  input_block_metadata=None, input_data_root=None,
+                  protocol_id="inputs", authorization_id="execution-fixture"):
+    bind_fixture_execution(value, plugin, execution_config, execution_inputs, execution_components)
     # Explicit engineering-only frozen metadata. These synthetic attestations
     # never claim acceptance of real PIRC-19--22 inputs or grant data access.
     if upstream_inputs is None:
@@ -96,13 +100,18 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
             "upstream_ids": (list(upstream_dependencies[cell["arm_id"]]) if upstream_dependencies is not None
                              else [record["object_id"] for record in upstream_inputs])} for cell in value["cells"]]})
     snapshot_hash = store.publish("upstream-snapshot-" + snapshot.snapshot_hash, snapshot.definition)
-    content = b"explicit synthetic plugin input"
+    content = b"explicit synthetic plugin input" if input_content is None else input_content
     (root / "plugin-input.bin").write_bytes(content)
     blocks = [{"block_id": block, "dataset_id": "synthetic", "release_id": "v1",
                "source_block_id": block, "sha256": hashlib.sha256(content).hexdigest(),
-               "path": "plugin-input.bin", "split_role": "final-eval" if formal else "train",
-               "fit_scope": not formal} for block in sorted({cell["block_id"] for cell in value["cells"]})]
-    protocol = {"schema_version": "pirc25-data-protocol-v1", "protocol_id": "inputs",
+               "path": "plugin-input.bin", "split_role": split_role or ("final-eval" if formal else "train"),
+               "fit_scope": not formal and split_role in (None, "train"),
+               **({"size_bytes": len(content)} if input_content is not None else {})}
+              for block in sorted({cell["block_id"] for cell in value["cells"]})]
+    if input_block_metadata is not None:
+        assert len(blocks) == 1 and input_block_metadata["block_id"] == blocks[0]["block_id"]
+        blocks = [dict(input_block_metadata)]
+    protocol = {"schema_version": "pirc25-data-protocol-v1", "protocol_id": protocol_id,
                 "study_id": value["study_id"], "blocks": blocks}
     if formal:
         gate = PreregistrationGate(store)
@@ -123,14 +132,14 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
             "preregistration_hash": digest(plan), "failure_policy": "retain-and-exclude-incomplete-blocks"}
     EvaluationExposureLedger(store).register_protocol(protocol, digest(protocol))
     value.update(code_hash=code_hash(), protocol_hash=digest(protocol), data_hash=data_binding(protocol))
-    grant = {"authorization_id": "execution-fixture", "study_id": value["study_id"],
+    grant = {"authorization_id": authorization_id, "study_id": value["study_id"],
         "expires_at": "2099-01-01T00:00:00+00:00", "evidence_hash": digest("explicit synthetic operator grant"),
-        "protocol_hash": digest(protocol), "data_root": str(root), "test_authorization": formal,
-        "purposes": ["fit", "execute", "evaluate", "preview", "export", "resume"],
+        "protocol_hash": digest(protocol), "data_root": str(root if input_data_root is None else input_data_root), "test_authorization": formal,
+        "purposes": ["fit", "select", "validate", "execute", "evaluate", "preview", "export", "resume"],
         "visibilities": sorted({"synthetic", package_visibility}), "block_ids": [b["block_id"] for b in blocks]}
     store.authorize(grant)
     upstream = audit_inputs(ROOT, tuple(upstream_ids))
-    payload = {"synthetic_adapter": plugin.plugin_id}
+    payload = {"synthetic_adapter": plugin.plugin_id} if package_payload is None else package_payload
     package = {"schema_version": "pirc25-package-v1", "kind": "PropagationResult",
         "study_id": value["study_id"], "visibility": package_visibility,
         "state_order": list(plugin.state_order), "units": list(plugin.units),
@@ -155,10 +164,11 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
             "checks": [{"check_id": "contract", "artifact_id": artifact["artifact_id"]}]}
         package["qualification_hash"] = store.publish("qualification-" + digest(qualification), qualification)
     reference = store.publish("package-" + digest(package), package)
-    value["admission"] = {"mode": "formal" if formal else "fixture", "protocol_id": "inputs",
+    value["admission"] = {"mode": "formal" if formal else "fixture", "protocol_id": protocol_id,
         "authorization_id": grant["authorization_id"], "package_hash": reference,
         "upstream_snapshot_hash": snapshot_hash, "upstream_acceptance_hash": catalog_hash, "upstream_root": str(root),
-        "upstream_ids": list(upstream_ids), "upstream_hash": upstream["manifest_hash"], "purpose": "evaluate" if formal else "fit"}
+        "upstream_ids": list(upstream_ids), "upstream_hash": upstream["manifest_hash"],
+        "purpose": "evaluate" if formal else {"selection": "select", "validation": "validate"}.get(split_role, "fit")}
     if not legacy_upstream:
         value["admission"].pop("upstream_ids")
         value["admission"].pop("upstream_hash")

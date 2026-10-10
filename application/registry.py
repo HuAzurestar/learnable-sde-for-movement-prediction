@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Callable, Dict, Generic, TypeVar
 
-from domain import ConfigurationError
 from .research_registry import VersionedRegistry, plan_resources
 from .research_execution import BINDING_FIELDS
 from infrastructure.research_store import ResearchError, encode
@@ -65,6 +64,7 @@ class ComponentRegistry(Generic[ConfigT, ComponentT]):
 
     def register(self, name: str, builder: Callable[[ConfigT], ComponentT]) -> None:
         if not name or name in self._builders:
+            from domain import ConfigurationError
             raise ConfigurationError(f"组件名为空或重复: {name!r}")
         self._builders[name] = builder
 
@@ -72,6 +72,16 @@ class ComponentRegistry(Generic[ConfigT, ComponentT]):
         try:
             return self._builders[name](config)
         except KeyError as exc:
+            from domain import ConfigurationError
             raise ConfigurationError(
                 f"未知组件 {name!r}；可用组件: {self.names}"
             ) from exc
+
+
+def __getattr__(name):
+    # Keep the historical error identity available without loading tensor
+    # domain values during allocation-free versioned owner registration.
+    if name == "ConfigurationError":
+        from domain import ConfigurationError
+        return ConfigurationError
+    raise AttributeError(name)

@@ -16,6 +16,7 @@ from experiments.pirc25.runner import SharedRunner
 from infrastructure.process_tree import ProcessTree
 from infrastructure.research_control import CheckpointExchange
 from infrastructure.research_store import ResearchStore, digest
+from tests.native_checkpoint_trace import NativeCheckpointTrace
 from tests.test_research_live_checkpoint import prepared
 
 
@@ -35,17 +36,29 @@ def test_early_real_checkpoint_stop_excludes_later_owner_work_and_resumes(
         tmp_path / "resumed", level, "resumed")
     original_wait, original_close = ProcessTree.wait_stopped, ProcessTree.close
     original_append, original_ack = store.append, CheckpointExchange.acknowledge
+    original_request, original_response = CheckpointExchange.request, CheckpointExchange.response
     stopped, acknowledgements, delayed = [], [], []
+    trace = NativeCheckpointTrace()
+    checkpoint_deadline = [None]
+
+    def request(exchange):
+        checkpoint_deadline[0] = exchange.deadline
+        return trace.call("request", lambda: original_request(exchange), deadline=exchange.deadline)
+
+    def response(exchange):
+        return trace.call("response", lambda: original_response(exchange),
+                          deadline=exchange.deadline, frame=True, omit_empty=True)
 
     def wait_stopped(tree, *args, **kwargs):
-        result = original_wait(tree, *args, **kwargs)
+        result = trace.call("native-stop", lambda: original_wait(tree, *args, **kwargs),
+                            deadline=checkpoint_deadline[0], native_code=lambda: tree.process.poll())
         if result:
             # Keep the actual native observation and actual wrapper exit code.
             stopped.append((time.monotonic(), tree.process.poll()))
         return result
 
     def acknowledge(exchange, artifact_id):
-        result = original_ack(exchange, artifact_id)
+        result = trace.call("ack", lambda: original_ack(exchange, artifact_id), deadline=exchange.deadline)
         acknowledgements.append((time.monotonic(), exchange.deadline, artifact_id))
         return result
 
@@ -57,13 +70,18 @@ def test_early_real_checkpoint_stop_excludes_later_owner_work_and_resumes(
         time.sleep(0.8)  # Coordinator only; the whole native tree is already stopped.
 
     def append(kind, *args, **kwargs):
-        result = original_append(kind, *args, **kwargs)
+        operation = {"CHECKPOINT_REQUESTED": "journal-request", "CHECKPOINT_SAVED": "journal-save",
+                     "WORKER_TREE_STOPPED": "journal-stop"}.get(kind)
+        result = (trace.call(operation, lambda: original_append(kind, *args, **kwargs),
+                             deadline=checkpoint_deadline[0])
+                  if operation else original_append(kind, *args, **kwargs))
         if delay_at == "stop-journal" and kind == "WORKER_TREE_STOPPED" and not delayed:
             delay()
         return result
 
     def close(tree):
-        result = original_close(tree)
+        result = trace.call("close", lambda: original_close(tree),
+                            deadline=checkpoint_deadline[0], native_code=lambda: tree.process.poll())
         if delay_at == "native-close" and not delayed:
             delay()
         return result
@@ -71,12 +89,20 @@ def test_early_real_checkpoint_stop_excludes_later_owner_work_and_resumes(
     monkeypatch.setattr(ProcessTree, "wait_stopped", wait_stopped)
     monkeypatch.setattr(ProcessTree, "close", close)
     monkeypatch.setattr(CheckpointExchange, "acknowledge", acknowledge)
+    monkeypatch.setattr(CheckpointExchange, "request", request)
+    monkeypatch.setattr(CheckpointExchange, "response", response)
     monkeypatch.setattr(store, "append", append)
-    interrupted = SharedRunner(store, registry, recovery_registry=adapters).run_cell(
-        "resumed", digest(value["cells"][0]), budget=BudgetSpec(3))
-    assert len(delayed) == 1, "actual post-stop boundary was not reached"
-    assert len(acknowledgements) == 1 and acknowledgements[0][0] < acknowledgements[0][1]
-    assert time.monotonic() >= acknowledgements[0][1], "counterexample did not cross the fuse"
+    try:
+        interrupted = SharedRunner(store, registry, recovery_registry=adapters).run_cell(
+            "resumed", digest(value["cells"][0]), budget=BudgetSpec(3))
+    except Exception:
+        # The original owner's containment/cleanup path has unwound.
+        # Output only after failure, never add critical-path I/O or claim exit.
+        print("Native checkpoint failure timeline:", json.dumps(trace.report(), sort_keys=True))
+        raise
+    assert len(delayed) == 1, ("actual post-stop boundary was not reached", trace.report())
+    assert len(acknowledgements) == 1 and acknowledgements[0][0] < acknowledgements[0][1], trace.report()
+    assert time.monotonic() >= acknowledgements[0][1], ("counterexample did not cross the fuse", trace.report())
     assert interrupted["state"] == "FAILED" and interrupted["exit_code"] != 0, interrupted
     assert store.attempts()[interrupted["attempt_id"]]["error_code"] == "CHECKPOINT_SAVED"
     events = store.events()

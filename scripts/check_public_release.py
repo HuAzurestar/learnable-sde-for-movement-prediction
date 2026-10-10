@@ -80,8 +80,20 @@ PUBLIC_NEX326_REFERENCES = {
     Path("tests/test_terrain_benchmark.py"),
 }
 
+# These adapters consume models/features from the already-public package.
+# Permit only that exact public package name, not other internal lineage IDs.
+PUBLIC_PHASE_SPACE_ADAPTER_REFERENCES = {
+    Path("application/pirc26_dynamics.py"),
+    Path("tests/test_pirc26_dynamics_adapters.py"),
+    Path("application/pirc26_dsde.py"),
+    Path("tests/test_pirc26_dsde.py"),
+}
+
 
 def is_approved_public_reference(label: str, relative: Path, matched: str) -> bool:
+    if (label == "internal work item" and relative in PUBLIC_PHASE_SPACE_ADAPTER_REFERENCES
+            and matched.upper() == "NEX326"):
+        return True
     if label == "internal work item" and (
         relative.is_relative_to(PUBLIC_NEX326)
         or relative in PUBLIC_NEX326_REFERENCES
