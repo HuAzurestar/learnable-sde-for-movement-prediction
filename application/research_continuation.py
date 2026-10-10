@@ -5,6 +5,7 @@ proof of an off-platform issuer. Every reference is content/hash bound.
 """
 from copy import deepcopy
 from datetime import datetime, timezone
+import os
 
 from infrastructure.research_store import ResearchError, digest
 
@@ -97,3 +98,47 @@ def renewed_source_grant(store, original, renewals):
     require(type(renewals) is dict and key in renewals,
             "explicit upstream grant renewal absent", "UNAUTHORIZED_DATA")
     return resolve_grant(store, original, renewals[key])
+
+
+def pid_reuse_observation(pid, recorded_started_at):
+    """Read-only native birth identity; unknown observations NEVER clear a veto.
+
+    Caller must already have durable whole-tree-stop evidence. This only proves
+    that a currently existing Windows PID is a different, later-born process.
+    https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes
+    """
+    if os.name != "nt" or type(pid) is not int or pid <= 1:
+        return None
+    import ctypes
+    from ctypes import wintypes
+    try:
+        recorded = datetime.fromisoformat(recorded_started_at)
+        if recorded.tzinfo is None:
+            return None
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.GetProcessTimes.argtypes = [wintypes.HANDLE, *[ctypes.POINTER(wintypes.FILETIME)] * 4]
+        kernel.GetProcessTimes.restype = wintypes.BOOL
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return None
+        try:
+            creation, exit_time, kernel_time, user_time = [wintypes.FILETIME() for _ in range(4)]
+            if not kernel.GetProcessTimes(handle, ctypes.byref(creation), ctypes.byref(exit_time),
+                                          ctypes.byref(kernel_time), ctypes.byref(user_time)):
+                return None
+            ticks = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+            birth = datetime.fromtimestamp((ticks - 116444736000000000) / 10000000, timezone.utc)
+            # Whole-tree launch always precedes WORKER_STARTED journal time.
+            # Two seconds is a conservative timestamp/observation margin.
+            if (birth - recorded).total_seconds() <= 2:
+                return None
+            return {"pid": pid, "recorded_started_at": recorded_started_at,
+                    "current_process_created_at": birth.isoformat(), "creation_filetime": ticks,
+                    "source": "native-GetProcessTimes-query-only"}
+        finally:
+            kernel.CloseHandle(handle)
+    except (ValueError, TypeError, OSError, OverflowError):
+        return None

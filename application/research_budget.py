@@ -123,13 +123,20 @@ class BudgetLedger:
             stops = {e["payload"].get("reservation_id") for e in events
                      if e["event_kind"] in {"WORKER_TREE_STOPPED", "WORKER_STOP_CONFIRMED"}}
             relevant = {r["reservation_id"] for r in costs}
-            for worker in (e["payload"] for e in events if e["event_kind"] == "WORKER_STARTED"
-                           and e["payload"].get("reservation_id") in relevant):
+            reuse_evidence = []
+            for worker_event in (e for e in events if e["event_kind"] == "WORKER_STARTED"
+                                 and e["payload"].get("reservation_id") in relevant):
+                worker = worker_event["payload"]
                 if (worker["reservation_id"] not in stops
                         or attempts[worker["attempt_id"]]["state"] not in self.store.TERMINAL):
                     raise ResearchError("RECOVERY_REQUIRED", "whole-tree stop/terminal proof absent")
                 if process_may_be_alive(worker.get("pid")):
-                    raise ResearchError("WORKER_ACTIVE", "recorded worker may still be alive")
+                    from .research_continuation import pid_reuse_observation
+                    reused = pid_reuse_observation(worker.get("pid"), worker_event["created_at"])
+                    if reused is None:
+                        raise ResearchError("WORKER_ACTIVE", "recorded worker may still be alive")
+                    reuse_evidence.append({**reused, "worker_event_hash": worker_event["hash"],
+                                           "reservation_id": worker["reservation_id"]})
             receipt = {"schema_version": "pirc25-arm-continuation-v1", "arm_id": arm_id,
                        "approval": approval_ref, "retained_cost_ms": used,
                        "closed_event_hashes": [e["hash"] for e in events if e["event_kind"] == "ARM_CLOSED"
@@ -137,6 +144,7 @@ class BudgetLedger:
                        "stop_event_hashes": [e["hash"] for e in events
                            if e["event_kind"] in {"WORKER_TREE_STOPPED", "WORKER_STOP_CONFIRMED"}
                            and e["payload"].get("reservation_id") in relevant],
+                       "pid_reuse_evidence": reuse_evidence,
                        "verified_prefix_hash": events[-1]["hash"]}
             reference = {"manifest_id": "arm-continuation-" + digest(receipt), "sha256": digest(receipt)}
             self.store.publish(reference["manifest_id"], receipt)

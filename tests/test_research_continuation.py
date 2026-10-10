@@ -1,6 +1,9 @@
 """Scoped immutable continuations/renewals; isolated stores, no research data."""
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+import os
+import subprocess
+import sys
 
 import pytest
 
@@ -65,6 +68,43 @@ def test_unknown_stop_still_closes_continued_arm_and_replay_does_not_reopen(tmp_
     assert ledger.balance("affine")["closed"]
     ledger.continue_arm("affine", approval_ref=ref)
     assert ledger.balance("affine")["closed"]
+
+
+def test_later_pid_reuse_with_old_whole_tree_stop_does_not_target_new_process(tmp_path, monkeypatch):
+    store, attempts = registered(tmp_path)
+    ledger = closed(store, attempts[0])
+    reservation = next(e['payload'] for e in store.events() if e['event_kind'] == 'RESERVE')
+    worker = store.append("WORKER_STARTED", {"reservation_id": reservation['reservation_id'],
+                                             "attempt_id": attempts[0], "pid": 123})
+    store.append("WORKER_TREE_STOPPED", {"reservation_id": reservation['reservation_id'],
+                                         "attempt_id": attempts[0]})
+    monkeypatch.setattr("infrastructure.process_tree.process_may_be_alive", lambda pid: True)
+    evidence = {'pid': 123, 'recorded_started_at': worker['created_at'],
+                'current_process_created_at': (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()}
+    monkeypatch.setattr("application.research_continuation.pid_reuse_observation", lambda *args: evidence)
+    reference = ledger.continue_arm("affine", approval_ref=approved(store))
+    receipt = store.manifest(reference['manifest_id'])
+    assert receipt['pid_reuse_evidence'][0]['worker_event_hash'] == worker['hash']
+    assert ledger.balance('affine')['committed_ms'] == 500
+    assert not ledger.balance('affine')['closed']
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='native Windows creation identity')
+def test_native_process_birth_distinguishes_same_instance_from_reused_pid():
+    from application.research_continuation import pid_reuse_observation
+    child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(20)'],
+                             creationflags=subprocess.CREATE_NO_WINDOW)
+    try:
+        now = datetime.now(timezone.utc)
+        assert pid_reuse_observation(child.pid, now.isoformat()) is None
+        old = (now - timedelta(days=1)).isoformat()
+        observation = pid_reuse_observation(child.pid, old)
+        assert observation['pid'] == child.pid
+        assert datetime.fromisoformat(observation['current_process_created_at']) > datetime.fromisoformat(old)
+        assert child.poll() is None  # A read-only identity query never stops it.
+    finally:
+        child.terminate()
+        child.wait(timeout=5)
 
 
 @pytest.mark.parametrize("fault", ["unsettled", "cap", "scope", "hold", "stop", "live"])
