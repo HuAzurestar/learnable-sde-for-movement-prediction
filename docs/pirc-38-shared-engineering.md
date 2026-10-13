@@ -711,3 +711,34 @@ read. External export guards also refuse publication after target fsync, preserv
 existing output and any already published private evidence candidate. Corrupt
 authority/identity conflicts retain their original refusal codes; unrelated
 lifecycle I/O failures are not classified as exposure audit failures.
+
+### Explicit concurrent compute dispatch
+
+The CPU queue capacity is not the metadata writer lock. A local owner may
+publish and explicitly activate a `pirc25-concurrent-dispatch-policy-v1`
+document through `application.research_dispatch_policy.activate_policy`.
+The closed document records the exact `store_id`, `decision="approved"`,
+`human_issuer`, `quoted_authorization`, sorted unique `resources` (`cpu` and/or
+`gpu`) and nonempty sorted unique `arm_prefixes`. It must retain
+`write_policy="atomic-single-writer"`, `budget_policy_changed=false` and
+`data_scope_changed=false`. Publish the immutable document before activating
+its exact `{manifest_id, sha256}` reference; a file alone is not permission.
+An activation is append-only and idempotent. Corrupt, foreign or retroactively
+published policy evidence refuses dispatch instead of falling back.
+
+For authorized arms/resources, independent funded attempts obtain unique
+compute tickets without the legacy global capacity/FIFO gate. Old unclaimed
+requests and unsettled claims therefore cannot stop other authorized attempts.
+Their reservations remain fully held against their original arms; no cost is
+reset, no new budget identity is created, and the same attempt cannot claim twice.
+The original `runtime-resources` manifest is unchanged. Unactivated or out-of-
+scope clients retain its legacy capacity and scheduling behavior. A deployment
+must update each participating producer to this implementation; older clients
+do not acquire new behavior merely because an activation exists in the ledger.
+
+Journal publication and claim assignment still execute inside the authoritative
+writer transaction. Each worker writes only its own attempt directory and its
+source-bound result. Registration, data/admission checks, native containment,
+job/arm accounting, integrity checks and recovery holds remain in force.
+This permission changes compute admission capacity, not data freezing, scientific
+qualification, available physical hardware or acceptance of a research result.
