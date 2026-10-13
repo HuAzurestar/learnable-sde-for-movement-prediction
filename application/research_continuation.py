@@ -123,7 +123,12 @@ def pid_reuse_observation(pid, recorded_started_at):
         kernel.CloseHandle.argtypes = [wintypes.HANDLE]
         handle = kernel.OpenProcess(0x1000, False, pid)
         if not handle:
-            return None
+            # OpenProcess can deny access to a retired process object that is
+            # absent from the executing-process table. Never infer exit from
+            # that error: require two complete native snapshots, including our
+            # own process, and the caller's pre-existing whole-tree-stop proof.
+            error = ctypes.get_last_error()
+            return pid_absence_observation(pid, recorded_started_at, open_error=error)
         try:
             creation, exit_time, kernel_time, user_time = [wintypes.FILETIME() for _ in range(4)]
             if not kernel.GetProcessTimes(handle, ctypes.byref(creation), ctypes.byref(exit_time),
@@ -140,5 +145,74 @@ def pid_reuse_observation(pid, recorded_started_at):
                     "source": "native-GetProcessTimes-query-only"}
         finally:
             kernel.CloseHandle(handle)
+    except (ValueError, TypeError, OSError, OverflowError):
+        return None
+
+
+def _snapshot_pid_presence(pid):
+    """Complete read-only native process table; any enumeration fault unknown.
+
+    https://learn.microsoft.com/en-us/windows/win32/api/tlhelp32/nf-tlhelp32-createtoolhelp32snapshot
+    TH32CS_SNAPPROCESS includes all system processes, not their restricted
+    modules/heaps. A query denial is not confused with absence.
+    """
+    if os.name != "nt" or type(pid) is not int or not 1 < pid < 2**32:
+        return None
+    import ctypes
+    from ctypes import wintypes
+    class Entry(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", wintypes.LONG),
+            ("dwFlags", wintypes.DWORD), ("szExeFile", wintypes.WCHAR * 260)]
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    for name in ("Process32FirstW", "Process32NextW"):
+        function = getattr(kernel, name)
+        function.argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+        function.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.CreateToolhelp32Snapshot(2, 0)
+    if not handle or handle == ctypes.c_void_p(-1).value:
+        return None
+    try:
+        entry = Entry()
+        entry.dwSize = ctypes.sizeof(Entry)
+        if not kernel.Process32FirstW(handle, ctypes.byref(entry)):
+            return None
+        seen = set()
+        while True:
+            if entry.th32ProcessID in seen or len(seen) >= 100000:
+                return None
+            seen.add(entry.th32ProcessID)
+            if not kernel.Process32NextW(handle, ctypes.byref(entry)):
+                if ctypes.get_last_error() != 18 or os.getpid() not in seen:
+                    return None
+                return {"present": pid in seen, "process_count": len(seen), "self_present": True}
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def pid_absence_observation(pid, recorded_started_at, *, open_error):
+    """Only complete fresh absence clears a historical identity veto.
+
+    This is not permission to stop/recover a live tree. continue_arm already
+    requires durable old whole-tree stop, terminal attempts and settled costs.
+    Present/protected/unknown identities remain vetoed; no process is killed.
+    """
+    if type(pid) is not int or not 1 < pid < 2**32 or open_error not in (5, 87):
+        return None
+    try:
+        if datetime.fromisoformat(recorded_started_at).tzinfo is None:
+            return None
+        samples = [_snapshot_pid_presence(pid), _snapshot_pid_presence(pid)]
+        if not all(s and s.get("present") is False and s.get("self_present") is True
+                   and type(s.get("process_count")) is int and s["process_count"] > 0 for s in samples):
+            return None
+        return {"pid": pid, "recorded_started_at": recorded_started_at,
+            "observation_kind": "absent-from-executing-process-table", "open_process_error": open_error,
+            "native_snapshots": samples, "source": "native-TH32CS_SNAPPROCESS-query-only"}
     except (ValueError, TypeError, OSError, OverflowError):
         return None

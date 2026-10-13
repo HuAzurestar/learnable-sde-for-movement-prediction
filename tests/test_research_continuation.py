@@ -89,6 +89,48 @@ def test_later_pid_reuse_with_old_whole_tree_stop_does_not_target_new_process(tm
     assert not ledger.balance('affine')['closed']
 
 
+@pytest.mark.parametrize("samples,accepted", [
+    ([{"present": False, "self_present": True, "process_count": 2}] * 2, True),
+    ([{"present": False, "self_present": True, "process_count": 2}, None], False),
+    ([{"present": False, "self_present": True, "process_count": 2},
+      {"present": True, "self_present": True, "process_count": 3}], False),
+    ([{"present": False, "self_present": False, "process_count": 2}] * 2, False),
+    ([{"present": False, "self_present": True, "process_count": 0}] * 2, False),
+])
+def test_absence_requires_two_complete_native_snapshots(monkeypatch, samples, accepted):
+    from application.research_continuation import pid_absence_observation
+    observations = iter(samples)
+    monkeypatch.setattr("application.research_continuation._snapshot_pid_presence", lambda pid: next(observations))
+    result = pid_absence_observation(123, datetime.now(timezone.utc).isoformat(), open_error=5)
+    assert (result is not None) == accepted
+    if accepted:
+        assert result['observation_kind'] == 'absent-from-executing-process-table'
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='native Windows process table')
+def test_native_snapshot_contains_live_identity_and_absence_is_read_only():
+    from application.research_continuation import _snapshot_pid_presence, pid_absence_observation
+    now = datetime.now(timezone.utc).isoformat()
+    assert _snapshot_pid_presence(os.getpid())['present']
+    assert pid_absence_observation(os.getpid(), now, open_error=5) is None
+    missing = 2**31 - 1
+    observation = pid_absence_observation(missing, now, open_error=5)
+    assert observation['pid'] == missing and len(observation['native_snapshots']) == 2
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='native Windows live-identity veto')
+def test_native_live_pid_cannot_continue_even_with_a_recorded_stop(tmp_path):
+    store, attempts = registered(tmp_path)
+    ledger = closed(store, attempts[0])
+    reservation = next(e['payload'] for e in store.events() if e['event_kind'] == 'RESERVE')
+    store.append('WORKER_STARTED', {'reservation_id': reservation['reservation_id'],
+        'attempt_id': attempts[0], 'pid': os.getpid()})
+    store.append('WORKER_TREE_STOPPED', {'reservation_id': reservation['reservation_id']})
+    with pytest.raises(ResearchError, match='WORKER_ACTIVE'):
+        ledger.continue_arm('affine', approval_ref=approved(store))
+    assert not any(e['event_kind'] == 'ARM_CONTINUATION' for e in store.events())
+
+
 @pytest.mark.skipif(os.name != 'nt', reason='native Windows creation identity')
 def test_native_process_birth_distinguishes_same_instance_from_reused_pid():
     from application.research_continuation import pid_reuse_observation
@@ -125,6 +167,9 @@ def test_continuation_rejects_unsafe_or_unapproved_reopening(tmp_path, monkeypat
         if fault == "live":
             store.append("WORKER_TREE_STOPPED", {"reservation_id": reservation["reservation_id"]})
             monkeypatch.setattr("infrastructure.process_tree.process_may_be_alive", lambda pid: True)
+            # The fixture models a genuinely live/unknown identity, not an
+            # absent native PID for which fresh stop-safe evidence is available.
+            monkeypatch.setattr("application.research_continuation.pid_reuse_observation", lambda *args: None)
     with pytest.raises(ResearchError):
         ledger.continue_arm("affine", approval_ref=ref)
     assert not any(e["event_kind"] == "ARM_CONTINUATION" for e in store.events())
