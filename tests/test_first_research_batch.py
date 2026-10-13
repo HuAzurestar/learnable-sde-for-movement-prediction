@@ -104,3 +104,43 @@ def test_actual_registration_and_pre_read_admission_in_disposable_store(batch, a
     assert receipt["mode"] == "pilot" and receipt["qualification"] == "fixture"
     assert receipt["documents"]["protocol"]["blocks"][0]["split_role"] == "validation"
     assert not any(e["event_kind"] in {"RESERVE", "WORKER_STARTED"} for e in store.events())
+
+
+def load_dispatch(batch):
+    import sys
+    sys.modules["pirc27_first_batch"] = batch
+    path = Path(batch.__file__).with_name("pirc27_first_batch_dispatch.py")
+    spec = importlib.util.spec_from_file_location("pirc27_dispatch_controls", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_dispatch_run_identity_is_literal_actual_owner_identity(batch, arms, tmp_path):
+    from infrastructure.research_store import ResearchStore
+    store = ResearchStore(tmp_path, "dispatch-identity-control", initialize=True)
+    store.publish(batch.ORIGINAL, {"arms": list(arms.values())})
+    batch.prepare(store)
+    record = store.manifest("study-" + batch.STUDY)
+    dispatch = load_dispatch(batch)
+    for cell in record["spec"]["cells"]:
+        assert dispatch.run_identity(record, cell) == store.register_run(batch.STUDY, cell)
+
+
+def test_dispatch_inspects_only_owned_records_without_foreign_manifest_reads(
+        batch, arms, tmp_path, monkeypatch):
+    from infrastructure.research_store import ResearchStore
+    store = ResearchStore(tmp_path, "dispatch-inspection-control", initialize=True)
+    store.publish(batch.ORIGINAL, {"arms": list(arms.values())})
+    result = batch.prepare(store)
+    dispatch = load_dispatch(batch)
+    monkeypatch.setattr(dispatch, "SPEC_HASH", result["spec_hash"])  # Disposable root only.
+    original = store.manifest
+    def exact_study_only(object_id):
+        assert object_id == "study-" + batch.STUDY
+        return original(object_id)
+    monkeypatch.setattr(store, "manifest", exact_study_only)
+    _, attempts, pending, balances = dispatch.inspect_owned(store)
+    assert attempts == [] and len(pending) == 8
+    assert all(b["committed_ms"] == 0 and not b["closed"] for b in balances)
+    assert not any(e["event_kind"] == "WORKER_STARTED" for e in store.events())
