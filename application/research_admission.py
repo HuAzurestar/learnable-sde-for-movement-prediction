@@ -555,4 +555,5 @@ class AdmissionGate:
         def checkpoint(state, progress, deadline):
             return checkpoint_handler(state, progress, admitted, deadline)
         return ResearchSupervisor(self.store).run(attempt_id, command, budget, result_validator=validate,
-            resource_plan=resource_plan, checkpoint_handler=checkpoint if checkpoint_handler is not None else None)
+            resource_plan=resource_plan, checkpoint_handler=checkpoint if checkpoint_handler is not None else None,
+            resource_sharing=cell.get("resource_sharing"))

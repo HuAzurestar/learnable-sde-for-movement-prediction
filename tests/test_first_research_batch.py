@@ -116,6 +116,50 @@ def load_dispatch(batch):
     return module
 
 
+def load_shared_cpu_supplement(batch):
+    import sys
+    sys.modules["pirc27_first_batch"] = batch
+    path = Path(batch.__file__).with_name("pirc27_shared_cpu_supplement.py")
+    spec = importlib.util.spec_from_file_location("pirc27_shared_cpu_supplement_controls", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_shared_cpu_supplement_is_two_new_gaussian_cells_without_budget_reset(
+        batch, arms, tmp_path):
+    from application.research_admission import AdmissionGate
+    from application.research_queue import SHARED_CPU_POLICY
+    from infrastructure.research_store import ResearchStore
+    from experiments.pirc27.qualification_plugin import qualification_plugin
+
+    supplement = load_shared_cpu_supplement(batch)
+    store = ResearchStore(tmp_path, "shared-cpu-supplement-control", initialize=True)
+    store.publish(batch.ORIGINAL, {"arms": list(arms.values())})
+    store.append("ARM_CLOSED", {"arm_id": arms["exact"]["arm_id"], "reason": "prior interrupted attempt"})
+    result = supplement.prepare(store)
+
+    assert result["state"] == "REGISTERED_NOT_STARTED"
+    assert result["settled_pirc27_ms_before"] == 0
+    assert result["prospective_slot_seconds"] == 600
+    spec = store.manifest("study-" + supplement.STUDY)["spec"]
+    assert spec["arms"] == [arms["gaussian"]]
+    assert spec["scientific_independent_n"] == 0
+    assert {cell["comparison_dimensions"]["model_configuration"] for cell in spec["cells"]} == {
+        "anisotropic-v1", "uncertain-initial-v1"}
+    assert all(cell["execution"]["config"]["method"] == "gaussian" for cell in spec["cells"])
+    assert all(cell["resource_sharing"] == SHARED_CPU_POLICY for cell in spec["cells"])
+    from application.research_execution import execution_plan
+    assert all(execution_plan(spec, cell, qualification_plugin())["matrix_cells"] == 2
+               for cell in spec["cells"])
+
+    cell = spec["cells"][0]
+    attempt = store.new_attempt(store.register_run(supplement.STUDY, cell))
+    receipt = AdmissionGate(store).prepare(spec, cell, qualification_plugin(), attempt)
+    assert receipt["mode"] == "pilot" and receipt["qualification"] == "fixture"
+    assert not any(event["event_kind"] in {"RESERVE", "WORKER_STARTED"} for event in store.events())
+
+
 def test_dispatch_run_identity_is_literal_actual_owner_identity(batch, arms, tmp_path):
     from infrastructure.research_store import ResearchStore
     store = ResearchStore(tmp_path, "dispatch-identity-control", initialize=True)
