@@ -182,6 +182,23 @@ function adjudicationView(aggregate, receipt) {
   section.append(text('pre',JSON.stringify({computation_ref:aggregate.computation_ref,computation_receipt:receipt ?? null},null,2)));
   return section;
 }
+function calibrationPreparationView(aggregate) {
+  const names = ['calibration_cost','calibration_evidence_hash','calibration_status_counts'];
+  if (!names.some(name => Object.hasOwn(aggregate,name))) return null;
+  if (!names.every(name => Object.hasOwn(aggregate,name)) || !Array.isArray(aggregate.calibration_cost?.sources)) {
+    throw new Error('Incomplete frozen calibration preparation.');
+  }
+  const cost = aggregate.calibration_cost, section = document.createElement('section');
+  section.id = 'comparison-calibration-preparation';
+  section.append(text('h3','Shared calibration preparation (whole study)'));
+  section.append(text('p','Original source attempts are counted once for the whole study, including failures. Horizon filtering does not subset this cost. Unknown is not zero; preparation is not method qualification or independent scientific replication.'));
+  section.append(text('p',`Evidence ${aggregate.calibration_evidence_hash} · ${cost.unique_attempts} original attempts · ${cost.scope}`));
+  section.append(table(['Charged slot-ms','Reserved slot-ms','Measured slot-ms'], [[cost.charged_ms ?? 'Unknown',cost.reserved_ms ?? 'Unknown',cost.measured_ms ?? 'Unknown']]));
+  section.append(table(['Preparation status','Registered slots'],Object.entries(aggregate.calibration_status_counts)));
+  section.append(table(['Store / original attempt','State','Cost status','Charged slot-ms','Reserved slot-ms','Measured slot-ms','Original event hash'],cost.sources.map(source => [
+    `${source.store_id} / ${source.attempt_id}`,source.state,source.status,source.charged_ms ?? 'Unknown',source.reserved_ms ?? 'Unknown',source.measured_ms ?? 'Unknown',source.event_hash ?? 'Unavailable'])));
+  return section;
+}
 function frozenComparisonEntry(data, horizon) {
   const index = data.figure_index, aggregate = data.aggregate;
   if (!index) return null;
@@ -239,6 +256,8 @@ function showComparison(target, data) {
     pane.append(text('p','Costs cover all attempts in this stratum, including failed retries and unscored blocks. Unknown is not zero; these are frozen export costs, not the current arm balance.'));
     const costs = table(['Arm / dimensions','Charged slot-ms','Reserved slot-ms','Measured slot-ms','Unknown / pending attempts','Cost sources'], comparisonRows(aggregate,horizon).map(arm => [arm.arm_id + ' ' + dimensionsLabel(arm.comparison_dimensions),arm.cost?.charged_ms ?? 'Unavailable',arm.cost?.reserved_ms ?? 'Unavailable',arm.cost?.measured_ms ?? 'Unknown',`${arm.cost?.unknown_attempt_ids?.length ?? '?'} / ${arm.cost?.pending_attempt_ids?.length ?? '?'}`,arm.cost?.source_event_hashes?.join('\n') || 'No frozen source']));
     costs.id = 'comparison-costs'; pane.append(costs);
+    const preparation = calibrationPreparationView(aggregate);
+    if (preparation) pane.append(preparation);
     pane.append(adjudicationView(aggregate,data.computation_receipt));
     const figure = text('div','Loading frozen worker figure…'); figure.id = 'comparison-figure'; pane.append(figure);
     try {

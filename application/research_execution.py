@@ -29,6 +29,8 @@ def execution_binding(entry, config, inputs, *, matrix_cells, components=None, c
 
 
 def resolve_execution(registry, cell):
+    from .research_disposition import require_executable_cell
+    require_executable_cell(cell)
     binding = cell.get("execution")
     if type(binding) is not dict or set(binding) not in (BINDING_FIELDS, BINDING_FIELDS | COMPOSITION_FIELDS) or binding.get("schema_version") != "pirc25-execution-binding-v1":
         raise ResearchError("CONTRACT_MISMATCH", "explicit versioned execution/resource binding required")
@@ -44,6 +46,8 @@ def resolve_execution(registry, cell):
 
 def execution_plan(spec, cell, plugin):
     """Revalidate even if AdmissionGate is called without SharedRunner."""
+    from .research_disposition import require_executable_cell
+    require_executable_cell(cell)
     entry = plugin.registry_entry
     validate_entry(entry)
     binding = cell.get("execution")

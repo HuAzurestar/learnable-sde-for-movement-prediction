@@ -60,8 +60,16 @@ def bind_fixture_execution(value, plugin, config=None, inputs=None):
 def admit_fixture(store, value, plugin, root, *, formal=False, package_visibility="synthetic",
                   execution_config=None, execution_inputs=None, recovery_command_builder=None,
                   upstream_ids=(), upstream_inputs=None, accepted_versions=None,
-                  upstream_dependencies=None, pirc22_cutover=None, upstream_visibility="synthetic", legacy_upstream=True):
-    bind_fixture_execution(value, plugin, execution_config, execution_inputs)
+                  upstream_dependencies=None, pirc22_cutover=None, upstream_visibility="synthetic", legacy_upstream=True,
+                  fixture_prefix="", input_content=b"explicit synthetic plugin input", primary_metrics=None,
+                  preregistration_extra=None, package_payload=None, preserve_execution=False):
+    if preserve_execution:
+        from application.research_execution import execution_plan
+        for cell in value["cells"]:
+            if cell.get("plugin_id") == plugin.plugin_id:
+                execution_plan(value, cell, plugin)
+    else:
+        bind_fixture_execution(value, plugin, execution_config, execution_inputs)
     # Explicit engineering-only frozen metadata. These synthetic attestations
     # never claim acceptance of real PIRC-19--22 inputs or grant data access.
     if upstream_inputs is None:
@@ -96,13 +104,14 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
             "upstream_ids": (list(upstream_dependencies[cell["arm_id"]]) if upstream_dependencies is not None
                              else [record["object_id"] for record in upstream_inputs])} for cell in value["cells"]]})
     snapshot_hash = store.publish("upstream-snapshot-" + snapshot.snapshot_hash, snapshot.definition)
-    content = b"explicit synthetic plugin input"
-    (root / "plugin-input.bin").write_bytes(content)
+    content = input_content
+    input_filename = fixture_prefix+"plugin-input.bin"
+    (root / input_filename).write_bytes(content)
     blocks = [{"block_id": block, "dataset_id": "synthetic", "release_id": "v1",
                "source_block_id": block, "sha256": hashlib.sha256(content).hexdigest(),
-               "path": "plugin-input.bin", "split_role": "final-eval" if formal else "train",
+               "path": input_filename, "split_role": "final-eval" if formal else "train",
                "fit_scope": not formal} for block in sorted({cell["block_id"] for cell in value["cells"]})]
-    protocol = {"schema_version": "pirc25-data-protocol-v1", "protocol_id": "inputs",
+    protocol = {"schema_version": "pirc25-data-protocol-v1", "protocol_id": fixture_prefix+"inputs",
                 "study_id": value["study_id"], "blocks": blocks}
     if formal:
         gate = PreregistrationGate(store)
@@ -112,25 +121,25 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
         protocol["history_hash"] = gate.import_history(report, digest(report))
         plan = {"schema_version": "pirc25-preregistration-v1", "test_mode": "blind",
                 "study_ids": [value["study_id"]], "protocol_bindings": [protocol_binding(protocol)],
-                "primary_metrics": ["error"], "selection_rule": "fixed synthetic adapters",
+                "primary_metrics": primary_metrics or ["error"], "selection_rule": "fixed synthetic adapters",
                 "stopping_rule": "fixed matrix", "qualification_checks": ["contract"],
                 "upstream_bindings": {value["study_id"]: study_binding(snapshot_hash, catalog_hash, study)},
                 "comparisons": [{"reference": value["arms"][0]["arm_id"],
-                                 "candidates": [a["arm_id"] for a in value["arms"][1:]]}]}
+                                 "candidates": [a["arm_id"] for a in value["arms"][1:]]}], **(preregistration_extra or {})}
         protocol["preregistration_hash"] = gate.register_preregistration(plan, digest(plan))
         value["comparison_plan"] = {"reference_arm_id": value["arms"][0]["arm_id"],
             "candidate_arm_ids": [a["arm_id"] for a in value["arms"][1:]],
             "preregistration_hash": digest(plan), "failure_policy": "retain-and-exclude-incomplete-blocks"}
     EvaluationExposureLedger(store).register_protocol(protocol, digest(protocol))
     value.update(code_hash=code_hash(), protocol_hash=digest(protocol), data_hash=data_binding(protocol))
-    grant = {"authorization_id": "execution-fixture", "study_id": value["study_id"],
+    grant = {"authorization_id": fixture_prefix+"execution-fixture", "study_id": value["study_id"],
         "expires_at": "2099-01-01T00:00:00+00:00", "evidence_hash": digest("explicit synthetic operator grant"),
         "protocol_hash": digest(protocol), "data_root": str(root), "test_authorization": formal,
         "purposes": ["fit", "execute", "evaluate", "preview", "export", "resume"],
         "visibilities": sorted({"synthetic", package_visibility}), "block_ids": [b["block_id"] for b in blocks]}
     store.authorize(grant)
     upstream = audit_inputs(ROOT, tuple(upstream_ids))
-    payload = {"synthetic_adapter": plugin.plugin_id}
+    payload = package_payload if package_payload is not None else {"synthetic_adapter": plugin.plugin_id}
     package = {"schema_version": "pirc25-package-v1", "kind": "PropagationResult",
         "study_id": value["study_id"], "visibility": package_visibility,
         "state_order": list(plugin.state_order), "units": list(plugin.units),
@@ -155,7 +164,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
             "checks": [{"check_id": "contract", "artifact_id": artifact["artifact_id"]}]}
         package["qualification_hash"] = store.publish("qualification-" + digest(qualification), qualification)
     reference = store.publish("package-" + digest(package), package)
-    value["admission"] = {"mode": "formal" if formal else "fixture", "protocol_id": "inputs",
+    value["admission"] = {"mode": "formal" if formal else "fixture", "protocol_id": protocol["protocol_id"],
         "authorization_id": grant["authorization_id"], "package_hash": reference,
         "upstream_snapshot_hash": snapshot_hash, "upstream_acceptance_hash": catalog_hash, "upstream_root": str(root),
         "upstream_ids": list(upstream_ids), "upstream_hash": upstream["manifest_hash"], "purpose": "evaluate" if formal else "fit"}
