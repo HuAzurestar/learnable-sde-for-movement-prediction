@@ -144,3 +144,106 @@ def test_dispatch_inspects_only_owned_records_without_foreign_manifest_reads(
     assert attempts == [] and len(pending) == 8
     assert all(b["committed_ms"] == 0 and not b["closed"] for b in balances)
     assert not any(e["event_kind"] == "WORKER_STARTED" for e in store.events())
+
+
+def test_closed_arm_cells_remain_visible_while_other_original_arm_can_dispatch(
+        batch, cells, monkeypatch):
+    from types import SimpleNamespace
+    dispatch = load_dispatch(batch)
+    spec = {"orchestrator_source_sha256": "planner"}
+    balances = [{"arm_id": "pirc27-affine-" + method + "-mean-x", "closed": method == "exact"}
+                for method in ("exact", "gaussian")]
+    store = SimpleNamespace(TERMINAL={"SUCCEEDED"}, publish=lambda *args: None)
+    monkeypatch.setattr(dispatch, "inspect_owned", lambda owner: (spec, [], cells, balances))
+    selected = []
+    def observe_dispatch(owner, study, cell_hash, *, budget):
+        selected.append(cell_hash)
+        assert budget.job_seconds == 300 and budget.category == "pilot"
+        return {"state": "SUCCEEDED"}  # Selector control only, no research worker.
+    monkeypatch.setattr(batch.SharedRunner, "run_cell", observe_dispatch)
+    result = dispatch.next_cell(store)
+    assert selected == [digest(cells[1])]
+    assert result["blocked_cell_hashes"] == [digest(c) for c in cells if
+                                           c["execution"]["config"]["method"] == "exact"]
+    balances[1]["closed"] = True
+    result = dispatch.next_cell(store)
+    assert result["state"] == "REMAINING_CELLS_BLOCKED"
+    assert len(result["blocked_cell_hashes"]) == 8
+    assert selected == [digest(cells[1])]
+
+
+@pytest.mark.parametrize("durable_success", [False, True])
+def test_stopped_recovery_preserves_original_verdict_cost_and_terminal_identity(
+        batch, arms, tmp_path, monkeypatch, durable_success):
+    from application.research_admission import AdmissionGate
+    from application.research_budget import BudgetLedger, BudgetSpec
+    from infrastructure.research_store import ResearchStore, encode
+    store = ResearchStore(tmp_path, "dispatch-reconcile-control", initialize=True)
+    store.publish(batch.ORIGINAL, {"arms": list(arms.values())})
+    prepared = batch.prepare(store)
+    dispatch = load_dispatch(batch)
+    monkeypatch.setattr(dispatch, "SPEC_HASH", prepared["spec_hash"])
+    spec = store.manifest("study-" + batch.STUDY)["spec"]
+    cell = spec["cells"][0]
+    run_id = store.register_run(batch.STUDY, cell)
+    attempt = store.new_attempt(run_id)
+    reservation = BudgetLedger(store).reserve(attempt, BudgetSpec(batch.JOB_SECONDS, category="pilot"))
+    receipt = AdmissionGate(store).prepare(spec, cell, batch.qualification_plugin(), attempt)
+    store.transition(attempt, "RUNNING")
+    store.append("WORKER_STARTED", {"attempt_id": attempt, "pid": 99999999,
+        "reservation_id": reservation["reservation_id"], "deadline_monotonic": 1.0})
+    stop = store.append("WORKER_TREE_STOPPED", {"attempt_id": attempt,
+        "reservation_id": reservation["reservation_id"], "observed_elapsed_ms": 17,
+        "confirmation": "native-job-or-process-group-no-running-descendants"})
+    # Produce the same schema through the registered plugin, then apply the
+    # real owner validator before standard artifact publication.
+    import subprocess
+    output = tmp_path / "worker-result.json"
+    command = batch.qualification_plugin().command_builder(output, spec, cell)
+    subprocess.run(command, check=True)
+    value = __import__("json").loads(output.read_bytes())
+    AdmissionGate(store).result_validator(receipt, spec, cell, batch.qualification_plugin())(value)
+    artifact = store.artifact(encode(value), role="result", visibility="synthetic",
+                              block_ids=[cell["block_id"]], study_id=batch.STUDY)
+    monkeypatch.setattr(dispatch, "process_may_be_alive", lambda pid: False)
+    def no_launch(*args, **kwargs):
+        raise AssertionError("recovery must never launch another worker")
+    monkeypatch.setattr(batch.SharedRunner, "run_cell", no_launch)
+    if durable_success:
+        BudgetLedger(store).settle(reservation["reservation_id"], 17, outcome="SUCCEEDED")
+        with pytest.raises(ResearchError, match="settlement cannot be replaced"):
+            dispatch.recover_stopped(store, attempt_id=attempt, stop_hash=stop["hash"])
+        result = dispatch.reconcile_published(store)
+        assert result == {"study_id": batch.STUDY, "attempt_id": attempt,
+            "state": "SUCCEEDED", "artifact_id": artifact["artifact_id"],
+            "elapsed_ms": 17, "reconciled": True}
+        assert store.attempts()[attempt]["artifact_id"] == artifact["artifact_id"]
+        assert not BudgetLedger(store).balance(cell["arm_id"])["closed"]
+    else:
+        with pytest.raises(ResearchError, match="durable supervisor success settlement required"):
+            dispatch.reconcile_published(store)
+        assert not any(e["event_kind"] == "SETTLE" for e in store.events())
+        with pytest.raises(ResearchError, match="original native whole-tree stop"):
+            dispatch.recover_stopped(store, attempt_id=attempt, stop_hash="0" * 64)
+        monkeypatch.setattr(dispatch, "process_may_be_alive", lambda pid: True)
+        with pytest.raises(ResearchError, match="may still be alive"):
+            dispatch.recover_stopped(store, attempt_id=attempt, stop_hash=stop["hash"])
+        assert not any(e["event_kind"] == "SETTLE" for e in store.events())
+        monkeypatch.setattr(dispatch, "process_may_be_alive", lambda pid: False)
+        original_transition = store.transition
+        def interrupted_transition(*args, **kwargs):
+            raise OSError("synthetic terminal-write outage")
+        monkeypatch.setattr(store, "transition", interrupted_transition)
+        with pytest.raises(OSError, match="terminal-write outage"):
+            dispatch.recover_stopped(store, attempt_id=attempt, stop_hash=stop["hash"])
+        assert store.attempts()[attempt]["state"] == "RUNNING"
+        monkeypatch.setattr(store, "transition", original_transition)
+        result = dispatch.recover_stopped(store, attempt_id=attempt, stop_hash=stop["hash"])
+        assert result["state"] == "INTERRUPTED" and result["arm_closed"]
+        assert result["elapsed_ms"] == 17 and result["reconciled"]
+        assert dispatch.recover_stopped(store, attempt_id=attempt, stop_hash=stop["hash"]) == result
+        assert store.attempts()[attempt]["artifact_id"] is None
+        assert store._verified_artifact_content(artifact) == encode(value)
+        assert len([e for e in store.events() if e["event_kind"] == "SETTLE"]) == 1
+        assert len([e for e in store.events() if e["event_kind"] == "STOPPED_RECONCILIATION"]) == 1
+    assert BudgetLedger(store).balance(cell["arm_id"])["committed_ms"] == 17
