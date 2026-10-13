@@ -227,6 +227,57 @@ class ProcessTree:
         except ProcessLookupError:
             return False
 
+    def peak_memory_bytes(self):
+        """Return the contained tree's observed peak resident/commit bytes.
+
+        A peak is deliberately monotone: a worker that exceeded its declared
+        envelope cannot become admissible again merely by releasing memory.
+        """
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+            class Basic(ctypes.Structure):
+                _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                            ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                            ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                            ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD),
+                            ("SchedulingClass", wintypes.DWORD)]
+            class IO(ctypes.Structure):
+                _fields_ = [(name, ctypes.c_uint64) for name in (
+                    "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                    "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+            class Extended(ctypes.Structure):
+                _fields_ = [("BasicLimitInformation", Basic), ("IoInfo", IO),
+                            ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                            ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+            data = Extended()
+            if not self.job or not self.kernel.QueryInformationJobObject(
+                    self.job, 9, ctypes.byref(data), ctypes.sizeof(data), None):
+                raise OSError(ctypes.get_last_error(), "cannot observe whole-job memory")
+            return int(data.PeakJobMemoryUsed)
+        if sys.platform.startswith("linux") and Path("/proc").is_dir():
+            _linux_proc_visible()
+            pages = os.sysconf("SC_PAGE_SIZE")
+            total = 0
+            for count, path in enumerate(Path("/proc").iterdir()):
+                if count > 100_000:
+                    raise OSError("process observation quota exceeded")
+                if not path.name.isdecimal():
+                    continue
+                try:
+                    fields = (path / "stat").read_text().rsplit(")", 1)[1].split()
+                    if int(fields[2]) != self.process.pid or fields[0] in {"Z", "X"}:
+                        continue
+                    statm = (path / "statm").read_text().split()
+                    total += int(statm[1]) * pages
+                except (FileNotFoundError, ProcessLookupError):
+                    continue
+                except (ValueError, IndexError) as exc:
+                    raise OSError("cannot parse process tree memory") from exc
+            _linux_proc_visible()
+            return total
+        raise OSError("whole-tree memory observation is unavailable")
+
     def wait_stopped(self, timeout=1):
         """Bounded observation after kill, never an extra computation grace."""
         until = time.monotonic() + timeout

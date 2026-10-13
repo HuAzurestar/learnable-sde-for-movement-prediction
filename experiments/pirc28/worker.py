@@ -53,7 +53,8 @@ def main():
     if spec['admission']['mode'] != 'fixture' and spec['switching_recipe']['schema_version'] == RECIPE_SCHEMA:
         from .source_preflight import validate_scientific_source
         def prefit_poll():
-            if time.monotonic() >= control.descriptor['deadline']:
+            deadline = control.descriptor['deadline']
+            if deadline is not None and time.monotonic() >= deadline:
                 raise ResearchError('TIMEOUT', 'shared supervisor pre-fit deadline reached')
         source_preflight = validate_scientific_source(store, spec, cells[0], attempt, check_budget=prefit_poll)
     # Fixture admission is explicitly engineering-only. Scientific admission
@@ -100,7 +101,8 @@ def main():
 
     def poll():
         now = time.monotonic()
-        if now >= control.descriptor['deadline']:
+        deadline = control.descriptor['deadline']
+        if deadline is not None and now >= deadline:
             raise ResearchError('TIMEOUT', 'shared supervisor deadline reached')
         if control.poll() is not None and latest:
             completed = sum(state['completed_iterations'] + 1 for state in latest['fit_states'] if state is not None)

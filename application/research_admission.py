@@ -310,7 +310,7 @@ class AdmissionGate:
             try:
                 mode = "fixture" if builtin_fixture else spec.get("admission", {}).get("mode")
                 cap = {"fixture": 900, "pilot": 1800, "formal": 7200}.get(mode, 7200)
-                if budget.job_seconds > cap:
+                if budget.job_seconds is not None and budget.job_seconds > cap:
                     raise ResearchError("CONTRACT_MISMATCH", "execution stage budget exceeds its hard cap")
                 admitted.update(self.prepare(spec, cell, plugin, attempt_id, builtin_fixture=builtin_fixture,
                                              recovery_builder=recovery_builder))

@@ -23,7 +23,7 @@ def verified_failure(store, attempt, spec, cell, plugin):
 def _verified_terminal(store, attempt, spec, cell, plugin, *, failed):
     state, role = ('FAILED', 'failure') if failed else ('SUCCEEDED', 'result')
     prefix = 'FAILURE' if failed else 'REUSE'
-    with store.lock():
+    with store._read_transaction():
         request = {"attempt_id": attempt["attempt_id"], "run_id": attempt["run_id"],
                    "artifact_id": attempt.get("artifact_id")}
         store._append(prefix+"_CHECK_STARTED", request)
@@ -87,6 +87,34 @@ def _verified_terminal(store, attempt, spec, cell, plugin, *, failed):
             cost = settlement["payload"]
             expected_id = digest([store.store_id, attempt["attempt_id"]])
             elapsed, reserved = cost.get("monotonic_elapsed_ms"), cost.get("reserved_ms")
+            resource_funding = False
+            if reserved is None:
+                policy_reference = reservation["payload"].get("execution_policy")
+                source_hash = reservation["payload"].get("source_code_hash")
+                resource_funding = (reservation["payload"].get("budget_mode") == "resource-guarded-no-time-cap"
+                    and type(policy_reference) is dict and set(policy_reference) == {"manifest_id", "sha256"}
+                    and source_hash == spec["code_hash"]
+                    and all(cost.get(key) == reservation["payload"].get(key) for key in
+                        ("budget_mode", "execution_policy", "source_code_hash")))
+                if resource_funding:
+                    from application.research_execution_policy import validate_policy, check_resource_observation
+                    policy = store._manifest(policy_reference["manifest_id"])
+                    resource_funding = (digest(policy) == policy_reference["sha256"]
+                        and any(event["event_kind"] == "MANIFEST"
+                            and event["payload"] == {"object_id": policy_reference["manifest_id"],
+                                                     "sha256": policy_reference["sha256"]}
+                            for event in events))
+                    if resource_funding:
+                        validate_policy(policy, store_id=store.store_id, arm_id=cell["arm_id"],
+                            source_code_hash=source_hash)
+                        check_resource_observation(policy, worker["payload"].get("resource_observation"))
+                        resource_funding = worker["payload"].get("deadline_monotonic") is None
+                    restart_reference = reservation["payload"].get("restart_adjudication")
+                    if resource_funding and restart_reference is not None:
+                        from application.research_restart_adjudication import resolve_retry_adjudication
+                        restart = resolve_retry_adjudication(store, restart_reference,
+                            execution_policy=policy_reference, source_code_hash=source_hash)
+                        resource_funding = restart["retry_attempt_id"] == attempt["attempt_id"]
             if (any(event["payload"].get("reservation_id") != expected_id for event in (reservation, settlement, worker))
                     or any(cost.get(key) != value for key, value in {
                         "attempt_id": attempt["attempt_id"], "run_id": run["run_id"], "study_id": spec["study_id"],
@@ -95,7 +123,8 @@ def _verified_terminal(store, attempt, spec, cell, plugin, *, failed):
                         ("attempt_id", "run_id", "study_id", "arm_id", "reserved_ms", "worker_slot"))
                     or isinstance(elapsed, bool) or not isinstance(elapsed, int) or elapsed < 0
                     or cost.get("charged_ms") != elapsed
-                    or isinstance(reserved, bool) or not isinstance(reserved, int) or not 0 < reserved <= 7200000
+                    or not (resource_funding or (not isinstance(reserved, bool)
+                        and isinstance(reserved, int) and 0 < reserved <= 7200000))
                     or not reservation["sequence"] < worker["sequence"] < settlement["sequence"] < completions[0]["sequence"]
                     or not any(event["sequence"] < worker["sequence"] for event in admission_events)):
                 raise ResearchError("UNQUALIFIED", "reused execution/cost bindings differ")

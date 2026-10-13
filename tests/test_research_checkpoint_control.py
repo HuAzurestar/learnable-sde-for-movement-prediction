@@ -15,6 +15,31 @@ def descriptor(tmp_path):
     return json.loads(exchange.environment()[control.ENVIRONMENT])
 
 
+def resource_descriptor(tmp_path):
+    exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", None, 4096)
+    return json.loads(exchange.environment()[control.ENVIRONMENT])
+
+
+def test_resource_guarded_descriptor_has_explicit_nullable_deadline(tmp_path):
+    exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", None, 4096)
+    value = json.loads(exchange.environment()[control.ENVIRONMENT])
+    assert value["schema_version"] == control.RESOURCE_SCHEMA and value["deadline"] is None
+    exchange.request()
+    request = control.WorkerControl(value).poll()
+    assert request["deadline"] is None and request["schema_version"] == control.RESOURCE_SCHEMA
+
+
+@pytest.mark.parametrize("schema,deadline", [
+    (control.SCHEMA, None), (control.RESOURCE_SCHEMA, 1.0),
+    ("unknown", None), ("unknown", 1.0),
+])
+def test_deadline_shape_is_bound_to_control_protocol_version(tmp_path, schema, deadline):
+    value = descriptor(tmp_path)
+    value.update(schema_version=schema, deadline=deadline)
+    with pytest.raises(control.ControlError):
+        control.WorkerControl(value)
+
+
 def test_total_frame_byte_quota_precedes_json_serialization(monkeypatch):
     monkeypatch.setattr(control.json, "dumps", lambda *a, **k: pytest.fail("over-byte-quota frame reached encoding allocation"))
     with pytest.raises(control.ControlError):

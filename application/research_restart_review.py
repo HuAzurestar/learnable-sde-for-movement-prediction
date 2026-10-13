@@ -15,7 +15,7 @@ def _require(condition, message):
         raise ResearchError("RECOVERY_REQUIRED", message)
 
 
-def inspect_restart_review(store, attempt_id):
+def inspect_restart_review(store, attempt_id, *, _final_completion=True):
     """Bind exact terminal/settlement/native-stop/closure events, no writes."""
     identifier(attempt_id)
     result = {}
@@ -99,5 +99,6 @@ def inspect_restart_review(store, attempt_id):
             "recovery_level": "restart-only-no-checkpoint", "history_mutated": False})
     with store._read_transaction():
         check()
-        store._read_completion(check, lambda: None)
+        if _final_completion:
+            store._read_completion(check, lambda: None)
     return deepcopy(result)

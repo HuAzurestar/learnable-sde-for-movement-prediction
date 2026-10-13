@@ -42,8 +42,20 @@ def _current_authority(store, study, cell, attempt, admissions, reserve, prefix)
         'UNQUALIFIED', 'pre-fit original admission/funding changed between phases')
     _require(not (store.path/'recovery-hold.json').exists(),
         'RECOVERY_REQUIRED', 'authoritative recovery holds scientific work')
-    _require(not BudgetLedger(store).balance(cell['arm_id'])['closed'],
-        'BUDGET_EXHAUSTED', 'original scientific arm is closed')
+    payload = reserve['payload']
+    resource = payload.get('budget_mode') == 'resource-guarded-no-time-cap'
+    balance = BudgetLedger(store).balance(cell['arm_id'],
+        execution_policy=payload.get('execution_policy') if resource else None,
+        source_code_hash=payload.get('source_code_hash') if resource else None)
+    if balance['closed'] and resource and payload.get('restart_adjudication'):
+        from application.research_restart_adjudication import resolve_retry_adjudication
+        adjudication = resolve_retry_adjudication(store, payload['restart_adjudication'],
+            execution_policy=payload['execution_policy'], source_code_hash=payload['source_code_hash'])
+        _require(adjudication['retry_attempt_id'] == attempt['attempt_id'],
+            'IDENTITY_CONFLICT', 'restart adjudication belongs to another attempt')
+    else:
+        _require(not balance['closed'],
+            'BUDGET_EXHAUSTED', 'original scientific arm is closed')
 
 
 def validate_scientific_source(store, study, cell, attempt, *, check_budget):
@@ -100,9 +112,15 @@ def validate_scientific_source(store, study, cell, attempt, *, check_budget):
         reserve = reserves[0]
         # SharedSupervisor funds command preparation first; AdmissionGate then
         # publishes its receipt, before the actual worker is launched.
+        funding = reserve['payload']
+        finite_funding = (type(funding.get('reserved_ms')) is int
+            and 0 < funding['reserved_ms'] <= 1_800_000)
+        resource_funding = (funding.get('reserved_ms') is None
+            and funding.get('budget_mode') == 'resource-guarded-no-time-cap'
+            and funding.get('source_code_hash') == study['code_hash']
+            and type(funding.get('execution_policy')) is dict)
         _require(reserve['sequence'] < admissions[0]['sequence']
-            and type(reserve['payload'].get('reserved_ms')) is int
-            and 0 < reserve['payload']['reserved_ms'] <= 1_800_000
+            and (finite_funding or resource_funding)
             and all(reserve['payload'].get(name) == value for name, value in {
                 'attempt_id': attempt['attempt_id'], 'run_id': attempt['run_id'],
                 'study_id': study['study_id'], 'arm_id': cell['arm_id'],

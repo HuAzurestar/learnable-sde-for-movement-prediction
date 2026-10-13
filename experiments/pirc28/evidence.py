@@ -90,6 +90,7 @@ def _cost_history(store, study, cell, attempts, events_by_attempt):
         if len(reserves) > 1 or len(settlements) > 1 or not terminal:
             raise ResearchError('UNQUALIFIED', 'attempt cost/terminal provenance is incomplete')
         cost = None
+        resource_funding = False
         if reserves:
             reserve = reserves[0]
             binding = {'attempt_id': attempt_id, 'run_id': attempt['run_id'], 'study_id': study['study_id'],
@@ -98,7 +99,24 @@ def _cost_history(store, study, cell, attempts, events_by_attempt):
                 raise ResearchError('UNQUALIFIED', 'attempt reservation belongs to a different source/arm')
             reserved = reserve['payload'].get('reserved_ms')
             cap = {'fixture': 900_000, 'pilot': 1_800_000, 'formal': 7_200_000}[study['admission']['mode']]
-            if type(reserved) is not int or not 0 < reserved <= cap:
+            finite_funding = type(reserved) is int and 0 < reserved <= cap
+            resource_funding = (reserved is None
+                and reserve['payload'].get('budget_mode') == 'resource-guarded-no-time-cap'
+                and reserve['payload'].get('source_code_hash') == study['code_hash']
+                and type(reserve['payload'].get('execution_policy')) is dict)
+            if resource_funding:
+                from application.research_execution_policy import resolve_policy
+                resolve_policy(store, reserve['payload']['execution_policy'], arm_id=cell['arm_id'],
+                    source_code_hash=study['code_hash'])
+                restart_reference = reserve['payload'].get('restart_adjudication')
+                if restart_reference is not None:
+                    from application.research_restart_adjudication import resolve_retry_adjudication
+                    restart = resolve_retry_adjudication(store, restart_reference,
+                        execution_policy=reserve['payload']['execution_policy'], source_code_hash=study['code_hash'])
+                    if (restart['retry_attempt_id'] != attempt_id
+                            or restart['parent_attempt_id'] != attempt.get('parent_attempt_id')):
+                        raise ResearchError('UNQUALIFIED', 'restart adjudication attempt lineage differs')
+            if not (finite_funding or resource_funding):
                 raise ResearchError('UNQUALIFIED', 'attempt reservation violates the shared stage cap')
             if settlements:
                 settlement = settlements[0]
@@ -123,7 +141,14 @@ def _cost_history(store, study, cell, attempts, events_by_attempt):
                 'reserved_ms': reserves[0]['payload']['reserved_ms'],
                 'charged_ms': None if cost is None else cost['charged_ms'],
                 'monotonic_elapsed_ms': None if cost is None else cost['monotonic_elapsed_ms'],
-                'settled': cost is not None}})
+                'settled': cost is not None,
+                **({'budget_mode': reserves[0]['payload']['budget_mode'],
+                    'execution_policy': reserves[0]['payload']['execution_policy'],
+                    **({'restart_adjudication': reserves[0]['payload']['restart_adjudication'],
+                        'adjudicated_parent_cost_ms': restart.get(
+                            'retained_cost_ms', restart.get('parent_cost_ms'))}
+                       if reserves[0]['payload'].get('restart_adjudication') is not None else {})}
+                   if resource_funding else {})}})
     return history
 
 

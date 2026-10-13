@@ -12,8 +12,10 @@ import threading
 from contextlib import ExitStack
 
 from infrastructure.process_tree import ProcessTree
+from infrastructure.research_resources import observe_resources
 from infrastructure.research_store import ResearchError, ResearchStore
-from .research_budget import BudgetLedger, BudgetSpec
+from .research_budget import BudgetLedger, BudgetSpec, ResourceBudgetSpec
+from .research_execution_policy import check_resource_observation
 from .research_queue import ResearchQueue
 
 
@@ -28,6 +30,18 @@ class ResearchSupervisor:
         if reservation["settled"]:
             raise ResearchError("IDENTITY_CONFLICT", "settled attempt cannot execute again")
         run = self.store.manifest("run-" + reservation["run_id"])
+        resource_guarded = type(budget) is ResourceBudgetSpec
+        resource_policy = None
+        if resource_guarded:
+            from .research_execution_policy import resolve_policy
+            resource_policy = resolve_policy(self.store, budget.execution_policy,
+                arm_id=run["arm_id"], source_code_hash=budget.source_code_hash)
+        def current_balance():
+            if resource_guarded:
+                return self.budget.balance(run["arm_id"],
+                    execution_policy=budget.execution_policy,
+                    source_code_hash=budget.source_code_hash, attempt_id=attempt_id)
+            return self.budget.balance(run["arm_id"])
         queue = ResearchQueue(self.store)
         try:
             queue.enqueue(reservation, run["cell"].get("resource_class", "cpu"))
@@ -51,13 +65,17 @@ class ResearchSupervisor:
                 raise ResearchError("RESOURCE_PLAN_REJECTED", "worker result byte quota is invalid")
             if not command or any(not isinstance(arg, str) for arg in command):
                 raise ResearchError("CONTRACT_MISMATCH", "worker command must be a string argument list")
+            if resource_guarded:
+                system_path = Path(os.environ.get("SystemDrive", Path.home().anchor or os.path.abspath(os.sep)) + os.sep)
+                preflight_resources = observe_resources(system_path=system_path, runtime_path=self.store.path)
+                check_resource_observation(resource_policy, preflight_resources)
         except BaseException as exc:
             self.budget.settle(reservation["reservation_id"], 0, outcome="PREFLIGHT_FAILED")
             self.store.transition(attempt_id, "PREFLIGHT_FAILED",
                                   error_code=exc.code if isinstance(exc, ResearchError) else "CONTRACT_MISMATCH")
             raise
         start = self.monotonic()
-        deadline = start + budget.job_seconds
+        deadline = None if resource_guarded else start + budget.job_seconds
         from infrastructure.research_control import CheckpointExchange, ControlError, ENVIRONMENT
         channel = CheckpointExchange(work, attempt_id, deadline, maximum_result_bytes) if checkpoint_handler is not None else None
         saved_checkpoint = None
@@ -92,7 +110,7 @@ class ResearchSupervisor:
                     # before journalling, owner validation or control cleanup.
                     # A later watchdog tick cannot undo this native observation.
                     stopped_at = self.monotonic()
-                    stopped_before_deadline = not expired.is_set() and stopped_at < deadline
+                    stopped_before_deadline = not expired.is_set() and (deadline is None or stopped_at < deadline)
             except (OSError, subprocess.TimeoutExpired) as exc:
                 raise ResearchError("WORKER_ACTIVE", "whole process tree stop is unconfirmed") from exc
 
@@ -106,7 +124,7 @@ class ResearchSupervisor:
                 monitor_errors.append(exc)
 
         def past_deadline():
-            return expired.is_set() or self.monotonic() >= deadline
+            return expired.is_set() or (deadline is not None and self.monotonic() >= deadline)
         def signal_checkpoint():
             nonlocal soft_started
             # Like the hard fuse, the actual80% signal must not wait behind
@@ -169,6 +187,11 @@ class ResearchSupervisor:
             nonlocal saved_checkpoint, budget_stop_requested
             if budget_stop_requested or channel is None or saved_checkpoint is not None or past_deadline():
                 return False
+            # A percentage-based checkpoint has no meaning for an explicit
+            # nullable time cap. Resource and heartbeat monitors stay active;
+            # restart-only work retains its registered restart semantics.
+            if deadline is None:
+                return False
             if not soft_done.is_set():
                 if self.monotonic() < deadline - budget.job_seconds * 0.2:
                     return False
@@ -206,7 +229,7 @@ class ResearchSupervisor:
             # must not enter checkpoint publication at all.
             def check_current_budget():
                 nonlocal budget_stop_requested
-                budget_stop_requested |= self.budget.balance(run["arm_id"])["closed"]
+                budget_stop_requested |= current_balance()["closed"]
             with ExitStack() as phases:
                 if frame is None:
                     phases.enter_context(self.store._read_transaction())
@@ -282,17 +305,23 @@ class ResearchSupervisor:
                 if channel is not None:
                     worker_environment.update(channel.environment())
                 process = subprocess.Popen(
-                    [sys.executable, str(wrapper), str(heartbeat), str(deadline), *command],
+                    [sys.executable, str(wrapper), str(heartbeat), "none" if deadline is None else str(deadline), *command],
                     stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT,
                     start_new_session=os.name != "nt",
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                     env=worker_environment,
                 )
                 tree = ProcessTree(process)
-                deadline_monitor = threading.Timer(max(0, deadline - self.monotonic()), hard_stop)
-                deadline_monitor.daemon = True
-                deadline_monitor.start()
-                if channel is not None:
+                resource_observation = None
+                if resource_guarded:
+                    resource_observation = observe_resources(
+                        system_path=system_path, runtime_path=self.store.path, tree=tree)
+                    check_resource_observation(resource_policy, resource_observation)
+                if deadline is not None:
+                    deadline_monitor = threading.Timer(max(0, deadline - self.monotonic()), hard_stop)
+                    deadline_monitor.daemon = True
+                    deadline_monitor.start()
+                if channel is not None and deadline is not None:
                     soft_monitor = threading.Timer(
                         max(0, start + budget.job_seconds * 0.8 - self.monotonic()), signal_checkpoint)
                     soft_monitor.daemon = True
@@ -300,16 +329,29 @@ class ResearchSupervisor:
                 with self.store.lock():
                     if self.store._attempts()[attempt_id]["state"] != "RUNNING":
                         raise ResearchError("IDENTITY_CONFLICT", "attempt reconciled before worker launch")
-                    self.store._append("WORKER_STARTED", {"attempt_id": attempt_id, "pid": process.pid,
-                                       "reservation_id": reservation["reservation_id"], "deadline_monotonic": deadline})
+                    started = {"attempt_id": attempt_id, "pid": process.pid,
+                               "reservation_id": reservation["reservation_id"], "deadline_monotonic": deadline}
+                    if resource_observation is not None:
+                        started["resource_observation"] = resource_observation
+                    self.store._append("WORKER_STARTED", started)
                     process.stdin.write(b"GO\n")
                     process.stdin.flush()
                 last_logged = start
+                last_resource_sample = start
                 while process.poll() is None:
                     now = self.monotonic()
-                    if expired.is_set() or now >= deadline:
+                    if expired.is_set() or (deadline is not None and now >= deadline):
                         outcome, error_code = "TIMEOUT", "TIMEOUT"
                         break
+                    if resource_guarded and now - last_resource_sample >= 1:
+                        try:
+                            resource_observation = observe_resources(
+                                system_path=system_path, runtime_path=self.store.path, tree=tree)
+                            check_resource_observation(resource_policy, resource_observation)
+                        except ResearchError:
+                            outcome, error_code = "INTERRUPTED", "RESOURCE_LIMIT"
+                            break
+                        last_resource_sample = now
                     if saved_checkpoint is not None:
                         # ACK follows complete physical/save/budget validation.
                         # The worker is now closing, not admitted to another job.
@@ -320,7 +362,7 @@ class ResearchSupervisor:
                             outcome, error_code = "INTERRUPTED", "HEARTBEAT_LOST"
                             break
                         try:
-                            process.wait(timeout=min(0.025, deadline - now))
+                            process.wait(timeout=0.025 if deadline is None else min(0.025, deadline - now))
                         except subprocess.TimeoutExpired:
                             pass
                         continue
@@ -332,7 +374,7 @@ class ResearchSupervisor:
                         outcome, error_code = "TIMEOUT", "TIMEOUT"
                         break
                     current_budget_closed = budget_stop_requested or (
-                        not budget_checked and self.budget.balance(run["arm_id"])["closed"])
+                        not budget_checked and current_balance()["closed"])
                     if current_budget_closed:
                         # A completed signal remains trace evidence even when
                         # the fresh blocked poll closes authority. No save/ACK.
@@ -342,27 +384,27 @@ class ResearchSupervisor:
                     # Authority I/O may cross the soft or hard threshold. Do
                     # not defer the80% request using its pre-read timestamp.
                     now = self.monotonic()
-                    if expired.is_set() or now >= deadline:
+                    if expired.is_set() or (deadline is not None and now >= deadline):
                         outcome, error_code = "TIMEOUT", "TIMEOUT"
                         break
                     if now - start >= 15 and (not heartbeat.exists() or time.time() - heartbeat.stat().st_mtime > 15):
                         outcome, error_code = "INTERRUPTED", "HEARTBEAT_LOST"
                         break
-                    if channel is None and now - start >= budget.job_seconds * 0.8 and not warned:
+                    if channel is None and deadline is not None and now - start >= budget.job_seconds * 0.8 and not warned:
                         record_checkpoint_request()
                     if not budget_checked:
                         collect_checkpoint()
                     if budget_stop_requested:
                         outcome, error_code = "BUDGET_EXHAUSTED", "BUDGET_EXHAUSTED"
                         break
-                    remaining = deadline - self.monotonic()
-                    if expired.is_set() or remaining <= 0:
+                    remaining = None if deadline is None else deadline - self.monotonic()
+                    if expired.is_set() or (remaining is not None and remaining <= 0):
                         outcome, error_code = "TIMEOUT", "TIMEOUT"
                         break
                     # Keep the same poll cadence, but wake on actual wrapper
                     # exit rather than idling while its checkpoint margin dies.
                     try:
-                        process.wait(timeout=min(0.025, remaining))
+                        process.wait(timeout=0.025 if remaining is None else min(0.025, remaining))
                     except subprocess.TimeoutExpired:
                         pass
                     now = self.monotonic()
@@ -377,7 +419,11 @@ class ResearchSupervisor:
                                 or past_deadline() or process.poll() is not None):
                             continue
                         now = self.monotonic()
-                        self.store.append("HEARTBEAT", {"attempt_id": attempt_id, "monotonic_elapsed_ms": math.ceil((now - start) * 1000)})
+                        heartbeat_event = {"attempt_id": attempt_id,
+                            "monotonic_elapsed_ms": math.ceil((now - start) * 1000)}
+                        if resource_observation is not None:
+                            heartbeat_event["resource_observation"] = resource_observation
+                        self.store.append("HEARTBEAT", heartbeat_event)
                         last_logged = now
                 completed_code = process.poll()
                 collect_checkpoint()
@@ -387,11 +433,19 @@ class ResearchSupervisor:
                 # Stop and confirm them before any owner-side result handling.
                 stop_tree()
                 record_tree_stopped()
+                if resource_guarded:
+                    try:
+                        resource_observation = observe_resources(
+                            system_path=system_path, runtime_path=self.store.path, tree=tree)
+                        check_resource_observation(resource_policy, resource_observation)
+                    except ResearchError:
+                        outcome, artifact_id, error_code = "INTERRUPTED", None, "RESOURCE_LIMIT"
+                        completed_code = None
                 if saved_checkpoint is not None:
                     # A fast exit must not skip a closure/hold occurring after
                     # ACK. This fresh read also verifies the actual final chain;
                     # no poll approval or pre-ACK snapshot is reused here.
-                    budget_stop_requested |= self.budget.balance(run["arm_id"])["closed"]
+                    budget_stop_requested |= current_balance()["closed"]
                 if completed_code is not None:
                     checkpoint_stopped = (completed_code == 85 and saved_checkpoint is not None
                                           and stopped_before_deadline)
@@ -498,7 +552,8 @@ class ResearchSupervisor:
             # work; result validation still has its original deadline vetoes.
             end = stopped_at if stop_confirmed and stopped_at is not None else self.monotonic()
             elapsed = math.ceil((end - start) * 1000)
-            if (outcome == "SUCCEEDED" or artifact_id is not None) and (past_deadline() or elapsed > reservation["reserved_ms"]):
+            if (outcome == "SUCCEEDED" or artifact_id is not None) and (past_deadline()
+                    or (reservation["reserved_ms"] is not None and elapsed > reservation["reserved_ms"])):
                 outcome, artifact_id, error_code = "TIMEOUT", None, "TIMEOUT"
             if stop_confirmed:
                 self.budget.settle(reservation["reservation_id"], elapsed, outcome=outcome)
