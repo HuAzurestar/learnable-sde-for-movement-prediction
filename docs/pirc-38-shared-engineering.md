@@ -16,6 +16,19 @@ reservation is released. After settlement, an explicit child attempt can retry
 under the existing retry limit. A closed arm or insufficient remaining lifetime
 budget yields terminal `BUDGET_EXHAUSTED`, not an untracked active attempt.
 
+An explicitly frozen cell may opt into
+`resource_sharing="explicit-user-authorized-shared-cpu-v1"`. This policy removes
+only CPU capacity exclusion when every configured CPU slot is already claimed;
+it does not release, settle, close or change any existing reservation or arm.
+The queue assigns a distinct bounded logical slot and records the policy plus
+configured capacity in `QUEUE_CLAIMED`. GPU work and unknown policies are
+refused. All authority mutations still pass through the same OS writer lock, so
+budget, queue, admission, result and terminal events remain serialized. Callers
+must not run long evidence reads or exports concurrently with an active owner
+dispatch; a writer timeout remains a real failed attempt, not permission to
+bypass the ledger. The policy is part of the immutable registered cell and thus
+changes its cell and study identity.
+
 ### Frozen test-read evidence
 
 `test` and `final-eval` protocol reads require both `preregistration_hash` and
