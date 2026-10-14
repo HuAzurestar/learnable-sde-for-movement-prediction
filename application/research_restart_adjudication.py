@@ -16,6 +16,7 @@ from infrastructure.research_store import ResearchError, digest
 
 
 SCHEMA = "pirc28-restart-adjudication-v1"
+PRELAUNCH_SCHEMA = "pirc28-restart-adjudication-v2"
 BRIDGE_SCHEMA = "pirc28-source-epoch-bridge-v1"
 CONTINUATION_SCHEMA = "pirc28-resource-arm-continuation-v1"
 RESOURCE_RETRY_SCHEMA = "pirc28-resource-retry-adjudication-v1"
@@ -188,9 +189,58 @@ def _attempt_payload(receipt):
             "error_code": None, "artifact_manifest_hash": None}
 
 
+def _prelaunch_predecessors(store, references, *, parent_attempt_id, current_run,
+                            current_definition, before_sequence):
+    """Carry every older prelaunch sibling forward across source renewals."""
+    from .research_queue_recovery import resolve_prelaunch_cancellation
+
+    _require(type(references) is list and len(references) <= 1,
+             "source renewal infrastructure retries exhausted", "RETRY_EXHAUSTED")
+    events = store._events()
+    expected = {event["payload"]["attempt_id"] for event in events
+        if event["event_kind"] == "ATTEMPT" and event["sequence"] < before_sequence
+        and event["payload"].get("state") == "REGISTERED"
+        and event["payload"].get("parent_attempt_id") == parent_attempt_id
+        and event["payload"].get("run_id") != current_run["run_id"]}
+    seen = set()
+    for reference in references:
+        cancellation = resolve_prelaunch_cancellation(store, reference)
+        attempt = store._attempts()[cancellation["attempt_id"]]
+        run = store._manifest("run-" + attempt["run_id"])
+        study = store._manifest("study-" + run["study_id"])["spec"]
+        definition_hash = study.get("pirc28_study_definition_hash")
+        previous = store._manifest("pirc28-study-definition-" + str(definition_hash))
+        _require(digest(previous) == definition_hash
+                 and {k: v for k, v in previous.items() if k != "runtime_code_hash"}
+                     == {k: v for k, v in current_definition.items() if k != "runtime_code_hash"}
+                 and previous.get("runtime_code_hash") != current_definition.get("runtime_code_hash")
+                 and digest(scientific_cell_identity(run["cell"]))
+                     == digest(scientific_cell_identity(current_run["cell"]))
+                 and attempt.get("parent_attempt_id") == parent_attempt_id
+                 and attempt.get("reason") == REASON and attempt["attempt_id"] not in seen,
+                 "prelaunch predecessor changes frozen design or retry lineage", "IDENTITY_CONFLICT")
+        reserve = next(event for event in events
+                       if event["hash"] == cancellation["event_hashes"]["reserve"])
+        prior = _published(store, reserve["payload"].get("restart_adjudication"), "prior restart")
+        _require(prior.get("parent_attempt_id") == parent_attempt_id
+                 and prior.get("retry_attempt_id") == attempt["attempt_id"]
+                 and prior.get("current_run_id") == run["run_id"]
+                 and prior.get("current_code_hash") == previous["runtime_code_hash"]
+                 and any(event["hash"] == cancellation["event_hashes"]["terminal"]
+                         and event["sequence"] < before_sequence for event in events),
+                 "prelaunch predecessor adjudication or terminal order differs")
+        seen.add(attempt["attempt_id"])
+    _require(seen == expected, "all prior source retry registrations must be retained",
+             "RETRY_EXHAUSTED")
+    return len(seen)
+
+
 def _resolve_receipt(store, reference, *, allow_missing_attempt=False):
     receipt = _published(store, reference, "restart adjudication")
-    _require(set(receipt) == RECEIPT_FIELDS and receipt.get("schema_version") == SCHEMA,
+    expected_fields = (RECEIPT_FIELDS | {"prelaunch_cancellations"}
+                       if receipt.get("schema_version") == PRELAUNCH_SCHEMA else RECEIPT_FIELDS)
+    _require(set(receipt) == expected_fields
+             and receipt.get("schema_version") in {SCHEMA, PRELAUNCH_SCHEMA},
              "restart adjudication schema differs")
     bridge = resolve_source_bridge(store, receipt["source_bridge"],
         execution_policy=receipt["execution_policy"], source_code_hash=receipt["current_code_hash"])
@@ -216,6 +266,9 @@ def _resolve_receipt(store, reference, *, allow_missing_attempt=False):
     _require(current_run.get("study_id") == pair["current_study_id"]
              and current_run.get("cell_hash") == cell_pair["current_cell_hash"],
              "adjudicated current run differs", "IDENTITY_CONFLICT")
+    predecessor_count = _prelaunch_predecessors(store, receipt.get("prelaunch_cancellations", []),
+        parent_attempt_id=receipt["parent_attempt_id"], current_run=current_run,
+        current_definition=bridge["current_definition"].to_dict(), before_sequence=matches[0]["sequence"])
     hashes = receipt.get("historical_event_hashes", {})
     _require(type(hashes) is dict and len(hashes) == 6
              and all(sum(event["hash"] == value for event in events) == 1 for value in hashes.values()),
@@ -277,7 +330,7 @@ def _resolve_receipt(store, reference, *, allow_missing_attempt=False):
     old_attempts = [value for value in same_cell if value["run_id"] == old_run["run_id"]]
     current_attempts = [value for value in same_cell if value["run_id"] == current_run["run_id"]]
     _require(len(old_attempts) == 1 and len(current_attempts) <= 3
-             and receipt.get("retry_ordinal") == expected_ordinal,
+             and receipt.get("retry_ordinal") == expected_ordinal + predecessor_count <= 2,
              "cross-epoch infrastructure retry allowance differs", "RETRY_EXHAUSTED")
     return deepcopy(receipt)
 
@@ -294,7 +347,7 @@ def resolve_restart_adjudication(store, reference, *, execution_policy, source_c
 
 
 def adjudicate_restart(store, parent_attempt_id, *, source_bridge, execution_policy,
-                       source_code_hash):
+                       source_code_hash, prelaunch_cancellations=None):
     """Register one deterministic restart child; never launch or reserve it."""
     from application.research_restart_review import inspect_restart_review
     from infrastructure.process_tree import process_may_be_alive
@@ -308,6 +361,8 @@ def adjudicate_restart(store, parent_attempt_id, *, source_bridge, execution_pol
                      "restart adjudication replay differs", "IDENTITY_CONFLICT")
             reference = existing[0]["payload"]
             receipt = _resolve_receipt(store, reference, allow_missing_attempt=True)
+            _require(receipt.get("prelaunch_cancellations", []) == (prelaunch_cancellations or []),
+                     "restart replay changed prelaunch history", "IDENTITY_CONFLICT")
             if store._attempts().get(receipt["retry_attempt_id"]) is None:
                 store._append("ATTEMPT", _attempt_payload(receipt),
                               "attempt-" + receipt["retry_attempt_id"])
@@ -325,10 +380,16 @@ def adjudicate_restart(store, parent_attempt_id, *, source_bridge, execution_pol
         current_cell = next(cell for cell in lineage["current"]["cells"]
                             if digest(cell) == cell_pair["current_cell_hash"])
         current_run_id = store.register_run(pair["current_study_id"], current_cell)
+        predecessor_count = _prelaunch_predecessors(store,
+            [] if prelaunch_cancellations is None else prelaunch_cancellations,
+            parent_attempt_id=parent_attempt_id,
+            current_run=store._manifest("run-" + current_run_id),
+            current_definition=bridge["current_definition"].to_dict(),
+            before_sequence=store._events()[-1]["sequence"] + 1)
         attempts = store._attempts()
         lineage_attempts = [value for value in attempts.values()
                             if value["run_id"] in {candidate["run_id"], current_run_id}]
-        _require(len(lineage_attempts) < 3 and all(value["state"] in store.TERMINAL
+        _require(len(lineage_attempts) + predecessor_count < 3 and all(value["state"] in store.TERMINAL
                  for value in lineage_attempts), "cross-epoch retry unavailable", "RETRY_EXHAUSTED")
 
         worker = next(event for event in store._events()
@@ -351,9 +412,12 @@ def adjudicate_restart(store, parent_attempt_id, *, source_bridge, execution_pol
             "retained_cost_ms": candidate["retained_cost_ms"],
             "scientific_cell_hash": cell_pair["scientific_cell_hash"],
             "current_run_id": current_run_id, "current_cell_hash": cell_pair["current_cell_hash"],
-            "retry_attempt_id": retry_id, "retry_ordinal": len(lineage_attempts),
+            "retry_attempt_id": retry_id, "retry_ordinal": len(lineage_attempts) + predecessor_count,
             "maximum_infrastructure_retries": 2, "recovery_level": "restart-only-no-checkpoint",
             "native_identity": native}
+        if prelaunch_cancellations:
+            receipt.update(schema_version=PRELAUNCH_SCHEMA,
+                           prelaunch_cancellations=deepcopy(prelaunch_cancellations))
         object_id = "pirc28-restart-adjudication-" + digest(receipt)
         reference = {"manifest_id": object_id, "sha256": digest(receipt)}
         store._publish(object_id, receipt)
@@ -554,7 +618,7 @@ def resolve_retry_adjudication(store, reference, *, execution_policy, source_cod
     with store._read_transaction():
         _reference(reference, "retry adjudication")
         value = store._manifest(reference["manifest_id"])
-        if value.get("schema_version") == SCHEMA:
+        if value.get("schema_version") in {SCHEMA, PRELAUNCH_SCHEMA}:
             receipt = _resolve_receipt(store, reference)
         elif value.get("schema_version") == RESOURCE_RETRY_SCHEMA:
             receipt = _resolve_resource_retry(store, reference)
