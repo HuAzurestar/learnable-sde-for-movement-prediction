@@ -11,6 +11,7 @@ from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -240,7 +241,12 @@ class ResearchStore:
     SCHEMA = "pirc25-contract-v1"
     TERMINAL = {"SUCCEEDED", "FAILED", "INTERRUPTED", "TIMEOUT", "BUDGET_EXHAUSTED", "PREFLIGHT_FAILED", "CANCELLED"}
 
-    def __init__(self, runtime_root: Path, store_id: str, *, initialize=False, allow_corrupt=False):
+    def __init__(self, runtime_root: Path, store_id: str, *, initialize=False, allow_corrupt=False,
+                 lock_wait_seconds=15):
+        if (type(lock_wait_seconds) not in (int, float)
+                or not math.isfinite(lock_wait_seconds) or not 0 <= lock_wait_seconds <= 3600):
+            raise ResearchError("CONTRACT_MISMATCH", "lock wait must be finite and between 0 and 3600 seconds")
+        self.lock_wait_seconds = lock_wait_seconds
         root = Path(runtime_root)
         if not root.is_absolute():
             raise ResearchError("CONTRACT_MISMATCH", "runtime root must be absolute")
@@ -277,7 +283,7 @@ class ResearchStore:
     def lock(self):
         if self._read_snapshot() is not None:
             return nullcontext()  # This thread still owns the outer OS lock.
-        return file_lock(self.path / ".writer.lock")
+        return file_lock(self.path / ".writer.lock", timeout=self.lock_wait_seconds)
 
     def _read_snapshot(self):
         snapshot = getattr(self._read_scope, 'snapshot', None)

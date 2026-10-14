@@ -1,6 +1,6 @@
 """Crash visibility, immutable identities, concurrency and disclosure order."""
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 import json
 
 import pytest
@@ -34,6 +34,43 @@ def test_store_identity_is_explicit_and_outside_git(tmp_path):
     (repo / ".git").write_text("gitdir: elsewhere")
     with pytest.raises(ResearchError, match="outside Git"):
         ResearchStore(repo / "runtime", "fixture", initialize=True)
+
+
+@pytest.mark.parametrize("wait", [True, -1, 3601, float("nan"), float("inf"), "60"])
+def test_invalid_writer_wait_does_not_create_store(tmp_path, wait):
+    with pytest.raises(ResearchError, match="lock wait must be finite"):
+        ResearchStore(tmp_path, "fixture", initialize=True, lock_wait_seconds=wait)
+    assert not (tmp_path / "pirc25").exists()
+
+
+def test_longer_writer_wait_preserves_exclusion_and_existing_events(store):
+    import threading
+    from infrastructure.research_store import file_lock
+    held, release = threading.Event(), threading.Event()
+
+    def hold_writer():
+        with file_lock(store.path / ".writer.lock"):
+            held.set()
+            assert release.wait(5)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        holder = pool.submit(hold_writer)
+        assert held.wait(2)
+        try:
+            with pytest.raises(ResearchError, match="WRITER_BUSY"):
+                ResearchStore(store.path.parent, store.store_id, lock_wait_seconds=0.05)
+            waiting = pool.submit(ResearchStore, store.path.parent, store.store_id,
+                                  lock_wait_seconds=3)
+            # It cannot complete even initialization while the other owner holds the lock.
+            with pytest.raises(FutureTimeoutError):
+                waiting.result(timeout=0.05)
+        finally:
+            release.set()
+        holder.result(timeout=2)
+        reopened = waiting.result(timeout=3)
+    assert reopened.events() == store.events() == []
+    reopened.append("TEST", {"value": 1})
+    assert len(store.events()) == 1
 
 
 def test_concurrent_registration_is_idempotent_and_immutable(store):
