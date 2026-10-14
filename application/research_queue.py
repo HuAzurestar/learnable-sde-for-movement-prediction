@@ -9,6 +9,9 @@ from infrastructure.research_store import ResearchError, digest
 from .research_budget import BudgetLedger
 
 
+SHARED_CPU_POLICY = "explicit-user-authorized-shared-cpu-v1"
+
+
 class ResearchQueue:
     def __init__(self, store, *, slots=None):
         self.store = store
@@ -37,7 +40,7 @@ class ResearchQueue:
             "attempt_id": reservation["attempt_id"], "arm_id": reservation["arm_id"],
             "resource": resource, "dispatch_id": uuid.uuid4().hex}, "queue-" + reservation["reservation_id"])
 
-    def claim(self, reservation_id):
+    def claim(self, reservation_id, *, resource_sharing=None):
         # Each claim gets a new physically verified scope, not a worker-lifetime
         # lock or a cached budget. Duplicate/FIFO/rotation decisions stay atomic.
         with self.store._read_transaction():
@@ -75,11 +78,15 @@ class ResearchQueue:
                 return resource_arm_continuation(self.store, item["arm_id"],
                     execution_policy=policy, source_code_hash=source) is not None
             target = queued[reservation_id]
+            if resource_sharing is not None and resource_sharing != SHARED_CPU_POLICY:
+                raise ResearchError("CONTRACT_MISMATCH", "unknown resource-sharing policy")
+            if resource_sharing is not None and target["resource"] != "cpu":
+                raise ResearchError("CONTRACT_MISMATCH", "only CPU work may use the shared-resource policy")
             resource = target["resource"]
             occupied = {item["slot"] for key, item in claims.items()
                         if item["resource"] == resource and not reservations[key]["settled"]}
             available = [slot for slot in range(self.slots[resource]) if slot not in occupied]
-            if not available:
+            if not available and resource_sharing != SHARED_CPU_POLICY:
                 # Waiting grants no execution authority. Do not reconstruct a
                 # complete source epoch under the writer lock when another
                 # owner must acquire that same lock to settle its occupied slot.
@@ -96,8 +103,24 @@ class ResearchQueue:
                        and (key == reservation_id or eligible(item))]
             # FIFO inside each arm; yield to the oldest other arm between claims.
             candidates = [item for item in pending if item["arm_id"] != last_arm.get(resource)] or pending
-            if not available or not candidates or candidates[0]["reservation_id"] != reservation_id:
+            if not candidates or candidates[0]["reservation_id"] != reservation_id:
                 return None
-            claim = {**target, "slot": available[0]}
+            if available:
+                slot = available[0]
+            elif resource_sharing == SHARED_CPU_POLICY:
+                # CPU workers remain independently supervised and budgeted. The
+                # store's OS lock still serializes every authority mutation; this
+                # policy only removes compute-capacity exclusion for an explicitly
+                # frozen cell. Keep a bounded unique logical slot for audit/UI.
+                extra = [slot for slot in range(64) if slot not in occupied]
+                if not extra:
+                    return None
+                slot = extra[0]
+            else:
+                return None
+            claim = {**target, "slot": slot}
+            if resource_sharing is not None:
+                claim.update(resource_sharing=resource_sharing,
+                             configured_slots=self.slots[resource])
             self.store._append("QUEUE_CLAIMED", claim, "claim-" + reservation_id)
             return claim

@@ -25,7 +25,8 @@ class ResearchSupervisor:
         self.budget = BudgetLedger(store)
         self.monotonic = monotonic
 
-    def run(self, attempt_id: str, command_builder, budget: BudgetSpec, *, result_validator=None, resource_plan=None, checkpoint_handler=None, failure_validator=None):
+    def run(self, attempt_id: str, command_builder, budget: BudgetSpec, *, result_validator=None,
+            resource_plan=None, checkpoint_handler=None, failure_validator=None, resource_sharing=None):
         reservation = self.budget.reserve(attempt_id, budget)
         if reservation["settled"]:
             raise ResearchError("IDENTITY_CONFLICT", "settled attempt cannot execute again")
@@ -45,7 +46,7 @@ class ResearchSupervisor:
         queue = ResearchQueue(self.store)
         try:
             queue.enqueue(reservation, run["cell"].get("resource_class", "cpu"))
-            while queue.claim(reservation["reservation_id"]) is None:
+            while queue.claim(reservation["reservation_id"], resource_sharing=resource_sharing) is None:
                 time.sleep(0.05)
         except BaseException as exc:
             # A duplicate caller must not release the original worker's claim.

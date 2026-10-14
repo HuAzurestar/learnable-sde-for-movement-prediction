@@ -23,6 +23,9 @@ def verified_failure(store, attempt, spec, cell, plugin):
 def _verified_terminal(store, attempt, spec, cell, plugin, *, failed):
     state, role = ('FAILED', 'failure') if failed else ('SUCCEEDED', 'result')
     prefix = 'FAILURE' if failed else 'REUSE'
+    # Calibrated targets may validate a settled source in this same owned
+    # scope. Retain PID/thread ownership and final physical verification for
+    # both reuse and typed failures rather than acquiring a nested OS lock.
     with store._read_transaction():
         request = {"attempt_id": attempt["attempt_id"], "run_id": attempt["run_id"],
                    "artifact_id": attempt.get("artifact_id")}

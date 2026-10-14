@@ -16,6 +16,19 @@ reservation is released. After settlement, an explicit child attempt can retry
 under the existing retry limit. A closed arm or insufficient remaining lifetime
 budget yields terminal `BUDGET_EXHAUSTED`, not an untracked active attempt.
 
+An explicitly frozen cell may opt into
+`resource_sharing="explicit-user-authorized-shared-cpu-v1"`. This policy removes
+only CPU capacity exclusion when every configured CPU slot is already claimed;
+it does not release, settle, close or change any existing reservation or arm.
+The queue assigns a distinct bounded logical slot and records the policy plus
+configured capacity in `QUEUE_CLAIMED`. GPU work and unknown policies are
+refused. All authority mutations still pass through the same OS writer lock, so
+budget, queue, admission, result and terminal events remain serialized. Callers
+must not run long evidence reads or exports concurrently with an active owner
+dispatch; a writer timeout remains a real failed attempt, not permission to
+bypass the ledger. The policy is part of the immutable registered cell and thus
+changes its cell and study identity.
+
 ### Frozen test-read evidence
 
 `test` and `final-eval` protocol reads require both `preregistration_hash` and
@@ -441,6 +454,19 @@ frozen-size regular-file/hash integrity primitive as authorized artifact reads;
 damaged bytes cannot be allocated without that bound or produce a new success.
 The UI displays the frozen aggregate and downloads the original CSV; it does not
 implement another statistics calculation. Raw trajectories never enter TSDE.
+
+Calibrated matrices retain the original shared preparation separately as
+`calibration_cost`, `calibration_evidence_hash` and `calibration_status_counts`
+in the aggregate and at the top level of the paper evidence index. Import binds
+all three to the immutable source bundle; rehashing a substituted or incomplete
+summary does not authorize it. CSV has one `shared-calibration-preparation`
+`row_kind` for the whole study, with empty arm/metric/independent-n fields and
+the complete frozen cost JSON, including failed attempts. Method rows have
+`row_kind=method-metric` and empty calibration fields: preparation is not charged
+again per arm, stratum or metric. Unknown totals remain empty scalar cells and
+JSON null, not zero. The read-only UI shows the same whole-study source attempts
+without recalculation or horizon subsetting. Old uncalibrated versions keep
+their original CSV/index bytes and do not acquire invented preparation costs.
 
 After publishing a preview/export grant, open the printed local session link:
 
