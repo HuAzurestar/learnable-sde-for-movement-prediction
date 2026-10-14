@@ -35,12 +35,18 @@ def _evidence(store, restart):
     _require(len(registrations) == len(publications) == 1
              and publications[0]['sequence'] < registrations[0]['sequence'],
              'one original source adjudication and registration required')
-    forbidden = {'RESERVE', 'SETTLE', 'QUEUED', 'QUEUE_CLAIMED', 'ADMISSION', 'WORKER_STARTED',
-                 'WORKER_TREE_STOPPED', 'WORKER_STOP_UNCONFIRMED', 'CHECKPOINT', 'READ_COMPLETED'}
-    _require(not any(e['payload'].get('attempt_id') == attempt['attempt_id']
-                     and (e['event_kind'] in forbidden or
-                          (e['event_kind'] == 'ATTEMPT' and e['payload'].get('state') == 'RUNNING'))
-                     for e in events), 'funded or admitted work cannot be replaced as a source proposal')
+    # Prove inactivity rather than enumerating known kinds of activity. A read
+    # that started or failed can already have exposed data; future/unknown
+    # attempt-scoped events cannot silently become permission to reset a source.
+    related = [e for e in events if isinstance(e['payload'], dict)
+               and e['payload'].get('attempt_id') == attempt['attempt_id']]
+    terminal = [e for e in related if e['event_kind'] == 'ATTEMPT'
+                and e['payload'] == attempt and attempt['state'] == 'CANCELLED'
+                and e['sequence'] > registrations[0]['sequence']]
+    expected = 1 if attempt['state'] == 'REGISTERED' else 2
+    _require(len(related) == expected and len(terminal) == expected - 1
+             and all(e == registrations[0] or e in terminal for e in related),
+             'funded or admitted work or other attempt activity cannot be replaced as a source proposal')
     return receipt, attempt, events, registrations[0]
 
 
