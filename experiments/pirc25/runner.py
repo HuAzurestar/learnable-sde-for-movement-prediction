@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from application.research_budget import BudgetSpec
+from application.research_budget import BudgetSpec, ResourceBudgetSpec
 from application.research_contracts import CapabilityRegistry
 from application.research_admission import AdmissionGate
 from application.research_execution import resolve_execution
@@ -26,6 +26,9 @@ class SharedRunner:
 
     def run_cell(self, study_id, cell_hash, *, budget=BudgetSpec(60, category="smoke"), parent_attempt_id=None,
                  reason=None, restart_adjudication=None):
+        if type(budget) is ResourceBudgetSpec:
+            from application.research_restart_adjudication import prime_policy_definitions
+            prime_policy_definitions(self.store, budget.execution_policy, budget.source_code_hash)
         spec = self.store.manifest("study-" + study_id)["spec"]
         cells = [cell for cell in spec["cells"] if digest(cell) == cell_hash]
         if len(cells) != 1:
@@ -49,7 +52,6 @@ class SharedRunner:
         if restart_adjudication is None:
             attempt = self.store.new_attempt(run_id, parent_attempt_id=parent_attempt_id, reason=reason)
         else:
-            from application.research_budget import ResourceBudgetSpec
             from application.research_restart_adjudication import resolve_retry_adjudication
             if type(budget) is not ResourceBudgetSpec or parent_attempt_id is not None or reason is not None:
                 raise ResearchError("CONTRACT_MISMATCH", "adjudicated restart owns its parent and funding")

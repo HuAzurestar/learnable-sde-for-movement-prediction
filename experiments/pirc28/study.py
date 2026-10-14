@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 import hashlib
 import json
 import math
@@ -114,6 +115,15 @@ def _validate(value):
     return value
 
 
+@lru_cache(maxsize=4)
+def _validated_definition(content):
+    # Pure structure/resource validation only. Canonical bytes (including the
+    # source identity) are the key, and the frozen object owns those bytes.
+    # At most 16 MiB of bounded definition content is retained. No manifest,
+    # grant, attempt, cost, closure, disclosure or admission decision is cached.
+    return SyntheticStudyDefinition(content)
+
+
 @dataclass(frozen=True)
 class SyntheticStudyDefinition:
     """Canonical bytes own all nested state; returned dicts are detached copies."""
@@ -137,7 +147,7 @@ class SyntheticStudyDefinition:
     @classmethod
     def from_dict(cls, value):
         try:
-            return cls(encode(value))
+            return _validated_definition(encode(value)) if cls is SyntheticStudyDefinition else cls(encode(value))
         except (TypeError, ValueError) as error:
             if isinstance(error, ResearchError):
                 raise

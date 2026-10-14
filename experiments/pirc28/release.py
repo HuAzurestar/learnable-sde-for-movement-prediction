@@ -112,6 +112,8 @@ def execute_next_source_cell(store, *, study_definition_hash, execution_policy):
         store.manifest("pirc28-study-definition-" + study_definition_hash))
     source = definition.to_dict()["runtime_code_hash"]
     _require(source == code_hash(), "source matrix runtime changed", "IDENTITY_CONFLICT")
+    from application.research_restart_adjudication import prime_policy_definitions
+    prime_policy_definitions(store, execution_policy, source)
     for arm in ("pirc28-k1", "pirc28-k2"):
         resolve_policy(store, execution_policy, arm_id=arm, source_code_hash=source)
     _require(resource_arm_was_promoted(store, "pirc28-k1", execution_policy=execution_policy,

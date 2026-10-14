@@ -75,6 +75,11 @@ def register_source_epoch(store, historical_definition_hash, current_definition,
     current_value = current_definition.to_dict()
     _require(current_value["runtime_code_hash"] == code_hash(),
              "current source definition code differs", "IDENTITY_CONFLICT")
+    # Cold numerical/resource structure validation is pure and may take longer
+    # than a peer writer's lock timeout. Prime canonical bytes before the
+    # actual transaction, which still rereads their authoritative manifest.
+    SyntheticStudyDefinition.from_dict(store.manifest(
+        "pirc28-study-definition-" + historical_definition_hash))
     with store._read_transaction():
         historical = SyntheticStudyDefinition.from_dict(store._manifest(
             "pirc28-study-definition-" + historical_definition_hash))

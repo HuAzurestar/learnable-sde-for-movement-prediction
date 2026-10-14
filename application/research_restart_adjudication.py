@@ -69,6 +69,57 @@ def _grant(store, study):
                                version=settings.get("authorization_version"))
 
 
+def prime_source_definitions(store, bridge_reference):
+    """Validate bounded immutable definitions outside any owned writer scope.
+
+    This is not authority: resolvers still reread and hash their actual bridge,
+    definitions, study/permission lineage, and journal under the later lock.
+    """
+    from experiments.pirc28.study import SyntheticStudyDefinition
+
+    _require(store._read_snapshot() is None,
+             "cold source definition validation must run outside the writer scope")
+    _reference(bridge_reference, "source epoch bridge")
+    bridge = store.manifest(bridge_reference["manifest_id"])
+    _require(digest(bridge) == bridge_reference["sha256"], "source bridge hash differs")
+    for field in ("historical_definition_hash", "current_definition_hash"):
+        reference = bridge.get(field)
+        _require(type(reference) is str and re.fullmatch("[0-9a-f]{64}", reference),
+                 "source definition hash required")
+        value = store.manifest("pirc28-study-definition-" + reference)
+        _require(digest(value) == reference, "source definition hash differs")
+        SyntheticStudyDefinition.from_dict(value)
+
+
+def _prime_restart(store, reference):
+    if store._read_snapshot() is not None:
+        return
+    _reference(reference, "retry adjudication")
+    receipt = store.manifest(reference["manifest_id"])
+    _require(digest(receipt) == reference["sha256"], "retry adjudication hash differs")
+    if receipt.get("schema_version") in {SCHEMA, PRELAUNCH_SCHEMA}:
+        prime_source_definitions(store, receipt["source_bridge"])
+    elif receipt.get("schema_version") == RESOURCE_RETRY_SCHEMA:
+        prime_policy_definitions(store, receipt["execution_policy"], receipt["current_code_hash"])
+
+
+def prime_policy_definitions(store, execution_policy, source_code_hash):
+    """Find only this policy's source bridge, then prime its pure definitions."""
+    if store._read_snapshot() is not None:
+        return
+    references = []
+    with store._read_transaction():
+        for event in store._manifest_events("pirc28-source-epoch-bridge-"):
+            payload = event["payload"]
+            bridge = store._manifest(payload["object_id"])
+            if (bridge.get("execution_policy") == execution_policy
+                    and bridge.get("current_code_hash") == source_code_hash):
+                references.append({"manifest_id": payload["object_id"], "sha256": payload["sha256"]})
+    _require(len(references) <= 1, "source policy has ambiguous epoch bridges", "IDENTITY_CONFLICT")
+    for reference in references:
+        prime_source_definitions(store, reference)
+
+
 def resolve_source_bridge(store, reference, *, execution_policy, source_code_hash):
     """Verify the exact old/new definitions and scope-preserving grant lineage."""
     from application.research_execution_policy import resolve_policy
@@ -337,6 +388,7 @@ def _resolve_receipt(store, reference, *, allow_missing_attempt=False):
 
 def resolve_restart_adjudication(store, reference, *, execution_policy, source_code_hash):
     """Resolve one registered child without converting the old closure."""
+    _prime_restart(store, reference)
     with store._read_transaction():
         receipt = _resolve_receipt(store, reference)
         _require(receipt["execution_policy"] == execution_policy
@@ -352,6 +404,8 @@ def adjudicate_restart(store, parent_attempt_id, *, source_bridge, execution_pol
     from application.research_restart_review import inspect_restart_review
     from infrastructure.process_tree import process_may_be_alive
 
+    if store._read_snapshot() is None:
+        prime_source_definitions(store, source_bridge)
     event_id = "pirc28-restart-adjudication-" + digest(
         [store.store_id, parent_attempt_id, source_bridge, execution_policy, source_code_hash])
     with store._read_transaction():
@@ -615,6 +669,7 @@ def _resolve_resource_retry(store, reference, *, allow_missing_attempt=False):
 
 def resolve_retry_adjudication(store, reference, *, execution_policy, source_code_hash):
     """Resolve either the historical cross-epoch child or a current retry."""
+    _prime_restart(store, reference)
     with store._read_transaction():
         _reference(reference, "retry adjudication")
         value = store._manifest(reference["manifest_id"])
@@ -634,6 +689,7 @@ def adjudicate_resource_retry(store, parent_attempt_id, *, execution_policy, sou
     """Register one same-source retry after exact measured-stop adjudication."""
     from infrastructure.process_tree import process_may_be_alive
 
+    prime_policy_definitions(store, execution_policy, source_code_hash)
     event_id = "pirc28-resource-retry-" + digest(
         [store.store_id, parent_attempt_id, execution_policy, source_code_hash])
     with store._read_transaction():
