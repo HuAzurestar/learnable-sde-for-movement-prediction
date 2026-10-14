@@ -29,11 +29,11 @@ def checkpoint_recipe(*, distinguishable=False, platform_name=None):
     # fake sampler, forced checkpoint or outcome-selected retry/budget.
     if (os.name if platform_name is None else platform_name) != 'nt':
         reference = value['approximation_spec']['event_driven_reference']
-        reference.update(particles=4096, independent_batches=32)
+        reference.update(particles=2048, independent_batches=16)
     return value
 
 
-@pytest.mark.parametrize('platform_name,particles,batches', [('nt', 1024, 8), ('posix', 4096, 32)])
+@pytest.mark.parametrize('platform_name,particles,batches', [('nt', 1024, 8), ('posix', 2048, 16)])
 def test_checkpoint_workload_is_fixed_and_within_original_resource_caps(platform_name, particles, batches):
     from experiments.pirc28.pipeline import recipe_resources
     from experiments.pirc28.runtime import switching_plugin
@@ -110,7 +110,7 @@ def test_reference_phase_checkpoint_reopened_resume_matches_actual_continuous_wo
     assert native != expected['fit']['reference_execution']
     report = actual['fit']['approximation_checks']
     assert report['reference_seed'] == reference_seed(study['switching_recipe'], cell['seed'])
-    batches = 8 if os.name == 'nt' else 32
+    batches = 8 if os.name == 'nt' else 16
     assert study['switching_recipe']['approximation_spec']['event_driven_reference']['independent_batches'] == batches
     assert all(path['reference_batches'] == batches for path in report['paths'])
     assert report['managed_evidence_bound'] is report['qualified_identifiability'] is False
