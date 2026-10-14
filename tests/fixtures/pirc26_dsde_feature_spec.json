@@ -1,0 +1,745 @@
+{
+  "schema_version": "pirc21-feature-spec-v1",
+  "feature_spec_id": "pirc21-p0-feature-spec-v1",
+  "processing_version": "pirc21-pr3-v1",
+  "description": "Executable P0 feature contract bound to immutable PIRC-20 dataset and cohort identities.",
+  "identity": {
+    "dataset_schema_version": "pirc20-release-v1",
+    "cohort_schema_version": "pirc20-cohort-v1",
+    "columns": [
+      {"name": "dataset_version", "dtype": "string", "unit": "1", "role": "dataset_version"},
+      {"name": "point_id", "dtype": "string", "unit": "1", "role": "point_identity"},
+      {"name": "file_id", "dtype": "string", "unit": "1", "role": "source_file_identity"},
+      {"name": "point_index", "dtype": "int64", "unit": "1", "role": "source_point_index"},
+      {"name": "absolute_epoch_ns", "dtype": "int64", "unit": "ns", "role": "absolute_time"},
+      {"name": "segment_id", "dtype": "string", "unit": "1", "role": "segment_identity"},
+      {"name": "split", "dtype": "string", "unit": "1", "role": "split_identity"},
+      {"name": "independent_block_id", "dtype": "string", "unit": "1", "role": "independent_block_identity"}
+    ],
+    "point_key_columns": ["dataset_version", "file_id", "point_index", "absolute_epoch_ns"],
+    "segment_id_column": "segment_id",
+    "independent_block_id_column": "independent_block_id",
+    "time_column": "absolute_epoch_ns"
+  },
+  "missing_statuses": [
+    "valid",
+    "source_missing",
+    "nodata",
+    "out_of_extent",
+    "insufficient_history",
+    "algorithm_failed",
+    "not_materialized"
+  ],
+  "factors": [
+    {
+      "factor_id": "dem_elevation",
+      "family": "static_terrain",
+      "source_id": "srtm_gl1",
+      "value_columns": [
+        {"name": "elevation_m", "dtype": "float32", "unit": "m", "role": "absolute"}
+      ],
+      "status_column": "dem_elevation_status",
+      "provenance": {
+        "source_version": "srtmgl1-v4.1",
+        "parent_asset_column": "dem_elevation_parent_asset_id",
+        "processing_version": "pirc21-pr1-v1",
+        "algorithm": "bilinear_metric_window"
+      },
+      "spatial": {"crs": "registered_source_crs", "interpolation": "bilinear"},
+      "time_window": "static_local_window_registered_in_variant",
+      "rollout_mode": "spatial_query",
+      "variant_required": true
+    },
+    {
+      "factor_id": "dem_local_elevation",
+      "family": "static_terrain",
+      "source_id": "srtm_gl1",
+      "value_columns": [
+        {"name": "relative_elevation_m", "dtype": "float32", "unit": "m", "role": "local_relative"},
+        {"name": "local_relief_m", "dtype": "float32", "unit": "m", "role": "local_relief"}
+      ],
+      "status_column": "dem_local_elevation_status",
+      "provenance": {
+        "source_version": "srtmgl1-v4.1",
+        "parent_asset_column": "dem_local_elevation_parent_asset_id",
+        "processing_version": "pirc21-pr3-v1",
+        "algorithm": "registered_metric_raster_window"
+      },
+      "spatial": {"crs": "registered_local_metric", "interpolation": "bilinear"},
+      "time_window": "static_250m_radius",
+      "rollout_mode": "spatial_query",
+      "variant_required": true
+    },
+    {
+      "factor_id": "dem_surface",
+      "family": "static_terrain",
+      "source_id": "srtm_gl1",
+      "value_columns": [
+        {"name": "slope_radians", "dtype": "float32", "unit": "rad", "role": "slope"},
+        {"name": "aspect_sin", "dtype": "float32", "unit": "1", "role": "downslope_east"},
+        {"name": "aspect_cos", "dtype": "float32", "unit": "1", "role": "downslope_north"},
+        {"name": "normal_east", "dtype": "float32", "unit": "1", "role": "surface_normal_east"},
+        {"name": "normal_north", "dtype": "float32", "unit": "1", "role": "surface_normal_north"},
+        {"name": "normal_up", "dtype": "float32", "unit": "1", "role": "surface_normal_up"},
+        {"name": "curvature_per_m", "dtype": "float32", "unit": "m-1", "role": "curvature"},
+        {"name": "roughness_m", "dtype": "float32", "unit": "m", "role": "roughness"}
+      ],
+      "status_column": "dem_surface_status",
+      "provenance": {
+        "source_version": "srtmgl1-v4.1",
+        "parent_asset_column": "dem_surface_parent_asset_id",
+        "processing_version": "pirc21-pr1-v1",
+        "algorithm": "metric_gradient_and_local_quadratic"
+      },
+      "spatial": {"crs": "registered_local_metric", "interpolation": "bilinear"},
+      "time_window": "static_three_by_three_halo",
+      "rollout_mode": "spatial_query",
+      "variant_required": true
+    },
+    {
+      "factor_id": "worldcover",
+      "family": "land_cover",
+      "source_id": "esa_worldcover_2021",
+      "value_columns": [
+        {"name": "worldcover_class", "dtype": "uint8", "unit": "class_code", "role": "raw_category"}
+      ],
+      "status_column": "worldcover_status",
+      "provenance": {
+        "source_version": "v200-2021",
+        "parent_asset_column": "worldcover_parent_asset_id",
+        "processing_version": "pirc21-pr1-v1",
+        "algorithm": "categorical_nearest_sample"
+      },
+      "spatial": {"crs": "registered_source_crs", "interpolation": "nearest"},
+      "time_window": "static",
+      "rollout_mode": "spatial_query",
+      "variant_required": true
+    },
+    {
+      "factor_id": "overture_road",
+      "family": "linear_transport",
+      "source_id": "overture_transportation_road",
+      "value_columns": [
+        {"name": "road_distance_m", "dtype": "float32", "unit": "m", "role": "nearest_distance"},
+        {"name": "road_direction_east", "dtype": "float32", "unit": "1", "role": "nearest_direction_east"},
+        {"name": "road_direction_north", "dtype": "float32", "unit": "1", "role": "nearest_direction_north"}
+      ],
+      "status_column": "overture_road_status",
+      "provenance": {
+        "source_version": "registered_overture_release",
+        "parent_asset_column": "overture_road_parent_asset_id",
+        "processing_version": "pirc21-pr1-v1",
+        "algorithm": "exact_nearest_geometry_in_registered_metric_projection"
+      },
+      "spatial": {"crs": "registered_local_metric", "interpolation": "nearest_geometry"},
+      "time_window": "static",
+      "rollout_mode": "spatial_query",
+      "variant_required": true
+    },
+    {
+      "factor_id": "overture_path",
+      "family": "linear_transport",
+      "source_id": "overture_transportation_path",
+      "value_columns": [
+        {"name": "path_distance_m", "dtype": "float32", "unit": "m", "role": "nearest_distance"},
+        {"name": "path_direction_east", "dtype": "float32", "unit": "1", "role": "nearest_direction_east"},
+        {"name": "path_direction_north", "dtype": "float32", "unit": "1", "role": "nearest_direction_north"}
+      ],
+      "status_column": "overture_path_status",
+      "provenance": {"source_version": "registered_overture_release", "parent_asset_column": "overture_path_parent_asset_id", "processing_version": "pirc21-pr2-v1", "algorithm": "exact_nearest_geometry_in_registered_metric_projection"},
+      "spatial": {"crs": "registered_local_metric", "interpolation": "nearest_geometry"},
+      "time_window": "static",
+      "rollout_mode": "spatial_query",
+      "variant_required": true
+    },
+    {
+      "factor_id": "overture_rail",
+      "family": "linear_transport",
+      "source_id": "overture_transportation_rail",
+      "value_columns": [
+        {"name": "rail_distance_m", "dtype": "float32", "unit": "m", "role": "nearest_distance"},
+        {"name": "rail_direction_east", "dtype": "float32", "unit": "1", "role": "nearest_direction_east"},
+        {"name": "rail_direction_north", "dtype": "float32", "unit": "1", "role": "nearest_direction_north"}
+      ],
+      "status_column": "overture_rail_status",
+      "provenance": {"source_version": "registered_overture_release", "parent_asset_column": "overture_rail_parent_asset_id", "processing_version": "pirc21-pr2-v1", "algorithm": "exact_nearest_geometry_in_registered_metric_projection"},
+      "spatial": {"crs": "registered_local_metric", "interpolation": "nearest_geometry"},
+      "time_window": "static",
+      "rollout_mode": "spatial_query",
+      "variant_required": true
+    },
+    {
+      "factor_id": "hydrorivers_river",
+      "family": "hydrology",
+      "source_id": "hydrorivers_v10",
+      "value_columns": [
+        {"name": "river_distance_m", "dtype": "float32", "unit": "m", "role": "nearest_distance"},
+        {"name": "river_direction_east", "dtype": "float32", "unit": "1", "role": "nearest_direction_east"},
+        {"name": "river_direction_north", "dtype": "float32", "unit": "1", "role": "nearest_direction_north"}
+      ],
+      "status_column": "hydrorivers_river_status",
+      "provenance": {"source_version": "hydrorivers-v10", "parent_asset_column": "hydrorivers_river_parent_asset_id", "processing_version": "pirc21-pr2-v1", "algorithm": "exact_nearest_geometry_in_registered_metric_projection"},
+      "spatial": {"crs": "registered_local_metric", "interpolation": "nearest_geometry"},
+      "time_window": "static",
+      "rollout_mode": "spatial_query",
+      "variant_required": true
+    },
+    {
+      "factor_id": "jrc_surface_water",
+      "family": "hydrology",
+      "source_id": "jrc_global_surface_water",
+      "value_columns": [
+        {"name": "jrc_water_distance_m", "dtype": "float32", "unit": "m", "role": "nearest_distance"},
+        {"name": "jrc_water_direction_east", "dtype": "float32", "unit": "1", "role": "nearest_direction_east"},
+        {"name": "jrc_water_direction_north", "dtype": "float32", "unit": "1", "role": "nearest_direction_north"},
+        {"name": "jrc_occurrence_percent", "dtype": "float32", "unit": "percent", "role": "water_occurrence"},
+        {"name": "jrc_seasonality_months", "dtype": "float32", "unit": "month", "role": "water_seasonality"}
+      ],
+      "status_column": "jrc_surface_water_status",
+      "provenance": {"source_version": "registered_jrc_release", "parent_asset_column": "jrc_surface_water_parent_asset_id", "processing_version": "pirc21-pr2-v1", "algorithm": "nearest_water_geometry_plus_nearest_raster_attributes"},
+      "spatial": {"crs": "registered_local_metric", "interpolation": "nearest_geometry"},
+      "time_window": "static",
+      "rollout_mode": "spatial_query",
+      "variant_required": true
+    },
+    {
+      "factor_id": "overture_navigable_water",
+      "family": "hydrology",
+      "source_id": "overture_navigable_water",
+      "value_columns": [
+        {"name": "navigable_water_distance_m", "dtype": "float32", "unit": "m", "role": "nearest_distance"},
+        {"name": "navigable_water_direction_east", "dtype": "float32", "unit": "1", "role": "nearest_direction_east"},
+        {"name": "navigable_water_direction_north", "dtype": "float32", "unit": "1", "role": "nearest_direction_north"}
+      ],
+      "status_column": "overture_navigable_water_status",
+      "provenance": {"source_version": "registered_overture_release", "parent_asset_column": "overture_navigable_water_parent_asset_id", "processing_version": "pirc21-pr2-v1", "algorithm": "exact_nearest_geometry_in_registered_metric_projection"},
+      "spatial": {"crs": "registered_local_metric", "interpolation": "nearest_geometry"},
+      "time_window": "static",
+      "rollout_mode": "spatial_query",
+      "variant_required": true
+    },
+    {
+      "factor_id": "osm_ridge",
+      "family": "natural_linear",
+      "source_id": "osm_natural_ridge",
+      "value_columns": [
+        {"name": "ridge_distance_m", "dtype": "float32", "unit": "m", "role": "nearest_distance"},
+        {"name": "ridge_direction_east", "dtype": "float32", "unit": "1", "role": "nearest_direction_east"},
+        {"name": "ridge_direction_north", "dtype": "float32", "unit": "1", "role": "nearest_direction_north"}
+      ],
+      "status_column": "osm_ridge_status",
+      "provenance": {"source_version": "registered_osm_extract", "parent_asset_column": "osm_ridge_parent_asset_id", "processing_version": "pirc21-pr2-v1", "algorithm": "exact_nearest_geometry_in_registered_metric_projection"},
+      "spatial": {"crs": "registered_local_metric", "interpolation": "nearest_geometry"},
+      "time_window": "static",
+      "rollout_mode": "spatial_query",
+      "variant_required": true
+    },
+    {
+      "factor_id": "osm_cliff",
+      "family": "natural_linear",
+      "source_id": "osm_natural_cliff",
+      "value_columns": [
+        {"name": "cliff_distance_m", "dtype": "float32", "unit": "m", "role": "nearest_distance"},
+        {"name": "cliff_direction_east", "dtype": "float32", "unit": "1", "role": "nearest_direction_east"},
+        {"name": "cliff_direction_north", "dtype": "float32", "unit": "1", "role": "nearest_direction_north"}
+      ],
+      "status_column": "osm_cliff_status",
+      "provenance": {"source_version": "registered_osm_extract", "parent_asset_column": "osm_cliff_parent_asset_id", "processing_version": "pirc21-pr2-v1", "algorithm": "exact_nearest_geometry_in_registered_metric_projection"},
+      "spatial": {"crs": "registered_local_metric", "interpolation": "nearest_geometry"},
+      "time_window": "static",
+      "rollout_mode": "spatial_query",
+      "variant_required": true
+    },
+    {
+      "factor_id": "historical_motion",
+      "family": "history",
+      "source_id": "pirc20_aligned_trajectory",
+      "value_columns": [
+        {"name": "history_direction_east", "dtype": "float32", "unit": "1", "role": "visible_history_direction_east"},
+        {"name": "history_direction_north", "dtype": "float32", "unit": "1", "role": "visible_history_direction_north"}
+      ],
+      "status_column": "historical_motion_status",
+      "provenance": {
+        "source_version": "pirc20-release-v1",
+        "parent_asset_column": "historical_motion_parent_asset_id",
+        "processing_version": "pirc21-pr1-v1",
+        "algorithm": "visible_prefix_displacement"
+      },
+      "spatial": {"crs": "registered_segment_metric", "interpolation": "history_window"},
+      "time_window": "prediction_visible_prefix_only",
+      "rollout_mode": "history_state",
+      "variant_required": true
+    }
+  ],
+  "variants": [
+    {
+      "variant_id": "elevation.absolute",
+      "factor_id": "dem_elevation",
+      "transform": "identity",
+      "parameters": {"input_columns": ["elevation_m"]},
+      "output_columns": [{"name": "v_elevation_absolute_m", "dtype": "float32", "unit": "m", "role": "absolute"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "elevation.local",
+      "factor_id": "dem_local_elevation",
+      "transform": "identity",
+      "parameters": {"input_columns": ["relative_elevation_m", "local_relief_m"]},
+      "output_columns": [
+        {"name": "v_elevation_relative_m", "dtype": "float32", "unit": "m", "role": "local_relative"},
+        {"name": "v_elevation_relief_m", "dtype": "float32", "unit": "m", "role": "local_relief"}
+      ],
+      "output_dim": 2,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "elevation.absolute_standardized",
+      "factor_id": "dem_elevation",
+      "transform": "clipped_standardize",
+      "parameters": {"input_columns": ["elevation_m"], "clip_sigma": 6.0},
+      "output_columns": [{"name": "v_elevation_absolute_z", "dtype": "float32", "unit": "1", "role": "absolute_standardized"}],
+      "output_dim": 1,
+      "fit_scope": "train_only",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "elevation.change_rate",
+      "factor_id": "dem_elevation",
+      "transform": "visible_time_difference",
+      "parameters": {"input_columns": ["elevation_m"], "time_column": "absolute_epoch_ns"},
+      "output_columns": [{"name": "v_elevation_change_rate_mps", "dtype": "float32", "unit": "m/s", "role": "visible_change_rate"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "elevation.local_standardized",
+      "factor_id": "dem_local_elevation",
+      "transform": "clipped_standardize",
+      "parameters": {"input_columns": ["relative_elevation_m", "local_relief_m"], "clip_sigma": 6.0},
+      "output_columns": [
+        {"name": "v_elevation_relative_z", "dtype": "float32", "unit": "1", "role": "local_relative_standardized"},
+        {"name": "v_elevation_relief_z", "dtype": "float32", "unit": "1", "role": "local_relief_standardized"}
+      ],
+      "output_dim": 2,
+      "fit_scope": "train_only",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "surface.orientation",
+      "factor_id": "dem_surface",
+      "transform": "identity",
+      "parameters": {"input_columns": ["slope_radians", "aspect_sin", "aspect_cos", "normal_east", "normal_north", "normal_up"]},
+      "output_columns": [
+        {"name": "v_surface_slope_rad", "dtype": "float32", "unit": "rad", "role": "slope"},
+        {"name": "v_surface_aspect_sin", "dtype": "float32", "unit": "1", "role": "downslope_east"},
+        {"name": "v_surface_aspect_cos", "dtype": "float32", "unit": "1", "role": "downslope_north"},
+        {"name": "v_surface_normal_east", "dtype": "float32", "unit": "1", "role": "surface_normal_east"},
+        {"name": "v_surface_normal_north", "dtype": "float32", "unit": "1", "role": "surface_normal_north"},
+        {"name": "v_surface_normal_up", "dtype": "float32", "unit": "1", "role": "surface_normal_up"}
+      ],
+      "output_dim": 6,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "surface.shape",
+      "factor_id": "dem_surface",
+      "transform": "clipped_standardize",
+      "parameters": {"input_columns": ["curvature_per_m", "roughness_m"], "clip_sigma": 6.0},
+      "output_columns": [
+        {"name": "v_surface_curvature_z", "dtype": "float32", "unit": "1", "role": "curvature_standardized"},
+        {"name": "v_surface_roughness_z", "dtype": "float32", "unit": "1", "role": "roughness_standardized"}
+      ],
+      "output_dim": 2,
+      "fit_scope": "train_only",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "worldcover.grouped",
+      "factor_id": "worldcover",
+      "transform": "grouped_one_hot",
+      "parameters": {"input_columns": ["worldcover_class"], "groups": ["built", "vegetated", "water_wetland", "bare_snow_unknown"]},
+      "output_columns": [
+        {"name": "v_worldcover_built", "dtype": "float32", "unit": "1", "role": "category_indicator"},
+        {"name": "v_worldcover_vegetated", "dtype": "float32", "unit": "1", "role": "category_indicator"},
+        {"name": "v_worldcover_water_wetland", "dtype": "float32", "unit": "1", "role": "category_indicator"},
+        {"name": "v_worldcover_bare_snow_unknown", "dtype": "float32", "unit": "1", "role": "category_indicator"}
+      ],
+      "output_dim": 4,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "worldcover.embedding",
+      "factor_id": "worldcover",
+      "transform": "embedding_identity",
+      "parameters": {"input_columns": ["worldcover_class"], "vocabulary": "esa_worldcover_v200_plus_unknown", "embedding_dim": 4},
+      "output_columns": [{"name": "v_worldcover_token", "dtype": "int16", "unit": "class_index", "role": "embedding_identity"}],
+      "output_dim": 1,
+      "fit_scope": "model_train_only",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "road.distance_raw",
+      "factor_id": "overture_road",
+      "transform": "identity",
+      "parameters": {"input_columns": ["road_distance_m"]},
+      "output_columns": [{"name": "v_road_distance_m", "dtype": "float32", "unit": "m", "role": "nearest_distance"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "road.distance_log1p",
+      "factor_id": "overture_road",
+      "transform": "log1p",
+      "parameters": {"input_columns": ["road_distance_m"], "scale_m": 1.0},
+      "output_columns": [{"name": "v_road_distance_log1p", "dtype": "float32", "unit": "1", "role": "nearest_distance_log1p"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "road.direction",
+      "factor_id": "overture_road",
+      "transform": "unit_vector",
+      "parameters": {"input_columns": ["road_direction_east", "road_direction_north"]},
+      "output_columns": [
+        {"name": "v_road_direction_east", "dtype": "float32", "unit": "1", "role": "nearest_direction_east"},
+        {"name": "v_road_direction_north", "dtype": "float32", "unit": "1", "role": "nearest_direction_north"}
+      ],
+      "output_dim": 2,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "path.distance_raw",
+      "factor_id": "overture_path",
+      "transform": "identity",
+      "parameters": {"input_columns": ["path_distance_m"]},
+      "output_columns": [{"name": "v_path_distance_m", "dtype": "float32", "unit": "m", "role": "nearest_distance"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "path.distance_log1p",
+      "factor_id": "overture_path",
+      "transform": "log1p",
+      "parameters": {"input_columns": ["path_distance_m"], "scale_m": 1.0},
+      "output_columns": [{"name": "v_path_distance_log1p", "dtype": "float32", "unit": "1", "role": "nearest_distance_log1p"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "path.direction",
+      "factor_id": "overture_path",
+      "transform": "unit_vector",
+      "parameters": {"input_columns": ["path_direction_east", "path_direction_north"]},
+      "output_columns": [
+        {"name": "v_path_direction_east", "dtype": "float32", "unit": "1", "role": "nearest_direction_east"},
+        {"name": "v_path_direction_north", "dtype": "float32", "unit": "1", "role": "nearest_direction_north"}
+      ],
+      "output_dim": 2,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "rail.distance_raw",
+      "factor_id": "overture_rail",
+      "transform": "identity",
+      "parameters": {"input_columns": ["rail_distance_m"]},
+      "output_columns": [{"name": "v_rail_distance_m", "dtype": "float32", "unit": "m", "role": "nearest_distance"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "rail.distance_log1p",
+      "factor_id": "overture_rail",
+      "transform": "log1p",
+      "parameters": {"input_columns": ["rail_distance_m"], "scale_m": 1.0},
+      "output_columns": [{"name": "v_rail_distance_log1p", "dtype": "float32", "unit": "1", "role": "nearest_distance_log1p"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "rail.direction",
+      "factor_id": "overture_rail",
+      "transform": "unit_vector",
+      "parameters": {"input_columns": ["rail_direction_east", "rail_direction_north"]},
+      "output_columns": [
+        {"name": "v_rail_direction_east", "dtype": "float32", "unit": "1", "role": "nearest_direction_east"},
+        {"name": "v_rail_direction_north", "dtype": "float32", "unit": "1", "role": "nearest_direction_north"}
+      ],
+      "output_dim": 2,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "river.distance_raw",
+      "factor_id": "hydrorivers_river",
+      "transform": "identity",
+      "parameters": {"input_columns": ["river_distance_m"]},
+      "output_columns": [{"name": "v_river_distance_m", "dtype": "float32", "unit": "m", "role": "nearest_distance"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "river.distance_log1p",
+      "factor_id": "hydrorivers_river",
+      "transform": "log1p",
+      "parameters": {"input_columns": ["river_distance_m"], "scale_m": 1.0},
+      "output_columns": [{"name": "v_river_distance_log1p", "dtype": "float32", "unit": "1", "role": "nearest_distance_log1p"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "river.direction",
+      "factor_id": "hydrorivers_river",
+      "transform": "unit_vector",
+      "parameters": {"input_columns": ["river_direction_east", "river_direction_north"]},
+      "output_columns": [
+        {"name": "v_river_direction_east", "dtype": "float32", "unit": "1", "role": "nearest_direction_east"},
+        {"name": "v_river_direction_north", "dtype": "float32", "unit": "1", "role": "nearest_direction_north"}
+      ],
+      "output_dim": 2,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "jrc.distance_log1p",
+      "factor_id": "jrc_surface_water",
+      "transform": "log1p",
+      "parameters": {"input_columns": ["jrc_water_distance_m"], "scale_m": 1.0},
+      "output_columns": [{"name": "v_jrc_water_distance_log1p", "dtype": "float32", "unit": "1", "role": "nearest_distance_log1p"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "jrc.direction",
+      "factor_id": "jrc_surface_water",
+      "transform": "unit_vector",
+      "parameters": {"input_columns": ["jrc_water_direction_east", "jrc_water_direction_north"]},
+      "output_columns": [
+        {"name": "v_jrc_water_direction_east", "dtype": "float32", "unit": "1", "role": "nearest_direction_east"},
+        {"name": "v_jrc_water_direction_north", "dtype": "float32", "unit": "1", "role": "nearest_direction_north"}
+      ],
+      "output_dim": 2,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "jrc.attributes",
+      "factor_id": "jrc_surface_water",
+      "transform": "identity",
+      "parameters": {"input_columns": ["jrc_occurrence_percent", "jrc_seasonality_months"]},
+      "output_columns": [
+        {"name": "v_jrc_occurrence_percent", "dtype": "float32", "unit": "percent", "role": "water_occurrence"},
+        {"name": "v_jrc_seasonality_months", "dtype": "float32", "unit": "month", "role": "water_seasonality"}
+      ],
+      "output_dim": 2,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "navigable_water.distance_raw",
+      "factor_id": "overture_navigable_water",
+      "transform": "identity",
+      "parameters": {"input_columns": ["navigable_water_distance_m"]},
+      "output_columns": [{"name": "v_navigable_water_distance_m", "dtype": "float32", "unit": "m", "role": "nearest_distance"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "navigable_water.distance_log1p",
+      "factor_id": "overture_navigable_water",
+      "transform": "log1p",
+      "parameters": {"input_columns": ["navigable_water_distance_m"], "scale_m": 1.0},
+      "output_columns": [{"name": "v_navigable_water_distance_log1p", "dtype": "float32", "unit": "1", "role": "nearest_distance_log1p"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "navigable_water.direction",
+      "factor_id": "overture_navigable_water",
+      "transform": "unit_vector",
+      "parameters": {"input_columns": ["navigable_water_direction_east", "navigable_water_direction_north"]},
+      "output_columns": [
+        {"name": "v_navigable_water_direction_east", "dtype": "float32", "unit": "1", "role": "nearest_direction_east"},
+        {"name": "v_navigable_water_direction_north", "dtype": "float32", "unit": "1", "role": "nearest_direction_north"}
+      ],
+      "output_dim": 2,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "ridge.distance_raw",
+      "factor_id": "osm_ridge",
+      "transform": "identity",
+      "parameters": {"input_columns": ["ridge_distance_m"]},
+      "output_columns": [{"name": "v_ridge_distance_m", "dtype": "float32", "unit": "m", "role": "nearest_distance"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "ridge.distance_log1p",
+      "factor_id": "osm_ridge",
+      "transform": "log1p",
+      "parameters": {"input_columns": ["ridge_distance_m"], "scale_m": 1.0},
+      "output_columns": [{"name": "v_ridge_distance_log1p", "dtype": "float32", "unit": "1", "role": "nearest_distance_log1p"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "ridge.direction",
+      "factor_id": "osm_ridge",
+      "transform": "unit_vector",
+      "parameters": {"input_columns": ["ridge_direction_east", "ridge_direction_north"]},
+      "output_columns": [
+        {"name": "v_ridge_direction_east", "dtype": "float32", "unit": "1", "role": "nearest_direction_east"},
+        {"name": "v_ridge_direction_north", "dtype": "float32", "unit": "1", "role": "nearest_direction_north"}
+      ],
+      "output_dim": 2,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "cliff.distance_raw",
+      "factor_id": "osm_cliff",
+      "transform": "identity",
+      "parameters": {"input_columns": ["cliff_distance_m"]},
+      "output_columns": [{"name": "v_cliff_distance_m", "dtype": "float32", "unit": "m", "role": "nearest_distance"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "cliff.distance_log1p",
+      "factor_id": "osm_cliff",
+      "transform": "log1p",
+      "parameters": {"input_columns": ["cliff_distance_m"], "scale_m": 1.0},
+      "output_columns": [{"name": "v_cliff_distance_log1p", "dtype": "float32", "unit": "1", "role": "nearest_distance_log1p"}],
+      "output_dim": 1,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "cliff.direction",
+      "factor_id": "osm_cliff",
+      "transform": "unit_vector",
+      "parameters": {"input_columns": ["cliff_direction_east", "cliff_direction_north"]},
+      "output_columns": [
+        {"name": "v_cliff_direction_east", "dtype": "float32", "unit": "1", "role": "nearest_direction_east"},
+        {"name": "v_cliff_direction_north", "dtype": "float32", "unit": "1", "role": "nearest_direction_north"}
+      ],
+      "output_dim": 2,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "history.direction",
+      "factor_id": "historical_motion",
+      "transform": "unit_vector",
+      "parameters": {"input_columns": ["history_direction_east", "history_direction_north"]},
+      "output_columns": [
+        {"name": "v_history_direction_east", "dtype": "float32", "unit": "1", "role": "visible_history_direction_east"},
+        {"name": "v_history_direction_north", "dtype": "float32", "unit": "1", "role": "visible_history_direction_north"}
+      ],
+      "output_dim": 2,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    },
+    {
+      "variant_id": "history.relative_road",
+      "factor_id": "historical_motion",
+      "transform": "relative_heading_sin_cos",
+      "parameters": {"input_columns": ["history_direction_east", "history_direction_north"], "reference_columns": ["road_direction_east", "road_direction_north"]},
+      "output_columns": [
+        {"name": "v_history_road_relative_sin", "dtype": "float32", "unit": "1", "role": "relative_heading_sin"},
+        {"name": "v_history_road_relative_cos", "dtype": "float32", "unit": "1", "role": "relative_heading_cos"}
+      ],
+      "output_dim": 2,
+      "fit_scope": "none",
+      "enabled_by_default": false
+    }
+  ],
+  "compositions": [
+    {
+      "composition_id": "road.log_distance_x_direction",
+      "input_variant_ids": ["road.distance_log1p", "road.direction"],
+      "operator": "scalar_vector_product",
+      "parameters": {},
+      "output_columns": [
+        {"name": "c_road_log_direction_east", "dtype": "float32", "unit": "1", "role": "distance_direction_interaction_east"},
+        {"name": "c_road_log_direction_north", "dtype": "float32", "unit": "1", "role": "distance_direction_interaction_north"}
+      ],
+      "output_dim": 2,
+      "enabled_by_default": false
+    },
+    {
+      "composition_id": "river.log_distance_x_direction",
+      "input_variant_ids": ["river.distance_log1p", "river.direction"],
+      "operator": "scalar_vector_product",
+      "parameters": {},
+      "output_columns": [
+        {"name": "c_river_log_direction_east", "dtype": "float32", "unit": "1", "role": "distance_direction_interaction_east"},
+        {"name": "c_river_log_direction_north", "dtype": "float32", "unit": "1", "role": "distance_direction_interaction_north"}
+      ],
+      "output_dim": 2,
+      "enabled_by_default": false
+    },
+    {
+      "composition_id": "worldcover.grouped_x_road_distance",
+      "input_variant_ids": ["worldcover.grouped", "road.distance_log1p"],
+      "operator": "scalar_vector_product",
+      "parameters": {},
+      "output_columns": [
+        {"name": "c_worldcover_built_x_road", "dtype": "float32", "unit": "1", "role": "category_distance_interaction"},
+        {"name": "c_worldcover_vegetated_x_road", "dtype": "float32", "unit": "1", "role": "category_distance_interaction"},
+        {"name": "c_worldcover_water_x_road", "dtype": "float32", "unit": "1", "role": "category_distance_interaction"},
+        {"name": "c_worldcover_other_x_road", "dtype": "float32", "unit": "1", "role": "category_distance_interaction"}
+      ],
+      "output_dim": 4,
+      "enabled_by_default": false
+    },
+    {
+      "composition_id": "surface.orientation_x_history",
+      "input_variant_ids": ["surface.orientation", "history.direction"],
+      "operator": "pairwise_product",
+      "parameters": {"semantics": ["uphill_projection", "contour_projection"]},
+      "output_columns": [
+        {"name": "c_history_uphill_projection", "dtype": "float32", "unit": "1", "role": "uphill_projection"},
+        {"name": "c_history_contour_projection", "dtype": "float32", "unit": "1", "role": "contour_projection"}
+      ],
+      "output_dim": 2,
+      "enabled_by_default": false
+    }
+  ],
+  "segment_aggregations": [
+    {"aggregation_id": "mean", "operator": "mean", "minimum_valid_points": 1, "output_suffix": "__mean", "enabled_by_default": false},
+    {"aggregation_id": "std", "operator": "std", "minimum_valid_points": 1, "output_suffix": "__std", "enabled_by_default": false},
+    {"aggregation_id": "min", "operator": "min", "minimum_valid_points": 1, "output_suffix": "__min", "enabled_by_default": false},
+    {"aggregation_id": "max", "operator": "max", "minimum_valid_points": 1, "output_suffix": "__max", "enabled_by_default": false},
+    {"aggregation_id": "last", "operator": "last", "minimum_valid_points": 1, "output_suffix": "__last", "enabled_by_default": false},
+    {"aggregation_id": "valid_fraction", "operator": "valid_fraction", "minimum_valid_points": 0, "output_suffix": "__valid_fraction", "enabled_by_default": false}
+  ],
+  "legacy_view": {
+    "read_only": true,
+    "columns": ["dem_elev", "dem_slope", "landcover", "has_map"],
+    "controls_experiment_validity": false
+  }
+}

@@ -14,6 +14,13 @@ ROOT = Path(__file__).resolve().parents[1]
     "infrastructure.research_store", "application.research_supervisor",
     "application.research_comparison", "experiments.pirc25.compare_worker",
     "experiments.pirc25.case_worker", "experiments.pirc25.__main__",
+    "application.pirc26_runtime", "infrastructure.pirc26_worker",
+    "application.pirc26_metrics",
+    "application.pirc26_forecast_control", "infrastructure.pirc26_forecast_codec",
+    "infrastructure.pirc26_worker_control",
+    "infrastructure.pirc26_checkpoint_contract",
+    "infrastructure.pirc26_training_state_contract",
+    "infrastructure.pirc26_process_resources",
 ])
 def test_actual_shared_entry_import_does_not_require_tensor_engines(module):
     # An independent interpreter proves that pytest's already-imported torch

@@ -8,6 +8,7 @@ import time
 
 from .research_budget import BudgetLedger, BudgetSpec
 from .research_admission import AdmissionGate
+from .research_contracts import invoke_validator
 from .research_execution import resolve_execution, execution_plan
 from .research_registry import implementation_hash
 from infrastructure.research_store import ResearchError, ResearchStore, digest
@@ -105,8 +106,10 @@ class SharedRecovery:
             if (attempt["state"] != "RUNNING" or receipt["attempt_id"] != attempt_id
                     or receipt["cell_hash"] != digest(cell) or type(state) is not dict
                     or state.get("step") != progress["completed_steps"]
-                    or progress["total_steps"] > receipt["resource_plan"]["counts"]["steps"]):
+                    or plugin.checkpoint_validator is None and progress["total_steps"] > receipt["resource_plan"]["counts"]["steps"]):
                 raise ResearchError("CONTRACT_MISMATCH", "checkpoint differs from the admitted running job")
+            if plugin.checkpoint_validator is not None:
+                invoke_validator(plugin, "checkpoint_validator", self.store, receipt, state, progress)
         adapter = self.recovery.resolve(plugin.plugin_id, plugin.resume_level, plugin.registry_entry.version)
         required = {"step", "data_position", "method_state", "rng_state"}
         from .research_registry import _bounded_json
@@ -139,7 +142,18 @@ class SharedRecovery:
         return artifact["artifact_id"]
 
     def prepare(self, attempt_id, checkpoint_id, *, authorization):
-        attempt, run, spec, cell, plugin = self._context(attempt_id)
+        context = self._context(attempt_id)
+        if not context[-1].validator_store_context:
+            return self._prepare(attempt_id, checkpoint_id, authorization=authorization, context=context)
+        # Opt-in source validators register guards on this SAME owned scope.
+        # The state cannot leave after a later checkpoint I/O outlives a raw
+        # source/model grant. Legacy callbacks retain their original scope.
+        with self.store._read_transaction():
+            return self._prepare(attempt_id, checkpoint_id, authorization=authorization,
+                context=self._context(attempt_id))
+
+    def _prepare(self, attempt_id, checkpoint_id, *, authorization, context):
+        attempt, run, spec, cell, plugin = context
         adapter = self.recovery.resolve(plugin.plugin_id, plugin.resume_level, plugin.registry_entry.version)
         if attempt["state"] not in {"FAILED", "INTERRUPTED"}:
             raise ResearchError("CONTRACT_MISMATCH", "only a stopped failed attempt may resume")
@@ -165,6 +179,19 @@ class SharedRecovery:
                 or not any(event["event_kind"] == "CHECKPOINT" and event["payload"] == saved
                            for event in self.store.events())):
             raise ResearchError("CONTRACT_MISMATCH", "checkpoint lacks authoritative source save and scope")
+        if plugin.checkpoint_validator is not None:
+            reference = value.get("admission_hash")
+            if not isinstance(reference, str) or not isinstance(value.get("progress"), dict):
+                raise ResearchError("CONTRACT_MISMATCH", "owned phase recovery requires its original admission and progress")
+            receipt = self.store.manifest("admission-" + reference)
+            if (receipt.get("admission_hash") != reference
+                    or digest({k:v for k,v in receipt.items() if k != "admission_hash"}) != reference
+                    or receipt.get("attempt_id") != attempt_id or receipt.get("spec_hash") != digest(spec)
+                    or receipt.get("cell_hash") != digest(cell)):
+                raise ResearchError("CONTRACT_MISMATCH", "checkpoint original admission differs")
+            # Before retry creation/admission/provider reads, not only after a
+            # worker has consumed the data. Validation grants no new authority.
+            invoke_validator(plugin, "checkpoint_validator", self.store, receipt, value["state"], value["progress"])
         self.store.verify_artifact_read(checkpoint_id, purpose="resume", authorization=authorization)
         return {"run": run, "spec": spec, "cell": cell, "plugin": plugin,
                 "adapter": adapter, "state": value["state"], "checkpoint_id": checkpoint_id}

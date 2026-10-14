@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import subprocess
@@ -32,6 +33,10 @@ class ResearchSupervisor:
         try:
             queue.enqueue(reservation, run["cell"].get("resource_class", "cpu"))
             while queue.claim(reservation["reservation_id"], resource_sharing=resource_sharing) is None:
+                execution_expiry = reservation.get("execution_deadline", reservation.get("work_deadline"))
+                if (execution_expiry and datetime.fromisoformat(execution_expiry)
+                        <= datetime.now(timezone.utc)):
+                    raise ResearchError("UNAUTHORIZED_DATA", "execution authorization expired while queued")
                 time.sleep(0.05)
         except BaseException as exc:
             # A duplicate caller must not release the original worker's claim.
@@ -57,7 +62,12 @@ class ResearchSupervisor:
                                   error_code=exc.code if isinstance(exc, ResearchError) else "CONTRACT_MISMATCH")
             raise
         start = self.monotonic()
-        deadline = start + budget.job_seconds
+        allocation_seconds = budget.job_seconds
+        execution_expiry = reservation.get("execution_deadline", reservation.get("work_deadline"))
+        if execution_expiry:
+            allocation_seconds = min(allocation_seconds, max(0,
+                (datetime.fromisoformat(execution_expiry) - datetime.now(timezone.utc)).total_seconds()))
+        deadline = start + allocation_seconds
         from infrastructure.research_control import CheckpointExchange, ControlError, ENVIRONMENT
         channel = CheckpointExchange(work, attempt_id, deadline, maximum_result_bytes) if checkpoint_handler is not None else None
         saved_checkpoint = None
@@ -117,7 +127,7 @@ class ResearchSupervisor:
                 # A Timer wakeup is not clock evidence (notably with Windows
                 # monotonic tick rounding). Wait cancellably until the actual
                 # threshold; never move the original signal before80%.
-                threshold = deadline - budget.job_seconds * 0.2
+                threshold = deadline - allocation_seconds * 0.2
                 while True:
                     remaining = threshold - self.monotonic()
                     if remaining <= 0:
@@ -149,7 +159,7 @@ class ResearchSupervisor:
                 request_id = channel.request_id
             else:
                 issued = self.monotonic()
-                if issued - start < budget.job_seconds * 0.8:
+                if issued - start < allocation_seconds * 0.8:
                     return False
                 request_id = None
             self.store.append("CHECKPOINT_REQUESTED", {"attempt_id": attempt_id,
@@ -170,7 +180,7 @@ class ResearchSupervisor:
             if budget_stop_requested or channel is None or saved_checkpoint is not None or past_deadline():
                 return False
             if not soft_done.is_set():
-                if self.monotonic() < deadline - budget.job_seconds * 0.2:
+                if self.monotonic() < deadline - allocation_seconds * 0.2:
                     return False
                 # A published request can already have a response while the
                 # sending call is still completing. Wait OUTSIDE the authority
@@ -257,7 +267,7 @@ class ResearchSupervisor:
                 deadline_monitor.start()
                 if channel is not None:
                     soft_monitor = threading.Timer(
-                        max(0, start + budget.job_seconds * 0.8 - self.monotonic()), signal_checkpoint)
+                        max(0, start + allocation_seconds * 0.8 - self.monotonic()), signal_checkpoint)
                     soft_monitor.daemon = True
                     soft_monitor.start()
                 with self.store.lock():
@@ -311,7 +321,7 @@ class ResearchSupervisor:
                     if now - start >= 15 and (not heartbeat.exists() or time.time() - heartbeat.stat().st_mtime > 15):
                         outcome, error_code = "INTERRUPTED", "HEARTBEAT_LOST"
                         break
-                    if channel is None and now - start >= budget.job_seconds * 0.8 and not warned:
+                    if channel is None and now - start >= allocation_seconds * 0.8 and not warned:
                         record_checkpoint_request()
                     if not budget_checked:
                         collect_checkpoint()
