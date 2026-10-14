@@ -428,7 +428,12 @@ def test_frozen_recipe_emits_evaluator_recovery_without_promoting_cell():
     relabeled['scenario']['label_permutation'] = [1, 0]
     relabeled_output = execute_recipe(relabeled, 2, 19, check_budget=fixture_poll)
     relabeled_diagnostics = relabeled_output['fit']['recovery_diagnostics']
-    assert relabeled_diagnostics['parameter_recovery']['metrics'] == diagnostics['parameter_recovery']['metrics']
+    # Relabeling may change float64 reduction order by a few ULPs (3.12/BLAS).
+    # This is rounding-only symmetry, not a change to any qualification gate.
+    assert relabeled_diagnostics['parameter_recovery']['metrics'] == pytest.approx(
+        diagnostics['parameter_recovery']['metrics'], rel=8*np.finfo(np.float64).eps, abs=0)
+    assert relabeled_diagnostics['state'] == diagnostics['state']
+    assert relabeled_output['fit']['qualified_identifiability'] is False
     for name in ('mode_brier', 'mode_ece', 'occupancy_error'):
         assert relabeled_diagnostics['mode_diagnostics'][name] == pytest.approx(diagnostics['mode_diagnostics'][name])
     one = execute_recipe(value, 1, 19, check_budget=fixture_poll)

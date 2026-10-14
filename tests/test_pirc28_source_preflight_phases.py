@@ -206,9 +206,26 @@ def test_between_phase_mutations_veto_handoff(isolated_source, monkeypatch, dama
 
 
 def test_physical_completion_follows_final_authority_io(isolated_source, monkeypatch):
+    _physical_completion_control(isolated_source, monkeypatch, extra_completion=False)
+
+
+def test_physical_completion_still_follows_an_additional_authority_callback(isolated_source, monkeypatch):
+    _physical_completion_control(isolated_source, monkeypatch, extra_completion=True)
+
+
+def _physical_completion_control(isolated_source, monkeypatch, *, extra_completion):
     store, _, study, cell, attempt = isolated_source
     original = store._events
-    changed = []
+    changed, additional = [], []
+    if extra_completion:
+        original_completion = store._read_completion
+
+        def completion(authority, expiry):
+            if getattr(authority, '__func__', None) is source_preflight.SourceMetadata.finish:
+                original_completion(lambda: additional.append(True), lambda: None)
+            original_completion(authority, expiry)
+
+        monkeypatch.setattr(store, '_read_completion', completion)
     baseline = sum(event['event_kind'] == 'DISCLOSURE_ALLOWED'
         and event['payload']['study_id'] == study['study_id'] for event in store.events())
 
@@ -217,7 +234,12 @@ def test_physical_completion_follows_final_authority_io(isolated_source, monkeyp
         allowed = [event for event in values if event['event_kind'] == 'DISCLOSURE_ALLOWED'
             and event['payload']['study_id'] == study['study_id']]
         completions = getattr(store._read_scope, 'completions', ())
-        if (store._read_snapshot() is None and len(completions) == 4
+        last = completions[-1][0] if completions else None
+        # Budget/permission checks may add callbacks. Identify the actual last
+        # pinned-file completion, not an incidental count of unrelated guards.
+        final_pinned_finish = (getattr(last, '__func__', None)
+                               is source_preflight.SourceMetadata.finish)
+        if (store._read_snapshot() is None and final_pinned_finish
                 and len(allowed) == baseline+2 and not changed):
             path = store.path/'manifests'/('study-'+study['study_id']+'.json')
             content = path.read_bytes()
@@ -228,14 +250,15 @@ def test_physical_completion_follows_final_authority_io(isolated_source, monkeyp
                 stream.write(b' ')
                 stream.flush()
                 os.fsync(stream.fileno())
-            changed.append((len(completions), len(allowed)-baseline))
+            changed.append(len(allowed)-baseline)
         return values
 
     monkeypatch.setattr(store, '_events', events)
     with pytest.raises(ResearchError) as error:
         source_preflight.validate_scientific_source(store, study, cell, attempt, check_budget=lambda: None)
     assert error.value.code == 'CORRUPT_ARTIFACT'
-    assert changed == [(4, 2)]
+    assert changed == [2], 'fault must actually follow both final authority disclosures'
+    assert additional == ([True] if extra_completion else [])
 
 
 def test_frozen_full_64_matrix_allows_original_timeout_owner_heartbeats(tmp_path, monkeypatch):
@@ -246,6 +269,9 @@ def test_frozen_full_64_matrix_allows_original_timeout_owner_heartbeats(tmp_path
     assert len(master.study_ids) == 64
     assert len(master.to_dict()['identifiability_spec']['replicate_ids']) == 16
     assert sum(len(store.manifest('study-'+name)['spec']['cells']) for name in master.study_ids) == 2048
+    # Upstream defaults now allow 300s waits. This original liveness control
+    # still exercises the explicit 15s owner-writer acquisition bound.
+    store.lock_wait_seconds = 15
     observed = _observe_pure_phases(store, monkeypatch)
     stopped = threading.Event()
     receipts, errors = [], []

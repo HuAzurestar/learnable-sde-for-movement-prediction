@@ -35,7 +35,7 @@ def test_first_missing_response_request_uses_the_original_owned_read_scope(tmp_p
 
     monkeypatch.setattr(ResearchStore, "_append", append)
     monkeypatch.setattr(CheckpointExchange, "acknowledge", acknowledge)
-    original_control(tmp_path, monkeypatch, "ready")
+    original_control(tmp_path, monkeypatch, "ready", wait_for_real_ready=True)
 
     # AFTER actual native stop, real funded settlement and original order/
     # refusal checks: do not manufacture any native result to satisfy this.

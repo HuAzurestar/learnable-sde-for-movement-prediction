@@ -4,6 +4,8 @@ Use the existing 600-step/6-second adversarial worker for ordering controls.
 The original 300-step/3-second acceptance and native stops stay unchanged.
 """
 
+import time
+
 import pytest
 
 from application.research_budget import BudgetLedger, BudgetSpec
@@ -14,15 +16,25 @@ from tests.test_research_checkpoint_phase_work import live_owner
 
 @pytest.mark.parametrize('change', ['ready', 'invalid', 'closed-arm', 'recovery-hold'])
 def test_fresh_response_after_durable_request_precedes_another_budget_poll(
-        tmp_path, monkeypatch, change):
+        tmp_path, monkeypatch, change, wait_for_real_ready=False):
     store, value, runner = live_owner(tmp_path)
     original_response = CheckpointExchange.response
     original_append, original_balance = store.append, BudgetLedger.balance
-    trace, exchanges, injected = [], [], []
+    trace, exchanges, injected, actual_ready = [], [], [], []
 
     def response(exchange):
         exchanges.append(exchange)
         if len(exchanges) == 1:
+            if wait_for_real_ready:
+                # The shared-prefix control specifically requires a real frame
+                # already waiting when this poll is suppressed. Observe it
+                # OUTSIDE writer ownership, within the original six-second
+                # deadline; never manufacture a frame, native exit or grace.
+                frame = original_response(exchange)
+                while frame is None and time.monotonic() < exchange.deadline:
+                    time.sleep(min(0.001, max(0, exchange.deadline-time.monotonic())))
+                    frame = original_response(exchange)
+                actual_ready.append((frame is not None, store._read_snapshot() is None))
             trace.append('first-missing')
             return None  # Suppress this IPC poll only, not the actual worker.
         trace.append('response')
@@ -65,6 +77,8 @@ def test_fresh_response_after_durable_request_precedes_another_budget_poll(
 
     # Check ordering only after native stop/settlement: a failing assertion must
     # not interrupt the actual worker or manufacture a successful native exit.
+    if wait_for_real_ready:
+        assert actual_ready == [(True, True)], 'real frame outside-writer precondition was not established'
     assert trace[trace.index('request-durable') + 1] == 'response', trace
     assert injected == [True]
     events = store.events()
