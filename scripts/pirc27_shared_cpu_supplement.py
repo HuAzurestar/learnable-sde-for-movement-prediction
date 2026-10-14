@@ -245,7 +245,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("prepare", "inspect", "run-next"))
     parser.add_argument("--runtime-config", type=Path, required=True)
-    parser.add_argument("--lock-wait-seconds", type=float, default=15,
+    parser.add_argument("--lock-wait-seconds", type=float, default=300,
                         help="wait for the existing authority writer (0..3600s); never bypass its OS lock")
     args = parser.parse_args(argv)
     try:
