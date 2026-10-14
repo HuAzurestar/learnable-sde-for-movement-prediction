@@ -6,6 +6,7 @@ No fake worker, replaced sampler, forced checkpoint or owner-created state is us
 
 import copy
 import json
+import os
 
 import pytest
 
@@ -19,6 +20,34 @@ from tests.test_pirc28_managed_approximation import engineering_recipe
 from tests.test_pirc28_synthetic import fixture_poll
 
 
+def checkpoint_recipe(*, distinguishable=False, platform_name=None):
+    value = engineering_recipe(distinguishable=distinguishable)
+    # Fixed disposable workloads, chosen by platform before ANY attempt. The
+    # original Windows workload and all 18/120-second limits stay unchanged.
+    # The smaller recipe completes on Linux before its 80% checkpoint boundary;
+    # run genuine additional fixed reference batches there, not a timed sleep,
+    # fake sampler, forced checkpoint or outcome-selected retry/budget.
+    if (os.name if platform_name is None else platform_name) != 'nt':
+        reference = value['approximation_spec']['event_driven_reference']
+        reference.update(particles=4096, independent_batches=32)
+    return value
+
+
+@pytest.mark.parametrize('platform_name,particles,batches', [('nt', 1024, 8), ('posix', 4096, 32)])
+def test_checkpoint_workload_is_fixed_and_within_original_resource_caps(platform_name, particles, batches):
+    from experiments.pirc28.pipeline import recipe_resources
+    from experiments.pirc28.runtime import switching_plugin
+    from application.research_registry import GLOBAL_LIMITS, plan_resources
+
+    value = checkpoint_recipe(platform_name=platform_name)
+    reference = value['approximation_spec']['event_driven_reference']
+    assert reference['particles'] == particles and reference['independent_batches'] == batches
+    config, inputs = recipe_resources(value, 2)
+    resources = plan_resources(switching_plugin().registry_entry, config, inputs, matrix_cells=1)
+    assert resources['tensor_elements'] <= GLOBAL_LIMITS['tensor_elements']
+    assert value == checkpoint_recipe(platform_name=platform_name)
+
+
 def fail_with_logs(store, result):
     logs = list((store.path / 'artifacts').glob('.attempt-*/worker.log'))
     pytest.fail(str(result)+'\n'+'\n'.join(path.read_text(errors='replace') for path in logs))
@@ -27,7 +56,7 @@ def fail_with_logs(store, result):
 def test_reference_phase_checkpoint_reopened_resume_matches_actual_continuous_worker(tmp_path, monkeypatch):
     # Fixed before execution. This exercises real reference work under the
     # original hard limits; elapsed-time observations never choose a new budget.
-    monkeypatch.setattr(evidence_tests, 'recipe', engineering_recipe)
+    monkeypatch.setattr(evidence_tests, 'recipe', checkpoint_recipe)
     continuous, baseline, _, baseline_grant, baseline_runner = evidence_tests.prepared(tmp_path / 'continuous')
     baseline_cell = next(cell for cell in baseline['cells'] if cell['fit_K'] == 2)
     completed = baseline_runner.run_cell(baseline['study_id'], digest(baseline_cell), budget=BudgetSpec(120))
@@ -81,7 +110,9 @@ def test_reference_phase_checkpoint_reopened_resume_matches_actual_continuous_wo
     assert native != expected['fit']['reference_execution']
     report = actual['fit']['approximation_checks']
     assert report['reference_seed'] == reference_seed(study['switching_recipe'], cell['seed'])
-    assert all(path['reference_batches'] == 8 for path in report['paths'])
+    batches = 8 if os.name == 'nt' else 32
+    assert study['switching_recipe']['approximation_spec']['event_driven_reference']['independent_batches'] == batches
+    assert all(path['reference_batches'] == batches for path in report['paths'])
     assert report['managed_evidence_bound'] is report['qualified_identifiability'] is False
     assert reopened.attempts()[resumed['attempt_id']]['parent_attempt_id'] == interrupted['attempt_id']
     events = reopened.events()

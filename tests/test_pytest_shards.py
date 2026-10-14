@@ -124,3 +124,20 @@ def test_real_external_selector_cannot_silently_remove_tests(tmp_path):
     assert completed.returncode != 0
     assert report is None or report['exit_code'] != 0
     assert 'another selector changed' in completed.stdout + completed.stderr
+
+
+def test_version_gate_also_requires_successful_shard_jobs_not_only_reports():
+    import yaml
+
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[1]
+                              / '.github' / 'workflows' / 'ci.yml').read_text(encoding='utf-8'))
+    jobs = workflow['jobs']
+    assert jobs['required']['needs'] == ['policy', 'python']
+    assert jobs['python']['name'] == 'test (${{ matrix.python-version }})'
+    assert jobs['python']['needs'] == ['python-suite']
+    gate = next(step for step in jobs['python']['steps']
+                if step.get('name') == 'Require complete successful version inventory')
+    assert gate.get('env', {}).get('SUITES_RESULT') == '${{ needs.python-suite.result }}'
+    lines = gate['run'].strip().splitlines()
+    assert lines[0].strip() == 'test "$SUITES_RESULT" = success'
+    assert lines[1].strip().startswith('python scripts/pytest_shards.py verify --count 4 ')

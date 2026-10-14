@@ -324,10 +324,14 @@ def test_resealed_false_numeric_pilot_is_not_qualification(source, fault):
 
 
 def test_direct_formal_computation_has_no_self_promotion_or_stale_worker_receipt(source, tmp_path):
-    store, spec, _, _, _, _, _ = source
+    store, spec, registry, recovery, _, _, _ = source
     with pytest.raises(ResearchError, match="owner admission"):
         execute_propagation(spec, spec["cells"][0])
-    outcome = next(a for a in store.attempts().values() if store.manifest("run-"+a["run_id"])["study_id"] == spec["study_id"])
+    # Establish this test's actual admitted result, also when selected alone or
+    # on another shard. A preceding test is not the source of this evidence.
+    outcome = SharedRunner(store, registry, recovery_registry=recovery).run_cell(
+        spec["study_id"], digest(spec["cells"][0]))
+    assert outcome['state'] == 'SUCCEEDED', outcome
     result = json.loads((store.path/"artifacts"/outcome["artifact_id"]).read_bytes())
     with pytest.raises(ResearchError, match="current owner attempt"):
         load_worker_admission(store, result["admission_hash"], spec, spec["cells"][0], tmp_path/"outside.json")

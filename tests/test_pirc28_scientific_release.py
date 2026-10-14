@@ -27,11 +27,12 @@ class MetadataStore:
 
 
 @pytest.fixture(scope='module')
-def full_metadata():
+def full_metadata(tmp_path_factory):
     plan = load_plan(REFERENCE_PLAN)
     frozen = release._registered_definition(encode(plan), code_hash())
     master = frozen.to_dict()
-    studies = frozen.proposals({'root': 'C:/engineering-metadata-only', 'store_id': 'not-registered'})
+    studies = frozen.proposals({'root': str(tmp_path_factory.mktemp('scientific-metadata-only')),
+                               'store_id': 'not-registered'})
     rows, lineage, proofs = [], [], []
     for study in studies:
         study['admission'] = {'mode': 'pilot'}

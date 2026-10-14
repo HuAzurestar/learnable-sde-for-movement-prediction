@@ -111,7 +111,11 @@ jobs:
           path: shard-reports
           merge-multiple: true
       - name: Require complete successful version inventory
-        run: python scripts/pytest_shards.py verify --count 4 --revision "${{ github.sha }}" --reports shard-reports
+        env:
+          SUITES_RESULT: ${{ needs.python-suite.result }}
+        run: |
+          test "$SUITES_RESULT" = success
+          python scripts/pytest_shards.py verify --count 4 --revision "${{ github.sha }}" --reports shard-reports
   required:
     name: required
     if: ${{ always() }}
