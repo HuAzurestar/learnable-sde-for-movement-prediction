@@ -200,7 +200,10 @@ def atomic_write(path: Path, content: bytes, *, before_replace=None, immutable=F
 
 
 @contextmanager
-def file_lock(path: Path, timeout: float = 15):
+def file_lock(path: Path, timeout: float = 300):
+    # Metadata publication can outlast 15s on an established Windows journal.
+    # Waiting is not compute exclusion: retain the same exclusive OS lock and
+    # independent worker/job watchdogs instead of failing a healthy admission.
     with path.open("a+b") as stream:
         stream.seek(0, os.SEEK_END)
         if stream.tell() == 0:

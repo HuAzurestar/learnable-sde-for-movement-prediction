@@ -365,7 +365,7 @@ class PreparationRunner:
             "preparation_origin": origin, "runtime_code_hash": runtime_hash, "settings": deepcopy(settings),
             "sources": descriptors, "train_binding": population, "read_event_hashes": []}
 
-        def command(output):
+        def handoff(output):
             # Existing supervisor has already reserved and claimed the original
             # arm. This builder only reads/serializes bytes, never decodes them.
             with self.store._read_transaction():
@@ -387,6 +387,14 @@ class PreparationRunner:
             self.store.publish(reference["request_manifest_id"], request)
             atomic_write(output.parent / "preparation-request.json", encode(request))
             return [sys.executable, "-B", str(ROOT / "infrastructure/pirc26_preparation_worker.py"), str(output)]
+
+        def command(output):
+            # All bytes remain in this not-yet-launched owned attempt. Keep one
+            # writer scope for this bounded input publication, with a final fresh
+            # physical prefix and every source/expiry disclosure guard intact.
+            # Never hold this scope while the scientific worker executes.
+            with self.store._read_transaction():
+                return handoff(output)
 
         def validate(value):
             _validate_result(value, request)
