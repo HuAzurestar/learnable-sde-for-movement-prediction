@@ -611,7 +611,7 @@ class ResearchStore:
         if any(c.get("arm_id") not in {a["arm_id"] for a in arms} for c in spec["cells"]):
             raise ResearchError("CONTRACT_MISMATCH", "cell arm is not registered")
         object_id = "study-" + spec["study_id"]
-        with self.lock():
+        def verify_families():
             for event in self._events():
                 if event["event_kind"] != "MANIFEST" or not event["payload"]["object_id"].startswith("study-"):
                     continue
@@ -622,8 +622,16 @@ class ResearchStore:
                         same_family = all(registered[k] == proposed[k] for k in keys)
                         if (registered["arm_id"] == proposed["arm_id"]) != same_family:
                             raise ResearchError("IDENTITY_CONFLICT", "arm family cannot be relabeled to reset its budget")
+        # Reuse one physically verified prefix ONLY inside this owned writer
+        # scope. Otherwise every historical study lookup scans the full journal
+        # again, making registration quadratic in a real multi-study store.
+        # All actual manifests are still rehashed; final guards repeat on a fresh
+        # uncached physical prefix before the registration leaves this scope.
+        with self._read_transaction():
+            verify_families()
             sha = self._publish(object_id, {"spec": spec, "spec_hash": expected_hash})
             self._append("MANIFEST", {"object_id": object_id, "sha256": sha}, "manifest-" + digest([object_id, sha]))
+            self._read_completion(verify_families, lambda: None)
         return {"study_id": spec["study_id"], "experiment_id": spec["experiment_id"], "spec_hash": expected_hash}
 
     def register_run(self, study_id: str, cell: dict) -> str:
