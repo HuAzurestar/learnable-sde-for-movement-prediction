@@ -29,6 +29,14 @@ dispatch; a writer timeout remains a real failed attempt, not permission to
 bypass the ledger. The policy is part of the immutable registered cell and thus
 changes its cell and study identity.
 
+Operator code may construct `ResearchStore(..., lock_wait_seconds=N)` with a
+finite wait of 0..3600 seconds; the default remains 15 seconds. The PIRC-27
+supplement CLI exposes `--lock-wait-seconds`. This waits for the existing OS
+writer lock and preserves writer exclusion, physical verification and ordinary
+`WRITER_BUSY` refusal if the bound expires. It does not retry attempts, extend
+worker deadlines or change the budget. Waiting during an active worker remains
+inside its original deadline and measured charge.
+
 ### Frozen test-read evidence
 
 `test` and `final-eval` protocol reads require both `preregistration_hash` and

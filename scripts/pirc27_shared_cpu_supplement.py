@@ -245,9 +245,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("prepare", "inspect", "run-next"))
     parser.add_argument("--runtime-config", type=Path, required=True)
+    parser.add_argument("--lock-wait-seconds", type=float, default=15,
+                        help="wait for the existing authority writer (0..3600s); never bypass its OS lock")
     args = parser.parse_args(argv)
     try:
-        store = original.connect(args.runtime_config)
+        store = original.connect(args.runtime_config, lock_wait_seconds=args.lock_wait_seconds)
         value = prepare(store) if args.command == "prepare" else inspect(store) if args.command == "inspect" else run_next(store)
         print(json.dumps(value, ensure_ascii=False, sort_keys=True), flush=True)
         return 0 if value.get("state") not in {"FAILED", "TIMEOUT", "INTERRUPTED", "PREFLIGHT_FAILED"} else 1
