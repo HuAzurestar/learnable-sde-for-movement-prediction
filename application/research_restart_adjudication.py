@@ -17,6 +17,7 @@ from infrastructure.research_store import ResearchError, digest
 
 SCHEMA = "pirc28-restart-adjudication-v1"
 PRELAUNCH_SCHEMA = "pirc28-restart-adjudication-v2"
+SUPERSESSION_SCHEMA = "pirc28-restart-adjudication-v3"
 BRIDGE_SCHEMA = "pirc28-source-epoch-bridge-v1"
 CONTINUATION_SCHEMA = "pirc28-resource-arm-continuation-v1"
 RESOURCE_RETRY_SCHEMA = "pirc28-resource-retry-adjudication-v1"
@@ -97,7 +98,7 @@ def _prime_restart(store, reference):
     _reference(reference, "retry adjudication")
     receipt = store.manifest(reference["manifest_id"])
     _require(digest(receipt) == reference["sha256"], "retry adjudication hash differs")
-    if receipt.get("schema_version") in {SCHEMA, PRELAUNCH_SCHEMA}:
+    if receipt.get("schema_version") in {SCHEMA, PRELAUNCH_SCHEMA, SUPERSESSION_SCHEMA}:
         prime_source_definitions(store, receipt["source_bridge"])
     elif receipt.get("schema_version") == RESOURCE_RETRY_SCHEMA:
         prime_policy_definitions(store, receipt["execution_policy"], receipt["current_code_hash"])
@@ -241,7 +242,7 @@ def _attempt_payload(receipt):
 
 
 def _prelaunch_predecessors(store, references, *, parent_attempt_id, current_run,
-                            current_definition, before_sequence):
+                            current_definition, before_sequence, unfunded_supersession=None):
     """Carry every older prelaunch sibling forward across source renewals."""
     from .research_queue_recovery import resolve_prelaunch_cancellation
 
@@ -254,8 +255,12 @@ def _prelaunch_predecessors(store, references, *, parent_attempt_id, current_run
         and event["payload"].get("parent_attempt_id") == parent_attempt_id
         and event["payload"].get("run_id") != current_run["run_id"]}
     seen = set()
-    for reference in references:
-        cancellation = resolve_prelaunch_cancellation(store, reference)
+    participants = [(resolve_prelaunch_cancellation(store, reference), True) for reference in references]
+    if unfunded_supersession is not None:
+        from .research_unfunded_source import resolve_unfunded_supersession
+        participants.append((resolve_unfunded_supersession(store, unfunded_supersession,
+            source_code_hash=current_definition['runtime_code_hash']), False))
+    for cancellation, funded in participants:
         attempt = store._attempts()[cancellation["attempt_id"]]
         run = store._manifest("run-" + attempt["run_id"])
         study = store._manifest("study-" + run["study_id"])["spec"]
@@ -270,28 +275,39 @@ def _prelaunch_predecessors(store, references, *, parent_attempt_id, current_run
                  and attempt.get("parent_attempt_id") == parent_attempt_id
                  and attempt.get("reason") == REASON and attempt["attempt_id"] not in seen,
                  "prelaunch predecessor changes frozen design or retry lineage", "IDENTITY_CONFLICT")
-        reserve = next(event for event in events
-                       if event["hash"] == cancellation["event_hashes"]["reserve"])
-        prior = _published(store, reserve["payload"].get("restart_adjudication"), "prior restart")
+        if funded:
+            reserve = next(event for event in events
+                           if event["hash"] == cancellation["event_hashes"]["reserve"])
+            prior_reference = reserve["payload"].get("restart_adjudication")
+            terminal_hash = cancellation["event_hashes"]["terminal"]
+        else:
+            prior_reference = cancellation['restart_adjudication']
+            terminal_hash = cancellation['terminal_event_hash']
+        prior = _published(store, prior_reference, "prior restart")
         _require(prior.get("parent_attempt_id") == parent_attempt_id
                  and prior.get("retry_attempt_id") == attempt["attempt_id"]
                  and prior.get("current_run_id") == run["run_id"]
                  and prior.get("current_code_hash") == previous["runtime_code_hash"]
-                 and any(event["hash"] == cancellation["event_hashes"]["terminal"]
+                 and any(event["hash"] == terminal_hash
                          and event["sequence"] < before_sequence for event in events),
                  "prelaunch predecessor adjudication or terminal order differs")
         seen.add(attempt["attempt_id"])
     _require(seen == expected, "all prior source retry registrations must be retained",
              "RETRY_EXHAUSTED")
-    return len(seen)
+    # Only the previously FUNDED queue cancellation consumes its retained
+    # retry ordinal. The additional, explicitly recorded source registration
+    # had no reservation, queue, admission or possible worker execution.
+    return len(references)
 
 
 def _resolve_receipt(store, reference, *, allow_missing_attempt=False):
     receipt = _published(store, reference, "restart adjudication")
     expected_fields = (RECEIPT_FIELDS | {"prelaunch_cancellations"}
                        if receipt.get("schema_version") == PRELAUNCH_SCHEMA else RECEIPT_FIELDS)
+    if receipt.get("schema_version") == SUPERSESSION_SCHEMA:
+        expected_fields = RECEIPT_FIELDS | {"prelaunch_cancellations", "unfunded_supersession"}
     _require(set(receipt) == expected_fields
-             and receipt.get("schema_version") in {SCHEMA, PRELAUNCH_SCHEMA},
+             and receipt.get("schema_version") in {SCHEMA, PRELAUNCH_SCHEMA, SUPERSESSION_SCHEMA},
              "restart adjudication schema differs")
     bridge = resolve_source_bridge(store, receipt["source_bridge"],
         execution_policy=receipt["execution_policy"], source_code_hash=receipt["current_code_hash"])
@@ -319,7 +335,8 @@ def _resolve_receipt(store, reference, *, allow_missing_attempt=False):
              "adjudicated current run differs", "IDENTITY_CONFLICT")
     predecessor_count = _prelaunch_predecessors(store, receipt.get("prelaunch_cancellations", []),
         parent_attempt_id=receipt["parent_attempt_id"], current_run=current_run,
-        current_definition=bridge["current_definition"].to_dict(), before_sequence=matches[0]["sequence"])
+        current_definition=bridge["current_definition"].to_dict(), before_sequence=matches[0]["sequence"],
+        unfunded_supersession=receipt.get('unfunded_supersession'))
     hashes = receipt.get("historical_event_hashes", {})
     _require(type(hashes) is dict and len(hashes) == 6
              and all(sum(event["hash"] == value for event in events) == 1 for value in hashes.values()),
@@ -399,7 +416,7 @@ def resolve_restart_adjudication(store, reference, *, execution_policy, source_c
 
 
 def adjudicate_restart(store, parent_attempt_id, *, source_bridge, execution_policy,
-                       source_code_hash, prelaunch_cancellations=None):
+                       source_code_hash, prelaunch_cancellations=None, unfunded_supersession=None):
     """Register one deterministic restart child; never launch or reserve it."""
     from application.research_restart_review import inspect_restart_review
     from infrastructure.process_tree import process_may_be_alive
@@ -417,6 +434,8 @@ def adjudicate_restart(store, parent_attempt_id, *, source_bridge, execution_pol
             receipt = _resolve_receipt(store, reference, allow_missing_attempt=True)
             _require(receipt.get("prelaunch_cancellations", []) == (prelaunch_cancellations or []),
                      "restart replay changed prelaunch history", "IDENTITY_CONFLICT")
+            _require(receipt.get('unfunded_supersession') == unfunded_supersession,
+                     'restart replay changed unfunded source history', 'IDENTITY_CONFLICT')
             if store._attempts().get(receipt["retry_attempt_id"]) is None:
                 store._append("ATTEMPT", _attempt_payload(receipt),
                               "attempt-" + receipt["retry_attempt_id"])
@@ -439,7 +458,8 @@ def adjudicate_restart(store, parent_attempt_id, *, source_bridge, execution_pol
             parent_attempt_id=parent_attempt_id,
             current_run=store._manifest("run-" + current_run_id),
             current_definition=bridge["current_definition"].to_dict(),
-            before_sequence=store._events()[-1]["sequence"] + 1)
+            before_sequence=store._events()[-1]["sequence"] + 1,
+            unfunded_supersession=unfunded_supersession)
         attempts = store._attempts()
         lineage_attempts = [value for value in attempts.values()
                             if value["run_id"] in {candidate["run_id"], current_run_id}]
@@ -472,6 +492,10 @@ def adjudicate_restart(store, parent_attempt_id, *, source_bridge, execution_pol
         if prelaunch_cancellations:
             receipt.update(schema_version=PRELAUNCH_SCHEMA,
                            prelaunch_cancellations=deepcopy(prelaunch_cancellations))
+        if unfunded_supersession is not None:
+            receipt.update(schema_version=SUPERSESSION_SCHEMA,
+                           prelaunch_cancellations=deepcopy(prelaunch_cancellations or []),
+                           unfunded_supersession=deepcopy(unfunded_supersession))
         object_id = "pirc28-restart-adjudication-" + digest(receipt)
         reference = {"manifest_id": object_id, "sha256": digest(receipt)}
         store._publish(object_id, receipt)
@@ -673,7 +697,7 @@ def resolve_retry_adjudication(store, reference, *, execution_policy, source_cod
     with store._read_transaction():
         _reference(reference, "retry adjudication")
         value = store._manifest(reference["manifest_id"])
-        if value.get("schema_version") in {SCHEMA, PRELAUNCH_SCHEMA}:
+        if value.get("schema_version") in {SCHEMA, PRELAUNCH_SCHEMA, SUPERSESSION_SCHEMA}:
             receipt = _resolve_receipt(store, reference)
         elif value.get("schema_version") == RESOURCE_RETRY_SCHEMA:
             receipt = _resolve_resource_retry(store, reference)

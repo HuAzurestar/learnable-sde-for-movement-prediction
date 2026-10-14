@@ -138,6 +138,14 @@ def validate_scientific_source(store, study, cell, attempt, *, check_budget):
             'UNAUTHORIZED_DATA', 'pre-fit admission grant/package scope differs')
         _require(metadata.manifest('admission-'+admission_hash) == receipt,
             'IDENTITY_CONFLICT', 'pre-fit original receipt changed between phases')
+        if resource_funding:
+            # Workers are separate processes: the supervisor's pure definition
+            # cache is not inherited on Windows. Prime before the FIRST mutable
+            # authority transaction, including the initial closed-arm retry.
+            from application.research_restart_adjudication import prime_policy_definitions, _prime_restart
+            prime_policy_definitions(store, funding['execution_policy'], funding['source_code_hash'])
+            if funding.get('restart_adjudication') is not None:
+                _prime_restart(store, funding['restart_adjudication'])
         with store._read_transaction():
             _current_authority(store, study, cell, attempt, admissions, reserve, events)
         reference = study.get('pirc28_study_definition_hash')
