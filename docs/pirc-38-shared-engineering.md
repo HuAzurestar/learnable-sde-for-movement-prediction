@@ -30,7 +30,8 @@ bypass the ledger. The policy is part of the immutable registered cell and thus
 changes its cell and study identity.
 
 Operator code may construct `ResearchStore(..., lock_wait_seconds=N)` with a
-finite wait of 0..3600 seconds; the default remains 15 seconds. The PIRC-27
+finite wait of 0..3600 seconds; the default is 300 seconds, matching the merged
+shared writer policy for worker bootstrap as well as operator calls. The PIRC-27
 supplement CLI exposes `--lock-wait-seconds`. This waits for the existing OS
 writer lock and preserves writer exclusion, physical verification and ordinary
 `WRITER_BUSY` refusal if the bound expires. It does not retry attempts, extend

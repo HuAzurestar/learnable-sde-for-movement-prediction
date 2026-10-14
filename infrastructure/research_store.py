@@ -242,7 +242,7 @@ class ResearchStore:
     TERMINAL = {"SUCCEEDED", "FAILED", "INTERRUPTED", "TIMEOUT", "BUDGET_EXHAUSTED", "PREFLIGHT_FAILED", "CANCELLED"}
 
     def __init__(self, runtime_root: Path, store_id: str, *, initialize=False, allow_corrupt=False,
-                 lock_wait_seconds=15):
+                 lock_wait_seconds=300):
         if (type(lock_wait_seconds) not in (int, float)
                 or not math.isfinite(lock_wait_seconds) or not 0 <= lock_wait_seconds <= 3600):
             raise ResearchError("CONTRACT_MISMATCH", "lock wait must be finite and between 0 and 3600 seconds")
