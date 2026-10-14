@@ -75,8 +75,18 @@ def registries():
 
 def bind_recipe_execution(spec):
     plugin = switching_plugin()
+    resources = {}
     for cell in spec['cells']:
-        config, inputs = recipe_resources(spec['switching_recipe'], cell['fit_K'])
+        k = cell['fit_K']
+        # Resource dimensions depend on the recipe and K, not the replicate's
+        # seed. Keep this pure derivation local to one call, with detached
+        # execution bindings for every cell. Invalid K types must still reach
+        # the original recipe validator (True and 1.0 alias integer dict keys).
+        if type(k) is not int or k not in (1, 2):
+            recipe_resources(spec['switching_recipe'], k)
+        if k not in resources:
+            resources[k] = recipe_resources(spec['switching_recipe'], k)
+        config, inputs = resources[k]
         cell.update(plugin_id=PLUGIN_ID, capability='switching-transition', resource_class='cpu', visibility='synthetic')
         cell['execution'] = execution_binding(plugin.registry_entry, config, inputs, matrix_cells=len(spec['cells']))
     return spec

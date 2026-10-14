@@ -75,14 +75,25 @@ class ResearchQueue:
                 return resource_arm_continuation(self.store, item["arm_id"],
                     execution_policy=policy, source_code_hash=source) is not None
             target = queued[reservation_id]
-            if not eligible(target):
-                raise ResearchError("BUDGET_EXHAUSTED", "queued arm closed")
             resource = target["resource"]
             occupied = {item["slot"] for key, item in claims.items()
                         if item["resource"] == resource and not reservations[key]["settled"]}
             available = [slot for slot in range(self.slots[resource]) if slot not in occupied]
+            if not available:
+                # Waiting grants no execution authority. Do not reconstruct a
+                # complete source epoch under the writer lock when another
+                # owner must acquire that same lock to settle its occupied slot.
+                # Preserve cheap legacy closed-arm rejection; opt-in eligibility
+                # is fully rechecked in the fresh claim scope once a slot opens.
+                if (target["arm_id"] in closed and reservations[reservation_id].get("budget_mode")
+                        != "resource-guarded-no-time-cap"):
+                    raise ResearchError("BUDGET_EXHAUSTED", "queued arm closed")
+                return None
+            if not eligible(target):
+                raise ResearchError("BUDGET_EXHAUSTED", "queued arm closed")
             pending = [item for key, item in queued.items() if item["resource"] == resource
-                       and key not in claims and not reservations[key]["settled"] and eligible(item)]
+                       and key not in claims and not reservations[key]["settled"]
+                       and (key == reservation_id or eligible(item))]
             # FIFO inside each arm; yield to the oldest other arm between claims.
             candidates = [item for item in pending if item["arm_id"] != last_arm.get(resource)] or pending
             if not available or not candidates or candidates[0]["reservation_id"] != reservation_id:
