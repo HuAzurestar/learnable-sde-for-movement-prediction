@@ -1,0 +1,25 @@
+{
+  "schema_version": "pirc17-small-budget-coarse-v1",
+  "purpose": "descriptive_five_minute_coarse_screen",
+  "offline_plan": "experiments/pirc17/plans/small-budget-offline-v1.json",
+  "offline_plan_sha256": "f8b48a75ff0bc1a662960c60301531d84f778a3f3e2f37d4d6376b9792d5e462",
+  "offline_result": "artifacts/pirc17/dev10/small-budget-offline-v1.json",
+  "offline_result_sha256": "a70a367e7bce829f45f96e81365f46ccd5224b8551dd6af159c5018cf7b61877",
+  "sample_ids": [
+    "00d6711e02d7224c4f68497b0b751391bab28a2844cf2bda1e8d7e57762a1a8b",
+    "0bbad69a73cae2f606dee4d88314ba1af8cfcc41d34b8c99432ef745573e02fa"
+  ],
+  "configurations": ["base", "all-terrain", "loo-road", "loo-river"],
+  "seeds": [20260814, 20260815, 20260816, 20260817, 20260818],
+  "particles": 256,
+  "step_seconds": 5.0,
+  "scoring_slots": 2,
+  "time_weights": [0.0, 1.0],
+  "map_backend": "multicell",
+  "expected_run_count": 40,
+  "wall_seconds": 900,
+  "outer_wall_seconds": 960,
+  "new_empirical_total_cap_seconds": 7200,
+  "prior_new_empirical_batches": [],
+  "final_eval_authorized": false
+}

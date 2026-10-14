@@ -1,0 +1,41 @@
+{
+  "schema_version": "pirc17-small-budget-offline-v1",
+  "purpose": "reuse_complete_five_seed_particles_before_any_new_rollout",
+  "new_rollouts": 0,
+  "final_eval_authorized": false,
+  "particle_budgets": [128, 256, 512],
+  "step_seconds": 0.3125,
+  "epsilon_m": 10.27506475,
+  "alpha": 0.05,
+  "diagnostic_family_size": 55,
+  "wall_seconds": 600,
+  "reference_power": "artifacts/pirc17/dev10/candidate-primary-five-seed-power-p512-v1.json",
+  "reference_power_sha256": "29e92c11d2642f0ec334920bb51fafaad8b4b24dec0b0be7431a2497aed3a771",
+  "candidate_evidence": {
+    "fit": "artifacts/pirc17/dev10/direct-linear-fit-v1.json",
+    "fit_sha256": "22fb218eda4922febc1e2ef8715e31ed3f54bbca3c75aa7461d2346589444c4a",
+    "fit_ledger": "artifacts/pirc17/dev10/direct-linear-fit-v1.jsonl",
+    "fit_ledger_sha256": "649fc0540ae5398235a19c7a0bd26d8e31ee5836dff2850c9d30bd5d4043e5be",
+    "training_policy_sha256": "560a6f0776287ab7a31a91c88d029e37f25a1964f8039a39554cd267e202d0ee"
+  },
+  "inputs": [
+    {
+      "ledger": "artifacts/pirc17/dev10/native-primary-p256-p512-v1.forecast.jsonl",
+      "ledger_sha256": "7a1ceca781fb9948d4adbecba4b5339baea514d48d9b22a46fd4842bb9476728",
+      "audit": "artifacts/pirc17/dev10/native-primary-p256-p512-v1.audit.json",
+      "audit_sha256": "99d072fce2fb603cf139c5445a73fa997668c297701b487002bcb307606dd8e4"
+    },
+    {
+      "ledger": "artifacts/pirc17/dev10/native-primary-seeds-20260815-16-p512-v1-restart1.forecast.jsonl",
+      "ledger_sha256": "4609544c890be30642c8afe35f0e6de957ddaa70cd5a5ae835b1a1e88ea600bb",
+      "audit": "artifacts/pirc17/dev10/native-primary-seeds-20260815-16-p512-v1-restart1.audit.json",
+      "audit_sha256": "4f8ee1bb9f57ff5cd7b86543d0bf38852f46e43a46ab608e53487e2546bac900"
+    },
+    {
+      "ledger": "artifacts/pirc17/dev10/native-primary-seeds-20260817-18-p512-v1.forecast.jsonl",
+      "ledger_sha256": "b3b370848e20c38f260d3d88fa198bca8b1826376d357640dbd9556eade3300f",
+      "audit": "artifacts/pirc17/dev10/native-primary-seeds-20260817-18-p512-v1.audit.json",
+      "audit_sha256": "6896c9f11b261d5e0a56a43f50f136d7f42b114d7b59d2cda7c1dac4e0857594"
+    }
+  ]
+}

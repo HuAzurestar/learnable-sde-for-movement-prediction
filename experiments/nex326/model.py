@@ -256,6 +256,8 @@ def calibrate_estimator(
     estimator: str,
     objective_lambda: object = None,
 ) -> ModelState:
+    if estimator not in {"crps_energy", "qmle", "mixed", "pure_es"}:
+        raise ValueError(f"unknown estimator: {estimator}")
     residuals = _one_step_residuals(model, validation)
     baseline_energy = _energy_proxy(residuals, model.covariances, 1.0)
     baseline_ll = _mean_log_likelihood(residuals, sum(model.covariances) / model.n_modes)
@@ -496,9 +498,18 @@ def train_model(
     config: Mapping[str, object],
 ) -> ModelState:
     model_kind = str(config["model"])
+    if model_kind not in {"seg_constant_mode", "pointwise_mixture", "single_gaussian", "gmm_kernel", "explicit_decomp"}:
+        raise ValueError(f"unknown model: {model_kind}")
+    estimator = str(config.get("estimator", "crps_energy"))
+    if estimator not in {"crps_energy", "qmle", "mixed", "pure_es"}:
+        raise ValueError(f"unknown estimator: {estimator}")
     condition_names = tuple(str(name) for name in config.get("condition", []))
     transfer = str(config.get("transfer", "full_finetune"))
     finetune = str(config.get("finetune", "all"))
+    if transfer not in {"scratch", "animal_pretrain", "meta_reptile", "full_finetune"}:
+        raise ValueError(f"unknown transfer: {transfer}")
+    if finetune not in {"all", "drift_only", "two_step"}:
+        raise ValueError(f"unknown finetune method: {finetune}")
 
     def fit(segments: Sequence[Segment]) -> ModelState:
         return _base_fit(

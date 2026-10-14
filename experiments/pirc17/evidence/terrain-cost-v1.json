@@ -1,0 +1,231 @@
+{
+  "schema_version": "pirc17-terrain-cost-evidence-v1",
+  "state": "observed-development-costs",
+  "interpretation": "Conditional serial cost accounting only; no formal execution authorization, runtime bound, numerical certificate or project ETA.",
+  "execution_admitted": false,
+  "final_eval_authorized": false,
+  "numerically_qualified": false,
+  "final_eval_label_prediction_metric_reads": 0,
+  "settings": {
+    "particles": 512,
+    "maximum_step_seconds": 5,
+    "physical_history_step_seconds": 5,
+    "nominal_horizon_seconds": 1800,
+    "scoring_slots_from_same_forecast": 4,
+    "time_weights": [
+      0.25,
+      0.25,
+      0.25,
+      0.25
+    ]
+  },
+  "timing_unit": "seconds per complete 512-particle forecast, including lazy map initialization",
+  "recorded_runtime": {
+    "python": "3.10.13",
+    "numpy": "1.26.4",
+    "torch": "2.3.1+cu121",
+    "torch_intraop_threads": 6,
+    "torch_interop_threads": 12,
+    "hardware_identity": null,
+    "hardware_identity_caveat": "CPU/GPU identity was not captured in these ledgers; do not infer it from the CUDA-enabled torch package."
+  },
+  "provenance": {
+    "original_workload_report": {
+      "path": "experiments/pirc17/plans/full-delivery-workload-v1.json",
+      "sha256": "322d2489f7976ba2ac4cf527bc4b577850c32590d8cf4f3e172a1bdeec3620ba"
+    },
+    "six_configuration_ledger": {
+      "path": "artifacts/pirc17/dev10/small-budget-full-p512-h5-v1.jsonl",
+      "sha256": "5a67eb8b954382ee2526b8c5bb8b37b106969098254aae83b0a6061119a60d16"
+    },
+    "six_configuration_audit": {
+      "path": "artifacts/pirc17/dev10/small-budget-full-p512-h5-v1.audit.json",
+      "sha256": "f098e1351fb7e122c171f42f01ca9ed7284db9d19bbaae81f18da6b52f3b2def"
+    },
+    "lio_plan": {
+      "path": "experiments/pirc17/plans/lio-cost-p512-h5-v1.json",
+      "sha256": "9ad9fd6f61d97d8fd555276907e17fb872c2fd2f8c273f312d7642d3951752a9"
+    },
+    "lio_ledger": {
+      "path": "artifacts/pirc17/dev10/lio-cost-p512-h5-v1.jsonl",
+      "sha256": "ffb249b15daee0910f4d2d45657d7aaf5c1bebb0fc2b30d679ab7c2ff8988a21"
+    },
+    "lio_probe": {
+      "path": "artifacts/pirc17/dev10/lio-cost-p512-h5-v1.probe.json",
+      "sha256": "b3733d9be34fa5d60e9da39ba5fe107e2b86fb951371df669d0012d9ccd549e1"
+    },
+    "lio_supervisor": {
+      "path": "artifacts/pirc17/dev10/lio-cost-p512-h5-v1.supervisor.jsonl",
+      "sha256": "c3be6f89f8c21ce2d621f8f9b90ff47faf38fe4637543640e7ee1f091eceb9b1"
+    },
+    "lio_cost_audit": {
+      "path": "artifacts/pirc17/dev10/lio-cost-p512-h5-v1.cost-audit.json",
+      "sha256": "6c58bbec506dad41775ee04ab2548ead96eff062a50637d5543528394f8ca205"
+    }
+  },
+  "by_configuration": {
+    "base": {
+      "count": 15,
+      "mean_seconds": 1.6859284066672748,
+      "min_seconds": 1.5312590000103228,
+      "max_seconds": 1.8004217999987304
+    },
+    "all-terrain": {
+      "count": 15,
+      "mean_seconds": 36.84817108666757,
+      "min_seconds": 28.803553399979137,
+      "max_seconds": 69.93925330002094
+    },
+    "loo-road": {
+      "count": 15,
+      "mean_seconds": 30.888703840000865,
+      "min_seconds": 27.16665530001046,
+      "max_seconds": 38.1088696999941
+    },
+    "loo-river": {
+      "count": 15,
+      "mean_seconds": 30.47184920000145,
+      "min_seconds": 27.284048400004394,
+      "max_seconds": 35.89689329999965
+    },
+    "loo-worldcover": {
+      "count": 15,
+      "mean_seconds": 31.698001293337438,
+      "min_seconds": 27.927925600029994,
+      "max_seconds": 38.07513279997511
+    },
+    "loo-surface": {
+      "count": 15,
+      "mean_seconds": 30.732499199993132,
+      "min_seconds": 27.04379870003322,
+      "max_seconds": 37.449606299982406
+    },
+    "lio-road": {
+      "count": 1,
+      "mean_seconds": 75.54993489995832,
+      "min_seconds": 75.54993489995832,
+      "max_seconds": 75.54993489995832
+    },
+    "lio-river": {
+      "count": 1,
+      "mean_seconds": 41.63108259998262,
+      "min_seconds": 41.63108259998262,
+      "max_seconds": 41.63108259998262
+    },
+    "lio-worldcover": {
+      "count": 1,
+      "mean_seconds": 39.30293130001519,
+      "min_seconds": 39.30293130001519,
+      "max_seconds": 39.30293130001519
+    },
+    "lio-surface": {
+      "count": 1,
+      "mean_seconds": 41.83993289998034,
+      "min_seconds": 41.83993289998034,
+      "max_seconds": 41.83993289998034
+    }
+  },
+  "sampling": {
+    "six_configurations": {
+      "independent_blocks": 3,
+      "origins": 3,
+      "seeds": [
+        20260814,
+        20260815,
+        20260816,
+        20260817,
+        20260818
+      ],
+      "count_per_configuration": 15
+    },
+    "four_lio": {
+      "independent_blocks": 1,
+      "origins": 1,
+      "seeds": [
+        20260814
+      ],
+      "count_per_configuration": 1,
+      "actual_horizons_seconds": [
+        55,
+        297,
+        894,
+        1796
+      ]
+    }
+  },
+  "lio_batch": {
+    "status": "complete",
+    "expected_run_count": 4,
+    "attempted_run_count": 4,
+    "success_count": 4,
+    "failure_count": 0,
+    "unattempted_run_count": 0,
+    "terminal_error_count": 0,
+    "started_at": "2026-09-29T15:14:03.441121+00:00",
+    "finished_at": "2026-09-29T15:19:30.966720+00:00",
+    "internal_seconds": 320.11624090000987,
+    "input_validation_seconds": 118.72836750000715,
+    "rollout_seconds": 198.32388169993646,
+    "other_internal_seconds": 3.0639917000662535,
+    "outer_seconds": 327.5257883000304,
+    "independent_audit_seconds": 6.063651200034656,
+    "numerical_sensitivities": 0,
+    "job_active_processes_at_close": 0,
+    "memory_observer": {
+      "calls": 1463,
+      "failed_calls": 0,
+      "observation_wall_seconds": 0.0621567009948194,
+      "minimum_observed_available_bytes": 5811859456,
+      "measurement_cache": false
+    }
+  },
+  "new_preparation_empirical_budget": {
+    "cap_seconds": 1800,
+    "prior_seconds": 0,
+    "charged_outer_seconds": 327.5257883000304,
+    "remaining_seconds": 1472.4742116999696,
+    "additional_execution_authorized": false,
+    "inner_batch_cap_seconds": 600,
+    "outer_batch_cap_seconds": 660
+  },
+  "scenarios": [
+    {
+      "independent_blocks_scenario_only": 30,
+      "origins_per_block": 1,
+      "seed_count": 5,
+      "terrain_forecasts": 1500,
+      "terrain_only_prediction_hours": 15.027043113608508,
+      "final_eval_available_blocks": null,
+      "full_feature_wall_time_estimate_seconds": null
+    },
+    {
+      "independent_blocks_scenario_only": 46,
+      "origins_per_block": 1,
+      "seed_count": 5,
+      "terrain_forecasts": 2300,
+      "terrain_only_prediction_hours": 23.041466107533047,
+      "final_eval_available_blocks": null,
+      "full_feature_wall_time_estimate_seconds": null
+    },
+    {
+      "independent_blocks_scenario_only": 62,
+      "origins_per_block": 1,
+      "seed_count": 5,
+      "terrain_forecasts": 3100,
+      "terrain_only_prediction_hours": 31.055889101457588,
+      "final_eval_available_blocks": null,
+      "full_feature_wall_time_estimate_seconds": null
+    }
+  ],
+  "projection_formula": "blocks * origins_per_block * seed_count * sum(ten configuration mean_seconds) / 3600",
+  "caveats": [
+    "The first six costs are means of 15 completed forecasts each; each LIO cost has only one origin/seed observation. No confidence interval or steady-state cost claim.",
+    "Per-forecast timings include lazy map initialization. Shared startup cost, cache effects and execution order were not separately profiled; do not subtract guessed startup time.",
+    "The LIO batch uses its native h5 Brownian grid, not bitwise replay of the earlier fine-grid-derived coarse streams. This cost measurement does not qualify LIO numerical accuracy.",
+    "The 30/46/62 block scenarios are respectively an inferential floor, a limited-pilot power scenario and validation availability. None selects the formal cohort or final-eval count.",
+    "Projections assume the same hardware, software, settings and serial execution; these measurements are not isolated performance benchmarks or formal wall-time upper bounds.",
+    "Input qualification, fitting, full metric registry, independent replay, failure handling, 28 required method slots, tests/reviews, manuscript/PDF and human decisions are not included in terrain prediction hours.",
+    "The old assumed-LIO workload report remains immutable historical evidence; these measured LIO observations supersede only its LIO cost assumption.",
+    "No new empirical batch, N/step/seed/horizon change, old N2048 restart or final-eval access is authorized by this evidence."
+  ]
+}

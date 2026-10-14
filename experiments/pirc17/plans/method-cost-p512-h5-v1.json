@@ -1,0 +1,125 @@
+{
+  "schema_version": "pirc17-method-cost-probe-v1",
+  "purpose": "bounded_method_fit_forecast_and_common_score_cost_only",
+  "fit_slots": [
+    "arm-01/full",
+    "arm-04/gmm_kernel",
+    "arm-05/explicit_decomp",
+    "arm-09/mixed",
+    "arm-14/reptile"
+  ],
+  "forecasts": [
+    {
+      "slot_id": "arm-01/full",
+      "fit_slot_id": "arm-01/full",
+      "pair_id": "pirc17-method-cost-probe-v1"
+    },
+    {
+      "slot_id": "arm-04/gmm_kernel",
+      "fit_slot_id": "arm-04/gmm_kernel",
+      "pair_id": null
+    },
+    {
+      "slot_id": "arm-05/explicit_decomp",
+      "fit_slot_id": "arm-05/explicit_decomp",
+      "pair_id": null
+    },
+    {
+      "slot_id": "arm-21/mc",
+      "fit_slot_id": "arm-01/full",
+      "pair_id": null
+    },
+    {
+      "slot_id": "arm-21/crn",
+      "fit_slot_id": "arm-01/full",
+      "pair_id": "pirc17-method-cost-probe-v1"
+    }
+  ],
+  "expected_fit_count": 5,
+  "expected_forecast_count": 5,
+  "particles": 512,
+  "max_step_seconds": 5.0,
+  "seed": 20260814,
+  "nominal_seconds": [
+    60.0,
+    300.0,
+    900.0,
+    1800.0
+  ],
+  "time_weights": [
+    0.25,
+    0.25,
+    0.25,
+    0.25
+  ],
+  "selection": "same lexical-first eligible validation sample as the closed LIO cost probe",
+  "sample_id": "00d6711e02d7224c4f68497b0b751391bab28a2844cf2bda1e8d7e57762a1a8b",
+  "origin_count": 1,
+  "max_steps": 400,
+  "max_particle_steps": 204800,
+  "max_transitions": 40000,
+  "expected_transitions": {
+    "train": 26009,
+    "adapt": 5762,
+    "validation": 6149
+  },
+  "preparation": {
+    "max_samples": 485,
+    "max_total_points": 1100000,
+    "max_file_bytes": 33554432,
+    "max_file_rows": 250000,
+    "wall_seconds": 180
+  },
+  "phase_cooperative_caps_seconds": {
+    "load": 180,
+    "fit": 90,
+    "forecast": 30,
+    "score": 10
+  },
+  "inner_wall_seconds": 600,
+  "outer_wall_seconds": 660,
+  "minimum_free_bytes": 2147483648,
+  "preparation_empirical_cap_seconds": 1800,
+  "prior_preparation_empirical_seconds": 327.5257883,
+  "source_trajectory": "private/source-trajectories/unified_full_leg.parquet",
+  "locations_source": {
+    "path": "artifacts/pirc17/dev10/native-primary-p1024-missing-v1.extension/root.json",
+    "sha256": "381c000b3ba9919d08325968255a4708a001d4a2a550940765428d0a37ecbc7d"
+  },
+  "prepared_evidence": {
+    "path": "artifacts/pirc17/dev10/method-development-preparation-v1.json",
+    "sha256": "eec69a9d9ee502e6f5f574a1b7ebc9ea0ec561c7789bf23b1e3b142aa9e3201e"
+  },
+  "expected_input_sha256": "3b17325c864ff1db5c1800533aa227f58a4a0a4e1e957e1430a773019d02c1d3",
+  "fit_reuse_scope": "within this cost probe only: identical full training components for FP/MC/CRN",
+  "formal_fit_reuse_authorized": false,
+  "formal_training_accepted": false,
+  "cost_origin_in_calibration_population": true,
+  "accuracy_claim_authorized": false,
+  "numerically_qualified": false,
+  "final_eval_authorized": false,
+  "automatic_retry": false,
+  "source_sha256": {
+    "data/pirc20.py": "e13de6ce21a632c166fad4f5050dd1322e58f6a7581830664b0182d331923124",
+    "experiments/nex326/cohort.py": "e59617dc9b84fe5071ab94e2555f90af4199c3adb6c370c2cc206ba44f38af15",
+    "experiments/nex326/model.py": "8863e936419a55d95b4fe31ddb8790fcbb0a923b57cbc3f77cde3e095dea9aa2",
+    "experiments/nex326/pirc20_adapter.py": "d9f82c905d299cb040157f1bbfb9995c3a197495abc756d1e29ee91fdccc25eb",
+    "experiments/nex326/specification.py": "31e7d6c496c63bdcfd76c666810bc4851ae5e5e5fd86e1d842442314abecfdd2",
+    "experiments/nex326/experiment.json": "f12dc97a20667212b206e46dd274706b8bf799ee54871729727938d2a7d9e54a",
+    "experiments/nex326/pirc19_scope_policy.json": "74c5f331fcb9ee11c2dd055b227095026f17c717e83df09d7c5f04bffc0868c6",
+    "experiments/pirc17/method_cost_probe.py": "ca98c455700204cf3ce42d62d621b712d263e1ddd04a0b413604eae91b573ccd",
+    "experiments/pirc17/method_training.py": "65c78934a74f2725bf7f792cd851178fcc539d67a912fc8d33253d45a1d15598",
+    "experiments/pirc17/method_development.py": "da8f9c1d280c0203636699438f967bd7c831fade6f4e621f5b87a8fa4931ebb7",
+    "experiments/pirc17/method_inputs.py": "11757c38e5aa8a2a7b83520c2465887a467fd63422766330203448e6b3a933b8",
+    "experiments/pirc17/method_rollout.py": "076e3964d8f2f18ea45c93c964962be01a74eff62c380cc8719b5e3af4ac3560",
+    "experiments/pirc17/origins.py": "e06c6165277e994af943c4b5108f978abb58cc39a005e326c15de6d1f26a6c26",
+    "experiments/pirc17/rollout.py": "b8fda002d6c771e86edf799f7708f3f1ad70fe9bc352b1a571bdbfe0aac2e45a",
+    "experiments/pirc17/calibration.py": "42c634c40544a37abbc88c4f06fa25a00938b33099286221de217eca1b9d7427",
+    "experiments/pirc17/metrics.py": "c00059e40421d5267deb35b73096048f22fd439dc9914801ccaf4fd609885570",
+    "experiments/pirc17/features.py": "7ce422a2a83add8ad8484d52f8a83a4669c05a259d3fcb8c55ab5e06de4cc26c",
+    "experiments/pirc17/workload.py": "04f3c003626fc88e3ab16cc239695166cbd6c134bd2767ecbea520616ca354fe",
+    "experiments/pirc17/physical_memory.py": "241f7482032ef4cbb8df1254ba5f81c40986c5b96d6a2f9c69fdf6b599c12680",
+    "experiments/pirc17/seed_resume_session.py": "d66f7f0f9e12ceae91dea78e3efb70167df545f6b1c83ac0d624fc85c854a9df",
+    "experiments/pirc17/seed_resume_lineage.py": "72a090ad3b943b90d230d441fb2e9b1011dc8e23e59aaf2259ee94c950ff2188"
+  }
+}

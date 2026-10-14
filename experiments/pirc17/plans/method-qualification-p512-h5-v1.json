@@ -1,0 +1,240 @@
+{
+  "schema_version": "pirc17-method-qualification-p512-h5-v1",
+  "purpose": "finite_development_method_mechanism_and_paired_planning_evidence",
+  "source_sha256": {
+    "data/pirc20.py": "e13de6ce21a632c166fad4f5050dd1322e58f6a7581830664b0182d331923124",
+    "experiments/nex326/cohort.py": "e59617dc9b84fe5071ab94e2555f90af4199c3adb6c370c2cc206ba44f38af15",
+    "experiments/nex326/model.py": "8863e936419a55d95b4fe31ddb8790fcbb0a923b57cbc3f77cde3e095dea9aa2",
+    "experiments/nex326/pirc20_adapter.py": "d9f82c905d299cb040157f1bbfb9995c3a197495abc756d1e29ee91fdccc25eb",
+    "experiments/nex326/specification.py": "31e7d6c496c63bdcfd76c666810bc4851ae5e5e5fd86e1d842442314abecfdd2",
+    "experiments/nex326/experiment.json": "f12dc97a20667212b206e46dd274706b8bf799ee54871729727938d2a7d9e54a",
+    "experiments/nex326/pirc19_scope_policy.json": "74c5f331fcb9ee11c2dd055b227095026f17c717e83df09d7c5f04bffc0868c6",
+    "experiments/pirc17/method_cost_probe.py": "ca98c455700204cf3ce42d62d621b712d263e1ddd04a0b413604eae91b573ccd",
+    "experiments/pirc17/method_training.py": "65c78934a74f2725bf7f792cd851178fcc539d67a912fc8d33253d45a1d15598",
+    "experiments/pirc17/method_development.py": "da8f9c1d280c0203636699438f967bd7c831fade6f4e621f5b87a8fa4931ebb7",
+    "experiments/pirc17/method_inputs.py": "11757c38e5aa8a2a7b83520c2465887a467fd63422766330203448e6b3a933b8",
+    "experiments/pirc17/method_rollout.py": "076e3964d8f2f18ea45c93c964962be01a74eff62c380cc8719b5e3af4ac3560",
+    "experiments/pirc17/origins.py": "e06c6165277e994af943c4b5108f978abb58cc39a005e326c15de6d1f26a6c26",
+    "experiments/pirc17/rollout.py": "b8fda002d6c771e86edf799f7708f3f1ad70fe9bc352b1a571bdbfe0aac2e45a",
+    "experiments/pirc17/calibration.py": "42c634c40544a37abbc88c4f06fa25a00938b33099286221de217eca1b9d7427",
+    "experiments/pirc17/metrics.py": "c00059e40421d5267deb35b73096048f22fd439dc9914801ccaf4fd609885570",
+    "experiments/pirc17/features.py": "7ce422a2a83add8ad8484d52f8a83a4669c05a259d3fcb8c55ab5e06de4cc26c",
+    "experiments/pirc17/workload.py": "04f3c003626fc88e3ab16cc239695166cbd6c134bd2767ecbea520616ca354fe",
+    "experiments/pirc17/physical_memory.py": "241f7482032ef4cbb8df1254ba5f81c40986c5b96d6a2f9c69fdf6b599c12680",
+    "experiments/pirc17/seed_resume_session.py": "d66f7f0f9e12ceae91dea78e3efb70167df545f6b1c83ac0d624fc85c854a9df",
+    "experiments/pirc17/seed_resume_lineage.py": "72a090ad3b943b90d230d441fb2e9b1011dc8e23e59aaf2259ee94c950ff2188",
+    "experiments/pirc17/method_qualification.py": "991905ae2799379a826e6bfa1d65a42f035f89093f951b79366c6399b3447418",
+    "experiments/pirc17/method_qualification_analysis.py": "01b5b58f3084bc0596ba2f707be281c9f9f0ab89493286197cf09d388d7488e3",
+    "experiments/pirc17/method_mechanisms.py": "30fda1e79a038bfaf88f38ce635fa155bdbac9e972074ee8099b182bced80033",
+    "experiments/pirc17/cached_method_mechanisms.py": "a51c541711bc33d3c879266b391f7487f5cfe04ceb7343bc931cab37baa76df3",
+    "experiments/pirc17/method_comparisons.py": "0715fc1c995fb1419f8606a1ad52d9ef0273132fd919c1dc0d4bedc01939db40",
+    "experiments/pirc17/comparison_registry.py": "889f914385c4329d24c4909f3821ea588e8888d05817768521eb17fde39d4da4",
+    "experiments/pirc17/inference.py": "d25def4bec006173f5c0f005ab3eda0eab2c3a35ec39c842e6622ea446e1a1b2",
+    "experiments/pirc17/inference_guard.py": "ac4419a1be4ccd79067df0b05272c5094ec9d0072b5cc6cddfdfdec8c654c416"
+  },
+  "method_registry_sha256": "4ab88c3b511fe19f2641dffc81bbf549cf1eb06b0bd91673a3edea2c6f5808f8",
+  "mechanism_registry_sha256": "5a4a8e9da5d9e73076422867ad24082260b6855788c29b897e291f685d6451f9",
+  "expected_origins_by_block": {
+    "50da7cfb18afb6bde2ee56bbbfa81698b47af8e262b2cc8554955da23faf225a": [
+      "00d6711e02d7224c4f68497b0b751391bab28a2844cf2bda1e8d7e57762a1a8b"
+    ],
+    "a5b32b31086bc6e7c3d26999dab18b0b439bf4ad93223e7fc67dbccc17642e7c": [
+      "0924849bf85b7c13eb7fc8378d0725b63e50b46c3e074e08f204a2303fdd6149"
+    ],
+    "b1c20f396c1e4e06c9547cbd7f9a494a1a497187caf6397979206784dffbaaba": [
+      "0bbad69a73cae2f606dee4d88314ba1af8cfcc41d34b8c99432ef745573e02fa"
+    ]
+  },
+  "origin_mode": "causal_prefix",
+  "selection": "the same three pre-existing terrain development origins, no outcome-based replacement",
+  "new_fit_slots": [
+    "arm-02/pointwise",
+    "arm-03/single_gaussian",
+    "arm-06/dt30",
+    "arm-06/dt120",
+    "arm-06/dt300",
+    "arm-06/dt600",
+    "arm-08/qmle",
+    "arm-09/pure_es",
+    "arm-12/scratch",
+    "arm-15/drift_only",
+    "arm-15/two_step"
+  ],
+  "cached_fit_slots": [
+    "arm-01/full",
+    "arm-04/gmm_kernel",
+    "arm-05/explicit_decomp",
+    "arm-09/mixed",
+    "arm-14/reptile"
+  ],
+  "required_slots": [
+    "arm-01/full",
+    "arm-02/pointwise",
+    "arm-03/single_gaussian",
+    "arm-04/gmm_kernel",
+    "arm-05/explicit_decomp",
+    "arm-06/dt30",
+    "arm-06/dt60",
+    "arm-06/dt120",
+    "arm-06/dt300",
+    "arm-06/dt600",
+    "arm-07/full",
+    "arm-08/qmle",
+    "arm-09/mixed",
+    "arm-09/pure_es",
+    "arm-10/d2_mc",
+    "arm-10/d2_closed",
+    "arm-11/full",
+    "arm-12/scratch",
+    "arm-14/reptile",
+    "arm-15/drift_only",
+    "arm-15/two_step",
+    "arm-16/full",
+    "arm-18/full",
+    "arm-19/em",
+    "arm-19/euler",
+    "arm-20/full",
+    "arm-21/mc",
+    "arm-21/crn"
+  ],
+  "forecast_order_per_origin_seed": [
+    "diagnostic/full-exact-kernel",
+    "arm-01/full",
+    "arm-02/pointwise",
+    "arm-03/single_gaussian",
+    "arm-04/gmm_kernel",
+    "arm-05/explicit_decomp",
+    "arm-06/dt30",
+    "arm-06/dt60",
+    "arm-06/dt120",
+    "arm-06/dt300",
+    "arm-06/dt600",
+    "arm-07/full",
+    "arm-08/qmle",
+    "arm-09/mixed",
+    "arm-09/pure_es",
+    "arm-10/d2_mc",
+    "arm-10/d2_closed",
+    "arm-11/full",
+    "arm-12/scratch",
+    "arm-14/reptile",
+    "arm-15/drift_only",
+    "arm-15/two_step",
+    "arm-16/full",
+    "arm-18/full",
+    "arm-19/em",
+    "arm-19/euler",
+    "arm-20/full",
+    "arm-21/mc",
+    "arm-21/crn"
+  ],
+  "new_fits": 11,
+  "reused_fits": 5,
+  "scientific_slot_forecasts": 420,
+  "same_grid_reference_forecasts": 15,
+  "expected_forecasts": 435,
+  "particles": 512,
+  "max_step_seconds": 5.0,
+  "seeds": [
+    20260814,
+    20260815,
+    20260816,
+    20260817,
+    20260818
+  ],
+  "nominal_seconds": [
+    60.0,
+    300.0,
+    900.0,
+    1800.0
+  ],
+  "time_weights": [
+    0.25,
+    0.25,
+    0.25,
+    0.25
+  ],
+  "max_steps": 400,
+  "max_particle_steps": 204800,
+  "max_transitions": 80000,
+  "expected_transitions_by_interval": {
+    "30": {
+      "train": 52170,
+      "adapt": 11567,
+      "validation": 12340
+    },
+    "60": {
+      "train": 26009,
+      "adapt": 5762,
+      "validation": 6149
+    },
+    "120": {
+      "train": 12918,
+      "adapt": 2861,
+      "validation": 3055
+    },
+    "300": {
+      "train": 5079,
+      "adapt": 1124,
+      "validation": 1196
+    },
+    "600": {
+      "train": 2467,
+      "adapt": 545,
+      "validation": 578
+    }
+  },
+  "planning_blocks": 46,
+  "score_diagnostic_extra_Gaussian_draws": 30720,
+  "preparation": {
+    "max_samples": 485,
+    "max_total_points": 1100000,
+    "max_file_bytes": 33554432,
+    "max_file_rows": 250000,
+    "wall_seconds": 180
+  },
+  "phase_cooperative_caps_seconds": {
+    "load": 180,
+    "fit": 90,
+    "forecast": 30,
+    "score": 10,
+    "analysis": 60
+  },
+  "inner_wall_seconds": 1000,
+  "outer_wall_seconds": 1060,
+  "termination_reserve_seconds": 40,
+  "independent_saved_output_audit_cap_seconds": 240,
+  "preparation_empirical_cap_seconds": 1800,
+  "prior_preparation_empirical_seconds": 393.318805,
+  "minimum_free_bytes": 2147483648,
+  "max_output_bytes": 268435456,
+  "max_artifact_bytes": 2097152,
+  "locations_source": {
+    "path": "artifacts/pirc17/dev10/native-primary-p1024-missing-v1.extension/root.json",
+    "sha256": "381c000b3ba9919d08325968255a4708a001d4a2a550940765428d0a37ecbc7d"
+  },
+  "prepared_evidence": {
+    "path": "artifacts/pirc17/dev10/method-development-preparation-v1.json",
+    "sha256": "eec69a9d9ee502e6f5f574a1b7ebc9ea0ec561c7789bf23b1e3b142aa9e3201e"
+  },
+  "expected_input_sha256": "3b17325c864ff1db5c1800533aa227f58a4a0a4e1e957e1430a773019d02c1d3",
+  "source_trajectory": "private/source-trajectories/unified_full_leg.parquet",
+  "cached_cost_plan_sha256": "31a012915b76c67f554480a20e57d52ae2681d2812cd0efa2af6f43281e30c9a",
+  "cached_cost_result_sha256": "55b2ac2c4f7ffbb43a66babe9708d3cad6a5e748c10604afe4fbeb9a173f14ca",
+  "cached_mechanism_report": {
+    "path": "artifacts/pirc17/dev10/cached-method-mechanisms-v1.json",
+    "sha256": "c3ec457b6920d51e514a5ebea8baa1f8e8400b8317795797d3229e89a7c46133"
+  },
+  "failure_policy": "one attempt per item; retain failed/unavailable rows, continue independent items only while resources remain; timeout/memory/output limit stops batch; never select successful intersections or rerun this reservation",
+  "gate_failure_policy": "failed mechanism gates are results, not reasons to tune, refit or repeat",
+  "numerical_scope": "Full same-grid exact-affine-kernel diagnostics plus descriptive five-seed simulation SE; not all-method h/N convergence or a global nonlinear solution",
+  "calibration_exposure": "validation origins overlap the estimator calibration population; planning/mechanism evidence only",
+  "secondary_origin_modes_in_this_batch": [],
+  "automatic_retry": false,
+  "automatic_expansion": false,
+  "formal_training_accepted": false,
+  "numerically_qualified": false,
+  "power_qualified": false,
+  "scientific_claim_authorized": false,
+  "final_eval_authorized": false
+}

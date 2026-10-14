@@ -856,15 +856,20 @@ def test_critical_algorithm_paths_are_checkpointed_and_auditable(tmp_path):
 def test_pirc19_completion_audit_separates_engineering_and_scientific_status(
     tmp_path,
 ):
-    report = write_completion_report(tmp_path / "completion.json")
-    assert report == build_completion_report()
+    report = build_completion_report()
+    # PIRC-17 source changes must not inherit PIRC-19's old execution receipt.
+    with pytest.raises(CompletionAuditError, match="current_source_identity"):
+        write_completion_report(tmp_path / "completion.json")
+    assert [check["name"] for check in report["checks"] if not check["passed"]] == [
+        "current_source_identity"
+    ]
     assert report["check_summary"] == {
-        "passed": 13,
+        "passed": 12,
         "total": 13,
-        "all_passed": True,
+        "all_passed": False,
     }
     assert report["overall_status"] == (
-        "pirc19_complete_with_approved_arm_exclusions"
+        "completion_audit_failed"
     )
     assert report["dimensions"]["frozen_contract_implementation"]["ratio"] == 1.0
     assert report["dimensions"]["current_dsde_execution"]["numerator"] == 31
@@ -883,7 +888,7 @@ def test_pirc19_completion_audit_separates_engineering_and_scientific_status(
     assert report["dimensions"][
         "scientifically_assessed_succeeded_executions"
     ]["numerator"] == 0
-    assert report["task_completion"]["status"] == "complete"
+    assert report["task_completion"]["status"] == "audit_failed"
     assert report["next_core_step_requires_external_input"] is False
 
     broken_multi = json.loads(

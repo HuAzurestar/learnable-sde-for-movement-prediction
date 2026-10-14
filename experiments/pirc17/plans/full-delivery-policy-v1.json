@@ -1,0 +1,610 @@
+{
+  "schema_version": "pirc17-finite-delivery-policy-v1",
+  "state": "proposed-for-pre-eval-review",
+  "execution_admitted": false,
+  "final_eval_authorized": false,
+  "new_empirical_fits": 0,
+  "new_empirical_forecasts": 0,
+  "purpose": "Close finite scope/parameter decisions for DEV-03/04; not a sealed executable manifest or approval.",
+  "training": {
+    "population_policy": "Explicitly adopt the entire existing task-qualified development subset, not the full raw release and not only the three pilot blocks.",
+    "eligibility_sha256": "7b6773ec628b7a14f586400ab315965d1f88b2227365b0b9a6cb35be9a7f9690",
+    "population_identity": "82ad16075261508d5362c17ebd1355c10f58e698d937fdc4ee2105c423308afd",
+    "prepared_inputs_sha256": "eec69a9d9ee502e6f5f574a1b7ebc9ea0ec561c7789bf23b1e3b142aa9e3201e",
+    "outer_train_windows": 404,
+    "validation_windows": 81,
+    "method_roles": {
+      "train": 328,
+      "adapt": 76,
+      "validation": 81
+    },
+    "method_assignment": "Preserve the global PIRC-20/NEX326 train/adapt assignment before subset selection.",
+    "justification": "Same frozen 30-minute time/terrain-coverage eligibility across both matrices; all eligible development windows, no error-based subsampling. Bounded task-specific experiment, not full-release training.",
+    "selection_bias_limit": "Coverage/duration-selected training subset; no claim of optimal full-release training or global geographic generalization.",
+    "methods": {
+      "fit_policy": "Refit each of 16 deterministic training identities in the causal frame/UTC solar policy; no historical legacy coefficient reuse.",
+      "groups": [
+        {
+          "training_components_sha256": "016774b9447a3e4193a6e8fd5860c29b5940b1ffa8ee6dd0fa4133440001b781",
+          "training_components": {
+            "model": "seg_constant_mode",
+            "estimator": "mixed",
+            "condition": [
+              "solar_elev"
+            ],
+            "transfer": "full_finetune",
+            "finetune": "all",
+            "objective_lambda": 0.5,
+            "dt_seconds": 60
+          },
+          "representative_slot": "arm-09/mixed",
+          "slots": [
+            "arm-09/mixed"
+          ]
+        },
+        {
+          "training_components_sha256": "087ac47d73ef62c9406b354058f9883e74249bf7df19c92679d87076b4b7f983",
+          "training_components": {
+            "model": "seg_constant_mode",
+            "estimator": "pure_es",
+            "condition": [
+              "solar_elev"
+            ],
+            "transfer": "full_finetune",
+            "finetune": "all",
+            "objective_lambda": "infinity",
+            "dt_seconds": 60
+          },
+          "representative_slot": "arm-09/pure_es",
+          "slots": [
+            "arm-09/pure_es"
+          ]
+        },
+        {
+          "training_components_sha256": "1f2594cb57d28c48372c4b87effe2328375aee61897e57869dee40d4a89ed58c",
+          "training_components": {
+            "model": "seg_constant_mode",
+            "estimator": "qmle",
+            "condition": [
+              "solar_elev"
+            ],
+            "transfer": "full_finetune",
+            "finetune": "all",
+            "dt_seconds": 60
+          },
+          "representative_slot": "arm-08/qmle",
+          "slots": [
+            "arm-08/qmle"
+          ]
+        },
+        {
+          "training_components_sha256": "24fa0039bfd73cfb8ed682f26451147ffc3957fdd2d3cc3c9b42d8735c0ed151",
+          "training_components": {
+            "model": "seg_constant_mode",
+            "estimator": "crps_energy",
+            "condition": [
+              "solar_elev"
+            ],
+            "transfer": "full_finetune",
+            "finetune": "drift_only",
+            "dt_seconds": 60
+          },
+          "representative_slot": "arm-15/drift_only",
+          "slots": [
+            "arm-15/drift_only"
+          ]
+        },
+        {
+          "training_components_sha256": "48a9b723722a1e6e91a019aba1c1a31c6704ab6808896c2225b478176dc1e972",
+          "training_components": {
+            "model": "seg_constant_mode",
+            "estimator": "crps_energy",
+            "condition": [
+              "solar_elev"
+            ],
+            "transfer": "full_finetune",
+            "finetune": "all",
+            "dt_seconds": 30
+          },
+          "representative_slot": "arm-06/dt30",
+          "slots": [
+            "arm-06/dt30"
+          ]
+        },
+        {
+          "training_components_sha256": "5e1168783099ac826fcbcbf9809de941bc70d55de044afa947b2a6fa157b5e01",
+          "training_components": {
+            "model": "explicit_decomp",
+            "estimator": "crps_energy",
+            "condition": [
+              "solar_elev"
+            ],
+            "transfer": "full_finetune",
+            "finetune": "all",
+            "dt_seconds": 60
+          },
+          "representative_slot": "arm-05/explicit_decomp",
+          "slots": [
+            "arm-05/explicit_decomp"
+          ]
+        },
+        {
+          "training_components_sha256": "8cb599918b8a24fcbd520b555beb306b25cd5d5c81d6e1a974880f1bb1cc60e7",
+          "training_components": {
+            "model": "seg_constant_mode",
+            "estimator": "crps_energy",
+            "condition": [
+              "solar_elev"
+            ],
+            "transfer": "full_finetune",
+            "finetune": "all",
+            "dt_seconds": 120
+          },
+          "representative_slot": "arm-06/dt120",
+          "slots": [
+            "arm-06/dt120"
+          ]
+        },
+        {
+          "training_components_sha256": "92792c2c18940b29a51bac6c685b3c1e274b389b3b73494fdb094c33123041d8",
+          "training_components": {
+            "model": "seg_constant_mode",
+            "estimator": "crps_energy",
+            "condition": [
+              "solar_elev"
+            ],
+            "transfer": "full_finetune",
+            "finetune": "two_step",
+            "dt_seconds": 60
+          },
+          "representative_slot": "arm-15/two_step",
+          "slots": [
+            "arm-15/two_step"
+          ]
+        },
+        {
+          "training_components_sha256": "93ecfd28bcab9eae004ed20252c59422921ea50c10bb53452089c67e9b9d5a59",
+          "training_components": {
+            "model": "seg_constant_mode",
+            "estimator": "crps_energy",
+            "condition": [
+              "solar_elev"
+            ],
+            "transfer": "full_finetune",
+            "finetune": "all",
+            "dt_seconds": 600
+          },
+          "representative_slot": "arm-06/dt600",
+          "slots": [
+            "arm-06/dt600"
+          ]
+        },
+        {
+          "training_components_sha256": "9439c12d438ed5d88935ac688dd5aec8efa58300ac010b4da170c5494156430c",
+          "training_components": {
+            "model": "seg_constant_mode",
+            "estimator": "crps_energy",
+            "condition": [
+              "solar_elev"
+            ],
+            "transfer": "scratch",
+            "finetune": "all",
+            "dt_seconds": 60
+          },
+          "representative_slot": "arm-12/scratch",
+          "slots": [
+            "arm-12/scratch"
+          ]
+        },
+        {
+          "training_components_sha256": "96615f2e35c1c0cecf2583e38d8da82a2db81b54885e8c40c09b19111c1e95c9",
+          "training_components": {
+            "model": "pointwise_mixture",
+            "estimator": "crps_energy",
+            "condition": [
+              "solar_elev"
+            ],
+            "transfer": "full_finetune",
+            "finetune": "all",
+            "dt_seconds": 60
+          },
+          "representative_slot": "arm-02/pointwise",
+          "slots": [
+            "arm-02/pointwise"
+          ]
+        },
+        {
+          "training_components_sha256": "9966345db8b656df4e9bbbed7ece8677727f794a3ded8db0b45b967453e3e3a9",
+          "training_components": {
+            "model": "seg_constant_mode",
+            "estimator": "crps_energy",
+            "condition": [
+              "solar_elev"
+            ],
+            "transfer": "meta_reptile",
+            "finetune": "all",
+            "dt_seconds": 60
+          },
+          "representative_slot": "arm-14/reptile",
+          "slots": [
+            "arm-14/reptile"
+          ]
+        },
+        {
+          "training_components_sha256": "b464d5fc5a2e4208f5ca5c4258355ec4d39c90a9e0c72be7029fd6fec0f03b3a",
+          "training_components": {
+            "model": "seg_constant_mode",
+            "estimator": "crps_energy",
+            "condition": [
+              "solar_elev"
+            ],
+            "transfer": "full_finetune",
+            "finetune": "all",
+            "dt_seconds": 60
+          },
+          "representative_slot": "arm-01/full",
+          "slots": [
+            "arm-01/full",
+            "arm-06/dt60",
+            "arm-07/full",
+            "arm-10/d2_closed",
+            "arm-10/d2_mc",
+            "arm-11/full",
+            "arm-16/full",
+            "arm-18/full",
+            "arm-19/em",
+            "arm-19/euler",
+            "arm-20/full",
+            "arm-21/crn",
+            "arm-21/mc"
+          ]
+        },
+        {
+          "training_components_sha256": "b6c9f4acb01cda7ec36092aa7c6a4f65cc4cf1362ce5a0dcce0eff236b875958",
+          "training_components": {
+            "model": "single_gaussian",
+            "estimator": "crps_energy",
+            "condition": [
+              "solar_elev"
+            ],
+            "transfer": "full_finetune",
+            "finetune": "all",
+            "dt_seconds": 60
+          },
+          "representative_slot": "arm-03/single_gaussian",
+          "slots": [
+            "arm-03/single_gaussian"
+          ]
+        },
+        {
+          "training_components_sha256": "c950c6536f283fde63f7decc9a7b891f4977a42e489670c4ae2e707cb63ae2f3",
+          "training_components": {
+            "model": "seg_constant_mode",
+            "estimator": "crps_energy",
+            "condition": [
+              "solar_elev"
+            ],
+            "transfer": "full_finetune",
+            "finetune": "all",
+            "dt_seconds": 300
+          },
+          "representative_slot": "arm-06/dt300",
+          "slots": [
+            "arm-06/dt300"
+          ]
+        },
+        {
+          "training_components_sha256": "ca1efb0a3a18f63a3293b6130e5b781a0da0a6de5c3660c8230a905a3326a8a5",
+          "training_components": {
+            "model": "gmm_kernel",
+            "estimator": "crps_energy",
+            "condition": [
+              "solar_elev"
+            ],
+            "transfer": "full_finetune",
+            "finetune": "all",
+            "dt_seconds": 60
+          },
+          "representative_slot": "arm-04/gmm_kernel",
+          "slots": [
+            "arm-04/gmm_kernel"
+          ]
+        }
+      ],
+      "max_transitions_per_fit": 80000,
+      "training_intervals_seconds": [
+        30,
+        60,
+        120,
+        300,
+        600
+      ],
+      "tail_rule": "Trim at most one incomplete terminal training interval, never scoring observations.",
+      "reuse_check": "Identical input, training components, sources, environment, interval and serialized-model identity; one physical fit per key, all 28 slot bindings retained.",
+      "seed_interpretation": "Five forecast seeds, not five independent deterministic trainings."
+    },
+    "terrain": {
+      "fit_policy": "Refit ten distinct configurations with the previously evaluated direct-linear solver and frozen PIRC-22 representation/capacity.",
+      "training_policy_sha256": "560a6f0776287ab7a31a91c88d029e37f25a1964f8039a39554cd267e202d0ee",
+      "transition_rule": "One original first-future transition per qualified train origin; 81 validation transitions diagnostic only.",
+      "independent_configurations": 10,
+      "base_ridge": 1e-06,
+      "weight_decay": 0.0001,
+      "reuse_check": "Seed labels may bind an identical deterministic fit only after exact parameter identity checks; configurations never share a fitted conditioner.",
+      "historical_candidates": "Existing Adam failures and pilot-only model flags retained; candidate artifacts are not silently promoted to accepted final models."
+    }
+  },
+  "selection": {
+    "requested_independent_blocks": 46,
+    "origins_per_block": 1,
+    "algorithm": "Hash-order independent block IDs with the fixed domain; choose lexically smallest eligible sample ID per block.",
+    "domain": "pirc17-final-block-order-v1",
+    "secondary_prefix_blocks": 6,
+    "eligibility_timing": "After ACCEPT-01 input access, freeze the complete eligibility/missingness denominator and exact selected IDs before any prediction or performance scoring.",
+    "shortfall": "Use all eligible blocks up to 46, record shortfall; fewer than 30 forbids a conclusive population verdict. No replacement, horizon shortening or expansion based on results.",
+    "same_paired_set": "All required method slots and ten terrain configurations use the identical primary set and identical secondary subsets.",
+    "power_basis": {
+      "source_sha256": "29e92c11d2642f0ec334920bb51fafaad8b4b24dec0b0be7431a2497aed3a771",
+      "target": 0.8,
+      "assumed_true_improvement_m": 82.200518,
+      "required_primary_blocks_at_pilot_sd": {
+        "all": 30,
+        "road": 33,
+        "river": 46,
+        "worldcover": 11,
+        "surface": 9
+      },
+      "rule": "46 is the largest registered primary-family 1x pilot-SD planning requirement, not a guaranteed power certificate.",
+      "limit": "Only three development blocks. The 2x-SD 182-block sensitivity is disclosed, not an expansion instruction. No transfer of terrain power to method comparisons."
+    }
+  },
+  "origin_modes": {
+    "causal_prefix": {
+      "role": "primary",
+      "blocks": 46,
+      "velocity": "Last-three-visible-observation secant; original observation time; measurement error unknown, not zero."
+    },
+    "known_velocity": {
+      "role": "secondary-descriptive",
+      "blocks": 6,
+      "velocity": "Supply the same causal-prefix secant at t0, but only position+velocity to the predictor; retain explicit source/time and unknown error.",
+      "limitation": "Causal derived velocity, not an independently measured exact sensor velocity; no new information or sensor-accuracy claim."
+    },
+    "point_only": {
+      "role": "secondary-descriptive",
+      "blocks": 6,
+      "velocity": "Empirical velocity prior fitted only on the 404 outer-train prefix origins; sample initial velocities per particle.",
+      "history": "History channel contains prior-initialized/predicted direction, explicitly labelled unobserved at t0; no hidden prefix enters the predictor."
+    },
+    "secondary_inference": "All 38 configurations/slots, all five seeds and metrics, but no hypothesis tests or factor verdicts; six blocks are a bounded descriptive diagnostic, not a representative or powered population sample."
+  },
+  "forecast": {
+    "particles": 512,
+    "maximum_step_seconds": 5.0,
+    "nominal_horizon_seconds": 1800.0,
+    "nominal_score_seconds": [
+      60.0,
+      300.0,
+      900.0,
+      1800.0
+    ],
+    "time_weights": [
+      0.25,
+      0.25,
+      0.25,
+      0.25
+    ],
+    "target_tolerance_seconds": 30.0,
+    "maximum_observation_gap_seconds": 60.0,
+    "target_rule": "Distinct original observations nearest each slot; earlier tie; no interpolation. Use actual elapsed times (last slot can be 1770..1830 seconds).",
+    "terrain_history_clock_seconds": 5.0,
+    "method_history_clock_seconds": "Each registered training/observation interval tau, not integration h.",
+    "method_noise": "R is calibrated velocity-rate covariance; fixed Q=R*tau independent of h; not global continuous-time MLE.",
+    "method_fp_scope": "Conditional Gaussian propagation with sampled mode histories and mean-evaluated nonlinear conditions; not a full PDE solution or global exact nonlinear SDE.",
+    "forecast_reuse": "None between method slots. Preserve slot/stream identity and explicit paired CRN/control stream mapping; do not count Full anchors as independent evidence.",
+    "longer_horizons": "60-minute common validation support is four blocks; not selected. No supported 72-hour claim or extra full forecast per scoring slot."
+  },
+  "statistics": {
+    "inference_config": {
+      "delta_m": 41.100259,
+      "alpha": 0.05,
+      "bootstrap_iterations": 2000,
+      "bootstrap_seed": 20260926,
+      "mc_check_seed": 20260927,
+      "minimum_blocks": 30,
+      "required_agreeing_seeds": 4,
+      "tail_tolerance_fraction_of_delta": 0.25
+    },
+    "terrain_registry_sha256": "0fdc75ba2f471b0d977ab8b2c79293cd073537a1888c6fd077217a4741d86d6f",
+    "method_registry_sha256": "4ab88c3b511fe19f2641dffc81bbf549cf1eb06b0bd91673a3edea2c6f5808f8",
+    "units": "metres for ES/delta/intervals",
+    "weights": "Equal independent blocks, equal origins within block, equal five seeds; seeds/windows are not independent blocks.",
+    "multiplicity": "Five terrain primary and four LIO contrasts in separate families; five method families separately. Holm zero tests and Bonferroni bootstrap-t intervals, not global FWER.",
+    "power_and_numerical_disposition": "Use the actual admissible development qualification per comparison; missing power/numerical qualification must remain explicit and cannot be manufactured from final scores or transferred from another matrix.",
+    "failure_precedence": "Missing/failed required evidence -> unavailable; unresolved conflict, missing power, instability or boundary overlap -> inconclusive; otherwise the frozen guarded interval rule.",
+    "tail_failure": "No automatic B/seed increase; retain the unstable result as inconclusive."
+  },
+  "metrics": {
+    "common_registry": "experiments/pirc17/metric_registry.json",
+    "primary": "Same unbiased 2D ensemble U-statistic ES for every slot, equal four-time weights.",
+    "inertial_baseline": "One deterministic x0+v0*t path per origin/mode, using the identical supplied causal velocity or the train-prior mean for point_only. Score as a point mass, not fitted uncertainty; no additional NEX326 arm and no fivefold seed replication.",
+    "required_secondary": "All registered ADE/FDE, endpoint error quantiles, marginal CRPS, radial 50/80/90/95 coverage and area, path ES, fixed-grid position entropy and overflow.",
+    "entropy_grid": {
+      "east_min_m": -10000,
+      "east_max_m": 10000,
+      "north_min_m": -10000,
+      "north_max_m": 10000,
+      "cell_width_m": 250,
+      "overflow_bins": 1
+    },
+    "nll": "Unavailable: no qualified predictive density; no unqualified Gaussian shortcut.",
+    "mode_entropy": "Separate diagnostic for labelled method modes; unavailable for unlabelled terrain dynamics, never inferred from position entropy.",
+    "method_gates": "Bind every historical gate to its actual statistic/operator/threshold and evidence. Corrected causal diagnostic definitions must be versioned, never silently equated to legacy future-state checks.",
+    "extra_sampling": "No implicit 8192-sample legacy diagnostic or unregistered forecasts. Saved N512 arrays and fitted parameters first; unresolved required diagnostic binding prevents pre-eval acceptance."
+  },
+  "numerical_evidence": {
+    "fixed_setting": "N512/h5, no automatic refinement",
+    "terrain_primary": "Existing three-block/five-seed primary-family total margins below delta/4 versus finite N512/h0.3125 reference.",
+    "epsilon_m": 10.27506475,
+    "reference_is_exact": false,
+    "limitations": [
+      "No five-seed N512-to-larger-N certificate",
+      "No global/all-block convergence proof",
+      "LIO lacks the same fine-reference study",
+      "Method kernel software or cost trials are not a terrain numerical certificate",
+      "Secondary origin modes are descriptive and not covered by the primary numerical study"
+    ],
+    "extra_cost_probes": 0,
+    "automatic_parameter_expansion": false,
+    "remaining_preparation_budget": {
+      "cumulative_empirical_cap_seconds": 1800,
+      "closed_probe_seconds": 382.890189,
+      "remaining_seconds": 1417.109811,
+      "scope": "Existing bounded full-delivery preparation envelope, not a new grant or a cap on all historical PIRC-17 work. Any necessary non-cost qualification needs its own exact preregistered plan; no new cost probes or automatic retries."
+    },
+    "unresolved_pre_eval_work": "Method-specific causal gate binding and bounded allowed-data qualification must be resolved in DEV-03/04/TEST-01; no fabricated blanket numerically_qualified=true."
+  },
+  "replay": {
+    "all_outputs": "One independent complete pass over immutable saved arrays, receipts, metrics, pairing, bootstrap/Holm, gates and verdicts. Not another full forecast generation.",
+    "prediction_replay": "First selected primary block, first registered seed, all 28 required method slots and ten terrain configs; compare output identity and retained failures, not an extra scientific replication.",
+    "runtime": {
+      "terrain": "All ten configurations",
+      "methods": [
+        "arm-01/full",
+        "arm-04/gmm_kernel",
+        "arm-05/explicit_decomp",
+        "arm-21/mc",
+        "arm-21/crn"
+      ],
+      "origin": "First selected primary origin",
+      "seed": 20260814,
+      "cold_trials": 5,
+      "warmup_trials": 1,
+      "warm_trials": 5,
+      "units": "ms per actual forecast minute; p50/p95 total latency, failure rate, sampled RSS/lifetime peak separately",
+      "scope": "Provider-cold/OS-warm versus warmed provider, not machine cold; five trials per condition give descriptive quantiles, not precise tail latency claims.",
+      "exclude_from_inference": "Fitting, offline scoring, file export and paper build."
+    }
+  },
+  "resource_budget": {
+    "phase_caps_seconds": {
+      "input_qualification_and_binding": 3600,
+      "method_training": 1800,
+      "terrain_training": 1800,
+      "method_forecasts": 10800,
+      "terrain_forecasts": 115200,
+      "offline_common_scores": 7200,
+      "mechanism_and_paired_inference": 7200,
+      "runtime_and_forecast_replay": 7200,
+      "independent_saved_output_reanalysis": 10800,
+      "aggregate_export_and_integrity": 7200
+    },
+    "total_active_compute_cap_seconds": 172800,
+    "measurement": "Cumulative elapsed active job time across resumes, including failed/aborted attempts. No reset on interruption; preserve original receipts and remaining caps.",
+    "per_method_fit_seconds": 90,
+    "per_terrain_fit_seconds": 90,
+    "per_method_forecast_seconds": 30,
+    "per_terrain_forecast_seconds": 180,
+    "max_attempts_per_work_item": 1,
+    "minimum_free_memory_bytes": 2147483648,
+    "parallel_empirical_workers": 1,
+    "precision": "float64 dynamics/scoring; canonical map values retain frozen float32 semantics",
+    "device": "CPU",
+    "batch_particles": 512,
+    "runtime_binding": {
+      "platform": "Windows-10-10.0.19045-SP0",
+      "processor": "Intel64 Family 6 Model 141 Stepping 1, GenuineIntel",
+      "physical_cpus": 6,
+      "logical_cpus": 12,
+      "ram_total_bytes": 34071752704,
+      "python": "3.10.13",
+      "numpy": "1.26.4",
+      "torch": "2.3.1+cu121",
+      "torch_threads": 6,
+      "torch_interop_threads": 12,
+      "numpy_openblas_threads": 12,
+      "numpy_openblas_version": "0.3.23.dev",
+      "numba_threads_when_loaded": 12,
+      "duckdb_input_threads": 2,
+      "duckdb_eligibility_threads": 4,
+      "map_packages": {
+        "duckdb": "1.5.5",
+        "numba": "0.65.1",
+        "pyarrow": "24.0.0",
+        "rasterio": "1.4.4"
+      },
+      "thread_policy": "Set/verify these effective counts and record all loaded thread pools per worker; environment variables alone are not proof. No migration or parallel speedup assumed.",
+      "source": "Closed method cost evidence for Python/NumPy/Torch and 6/12 Torch threads; read-only current-host runtime inventory for other fields. Numba 12 is an explicit proposed count, not a measured cost-trial observation."
+    },
+    "cap_enforcement_required": "DEV-04 owned-process deadlines plus durable cumulative ledger; declarations alone are not enforcement.",
+    "on_cap": "Stop owned work and record every unattempted/failed item. No silent phase transfer, cheaper fallback, retry or cap extension; missing required evidence is not completion.",
+    "outside_this_cap": "Pre-eval software/qualification preparation, manuscript/PDF and review/human latency; not a 48-hour project-completion promise."
+  },
+  "counts": {
+    "method_slots_required": 28,
+    "method_slots_excluded": 8,
+    "terrain_configurations": 10,
+    "primary_origins": 46,
+    "secondary_origins_per_mode": 6,
+    "origin_cases_all_modes": 58,
+    "seeds_per_origin": 5,
+    "primary_method_forecasts": 6440,
+    "primary_terrain_forecasts": 2300,
+    "secondary_method_forecasts": 1680,
+    "secondary_terrain_forecasts": 600,
+    "method_forecasts_all_modes": 8120,
+    "terrain_forecasts_all_modes": 2900,
+    "scientific_forecasts_all_modes": 11020,
+    "inertial_deterministic_paths": 58,
+    "independent_method_fits": 16,
+    "independent_terrain_fits": 10,
+    "forecast_replay_items": 38,
+    "runtime_subjects": 15,
+    "runtime_forecasts_including_warmup": 165,
+    "max_generated_stochastic_forecasts_including_audits": 11223,
+    "full_prediction_regeneration_passes": 0,
+    "full_saved_output_reanalysis_passes": 1
+  },
+  "cost_projection": {
+    "primary_prediction_and_common_score_hours": 24.35403587034242,
+    "all_modes_prediction_and_common_score_hours": 30.707262619127395,
+    "finite_runtime_and_reforecast_prediction_hours": 1.2156638208666313,
+    "evidence": {
+      "terrain": {
+        "path": "experiments/pirc17/evidence/terrain-cost-v1.json",
+        "sha256": "905aed0dcbc2ed448af10fc9ae8541fd1067b719bb45e45ae38426e3a9de4600"
+      },
+      "methods": {
+        "path": "experiments/pirc17/evidence/method-cost-v1.json",
+        "sha256": "61c98536ee15ebcfda3df821030cd6355e2fc3bf6aa695acea917313ad775d65"
+      }
+    },
+    "secondary_origin_cost_measured": false,
+    "assumptions": [
+      "same serial CPU runtime, N512/h5 and nominal 30-minute horizon",
+      "all 26 FP slots use the maximum of the three observed FP prices",
+      "secondary origin modes use causal-prefix unit prices without a new cost probe",
+      "cold/warm/replay use existing prices, not measured benchmark distributions"
+    ],
+    "not_an_upper_bound_or_project_eta": true,
+    "excluded_from_estimate": [
+      "input binding/loading",
+      "all formal fits",
+      "extra mechanism scores",
+      "independent reanalysis",
+      "serialization and integrity",
+      "failure overhead",
+      "software implementation/review",
+      "full manuscript/PDF",
+      "human decision time"
+    ]
+  },
+  "admission_requirements": [
+    "DEV-03 exact protocol/input/code seal",
+    "DEV-04 executable full matrix and enforced finite budgets",
+    "Required mechanism/power/numerical qualification dispositions with evidence",
+    "TEST-01 and REVIEW-01 all pre-eval HC/EC checks pass",
+    "Human ACCEPT-01 on the exact version"
+  ],
+  "sha256": "661dae3ff86eee843e36f8090de8b68668adf02bddee05fe247bf8541d99ef59"
+}

@@ -1,0 +1,1377 @@
+{
+  "schema_version": "pirc17-candidate-workload-v1",
+  "state": "candidate-accounting-only",
+  "execution_admitted": false,
+  "final_eval_authorized": false,
+  "source_sha256": {
+    "experiments/nex326/specification.py": "31e7d6c496c63bdcfd76c666810bc4851ae5e5e5fd86e1d842442314abecfdd2",
+    "experiments/nex326/experiment.json": "f12dc97a20667212b206e46dd274706b8bf799ee54871729727938d2a7d9e54a",
+    "experiments/nex326/pirc19_scope_policy.json": "74c5f331fcb9ee11c2dd055b227095026f17c717e83df09d7c5f04bffc0868c6",
+    "experiments/nex326/runner.py": "ac6c8a764e5407ba3616dba03fc400c9b524f84dd552abf78d5f7c210fc36990",
+    "experiments/nex326/model.py": "8863e936419a55d95b4fe31ddb8790fcbb0a923b57cbc3f77cde3e095dea9aa2",
+    "experiments/nex326/cohort.py": "e59617dc9b84fe5071ab94e2555f90af4199c3adb6c370c2cc206ba44f38af15",
+    "experiments/pirc17/configurations.py": "2ec5fa1f19ba28fd62823f756ca011e4d54c89ed7ca88f1524ffebf8425556b3",
+    "experiments/pirc17/workload.py": "04f3c003626fc88e3ab16cc239695166cbd6c134bd2767ecbea520616ca354fe"
+  },
+  "pilot_bindings": {
+    "plan": {
+      "path": "experiments/pirc17/plans/small-budget-full-p512-h5-v1.json",
+      "sha256": "bfa6fa6039ba07d8c97fa0a6dcc8a8e9c3b04e0fcb50714aea42b75aa14dc467"
+    },
+    "ledger": {
+      "path": "artifacts/pirc17/dev10/small-budget-full-p512-h5-v1.jsonl",
+      "sha256": "5a67eb8b954382ee2526b8c5bb8b37b106969098254aae83b0a6061119a60d16"
+    },
+    "audit": {
+      "path": "artifacts/pirc17/dev10/small-budget-full-p512-h5-v1.audit.json",
+      "sha256": "f098e1351fb7e122c171f42f01ca9ed7284db9d19bbaae81f18da6b52f3b2def"
+    }
+  },
+  "registered_seeds": [
+    20260814,
+    20260815,
+    20260816,
+    20260817,
+    20260818
+  ],
+  "method_matrix": {
+    "slots": [
+      {
+        "slot_id": "arm-01/full",
+        "arm_id": 1,
+        "group": "model",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": true,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "e40b0be23c5eb6e1cb61e599344a85349270c67f0bca7e941a13291fea92ee71",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-02/pointwise",
+        "arm_id": 2,
+        "group": "model",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "pointwise_mixture",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "c560ea1ce5e8ea7800eaf75a3118170814d947a845fa4f9cf4ece8b7d804cc24",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-03/single_gaussian",
+        "arm_id": 3,
+        "group": "model",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "single_gaussian",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "5dd8589631522618ce7ed23e4cba4c5e6a3881bfd3088184a3fef79bda073419",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-04/gmm_kernel",
+        "arm_id": 4,
+        "group": "model",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "gmm_kernel",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "e277df7194dbc22dfbb0242f2ae527e8af8383027aa3666ca3305e7e47617e10",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-05/explicit_decomp",
+        "arm_id": 5,
+        "group": "model",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "explicit_decomp",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "91b77a848b8714b0338177239bccf79a62024a5c93555c41ff4233fa23619620",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-06/dt30",
+        "arm_id": 6,
+        "group": "model",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 30
+        },
+        "component_identity_sha256": "474888c99bd661d1c89534a91fac79e7154b463355c9daa8a1be8c148ab502d1",
+        "propagator": "fp",
+        "observation_interval_seconds": 30,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-06/dt60",
+        "arm_id": 6,
+        "group": "model",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "e40b0be23c5eb6e1cb61e599344a85349270c67f0bca7e941a13291fea92ee71",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-06/dt120",
+        "arm_id": 6,
+        "group": "model",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 120
+        },
+        "component_identity_sha256": "b6883bf57f62645ead8a6f3b3fcdf182beebcd43f8a532e5ce05dc88a2a44460",
+        "propagator": "fp",
+        "observation_interval_seconds": 120,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-06/dt300",
+        "arm_id": 6,
+        "group": "model",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 300
+        },
+        "component_identity_sha256": "e8da7531b46a97a1d10239c6638c2a96e5efe087b9db353d1adc1e456ae66dd9",
+        "propagator": "fp",
+        "observation_interval_seconds": 300,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-06/dt600",
+        "arm_id": 6,
+        "group": "model",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 600
+        },
+        "component_identity_sha256": "c0bc5d73b57856c97e656c86a10fcdcf3466a22b96eafb1bcad1db654b538a0e",
+        "propagator": "fp",
+        "observation_interval_seconds": 600,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-07/full",
+        "arm_id": 7,
+        "group": "algorithm",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": true,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "e40b0be23c5eb6e1cb61e599344a85349270c67f0bca7e941a13291fea92ee71",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-08/qmle",
+        "arm_id": 8,
+        "group": "algorithm",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "qmle",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "ee7097bd0bf89ff6bf72279442e30d633f341992091a2c0e863117019948b355",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-09/mixed",
+        "arm_id": 9,
+        "group": "algorithm",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "mixed",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60,
+          "objective_lambda": 0.5
+        },
+        "component_identity_sha256": "56b1b935050e3d62b6d4288a047bbba2926e9e36ca63f608bb918667d22f60ad",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-09/pure_es",
+        "arm_id": 9,
+        "group": "algorithm",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "pure_es",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60,
+          "objective_lambda": "infinity"
+        },
+        "component_identity_sha256": "f4f04ffd30066d5563d253df20d65b1a99f2e7e6537996e245629b1024441195",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-10/d2_mc",
+        "arm_id": 10,
+        "group": "algorithm",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60,
+          "score": "d2_mc",
+          "score_samples": 256
+        },
+        "component_identity_sha256": "870dac2574e8b2bf11df33596132a7c6d4649f013104771707510ee3d39c00a6",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-10/d2_closed",
+        "arm_id": 10,
+        "group": "algorithm",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60,
+          "score": "d2_closed"
+        },
+        "component_identity_sha256": "1baac614a675a9388ed8785453f9492a55a79211fef07e9cc6c80a902d49f32d",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-11/full",
+        "arm_id": 11,
+        "group": "learning",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": true,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "e40b0be23c5eb6e1cb61e599344a85349270c67f0bca7e941a13291fea92ee71",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-12/scratch",
+        "arm_id": 12,
+        "group": "learning",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "scratch",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "f003f54fcb42477a129fd79dfb6584f8d5f38cf4d5b8ea489c0de35303777b16",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-13/animal_pretrain",
+        "arm_id": 13,
+        "group": "learning",
+        "disposition": "EXCLUDED",
+        "exclusion_reason": "No licensed, versioned animal trajectory cohort is available for animal-to-human pretraining.",
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "animal_pretrain",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "81295eb38142386c4607c79771ea2d2da2c99a00c49122def102e6160ff7385a",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-14/reptile",
+        "arm_id": 14,
+        "group": "learning",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "meta_reptile",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "b95f95e6953c30edfe55af5e0a496ca85d1a470ea755ab201a8c64bf18150c7c",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-15/drift_only",
+        "arm_id": 15,
+        "group": "learning",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "drift_only",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "ce61a947dcb2df2433f8a6c9972d4253b28ec5431312b44fe8248d8935833bc2",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-15/two_step",
+        "arm_id": 15,
+        "group": "learning",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "two_step",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "601b277a6536bf05a010b23eff3a65a3e664f3fa24388f5f71070d065444de7b",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-16/full",
+        "arm_id": 16,
+        "group": "model",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": true,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "e40b0be23c5eb6e1cb61e599344a85349270c67f0bca7e941a13291fea92ee71",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-17/uncond",
+        "arm_id": 17,
+        "group": "model",
+        "disposition": "EXCLUDED",
+        "exclusion_reason": "The current scope does not require condition-variant reproduction; aligned temperature and precipitation are unavailable. Existing successful variants remain supplemental evidence.",
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "a37c50c565f5909be60cf54d76b57531923f1ce5693842ee1274f044100f44e2",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-17/is_day",
+        "arm_id": 17,
+        "group": "model",
+        "disposition": "EXCLUDED",
+        "exclusion_reason": "The current scope does not require condition-variant reproduction; aligned temperature and precipitation are unavailable. Existing successful variants remain supplemental evidence.",
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "is_day"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "7d7f0b6d9b7679694c296d7d86d4529d8bc8299c809029e881af971d19f15c73",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-17/weather",
+        "arm_id": 17,
+        "group": "model",
+        "disposition": "EXCLUDED",
+        "exclusion_reason": "The current scope does not require condition-variant reproduction; aligned temperature and precipitation are unavailable. Existing successful variants remain supplemental evidence.",
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev",
+            "temperature",
+            "precipitation"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "b358d9e6564314a0cbd298ae98f10bcd633d783d8234b50e75d27072db0e3e52",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-17/terrain",
+        "arm_id": 17,
+        "group": "model",
+        "disposition": "EXCLUDED",
+        "exclusion_reason": "The current scope does not require condition-variant reproduction; aligned temperature and precipitation are unavailable. Existing successful variants remain supplemental evidence.",
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev",
+            "terrain_elevation",
+            "terrain_slope"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60,
+          "coverage_mask": "has_terrain"
+        },
+        "component_identity_sha256": "0dc69d7f7b1f7af5b530ef2db0bebb277fc78f977626fa19c2f786376936ea35",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-18/full",
+        "arm_id": 18,
+        "group": "inference",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": true,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "e40b0be23c5eb6e1cb61e599344a85349270c67f0bca7e941a13291fea92ee71",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-19/em",
+        "arm_id": 19,
+        "group": "inference",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "euler_maruyama",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "71b978e6ea2ddb0bf37f1607aebb23f224bb19c310192f21f66933f1cc403f78",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-19/euler",
+        "arm_id": 19,
+        "group": "inference",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "euler_maruyama",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "71b978e6ea2ddb0bf37f1607aebb23f224bb19c310192f21f66933f1cc403f78",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-20/full",
+        "arm_id": 20,
+        "group": "inference",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": true,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "e40b0be23c5eb6e1cb61e599344a85349270c67f0bca7e941a13291fea92ee71",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-21/mc",
+        "arm_id": 21,
+        "group": "inference",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "mc",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "ed5793a75f1f3ec4e7698aeb0bcca82a18da5bd2084d6a1608f144584e5b8523",
+        "propagator": "mc",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-21/crn",
+        "arm_id": 21,
+        "group": "inference",
+        "disposition": "REQUIRED",
+        "exclusion_reason": null,
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "crn",
+          "bridge": "none",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "7a1f50a2f96b2c2a110d6fce1986ac2f6a4bac1fca1f3503ce6a61c96c95361b",
+        "propagator": "crn",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-22/doob",
+        "arm_id": 22,
+        "group": "inference",
+        "disposition": "EXCLUDED",
+        "exclusion_reason": "Endpoint-prior bridges are an expert-assisted extension and are outside the current core reproduction.",
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "doob",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "45686a617e9606c9eb5d32b3f74ec233685f6d76f2d80e8f11d8a513e3f21e63",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-22/sb",
+        "arm_id": 22,
+        "group": "inference",
+        "disposition": "EXCLUDED",
+        "exclusion_reason": "Endpoint-prior bridges are an expert-assisted extension and are outside the current core reproduction.",
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "gaussian_schrodinger",
+          "state_dim": 2,
+          "dt_seconds": 60,
+          "bridge_epsilon_scale": 0.5,
+          "bridge_time_steps": 8,
+          "bridge_sinkhorn_iterations": 500,
+          "bridge_sinkhorn_tolerance": 1e-08
+        },
+        "component_identity_sha256": "63253c65c1b988774c9463de280cc19add1740fc1f453491bf05893ac26998a9",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      },
+      {
+        "slot_id": "arm-22/soft_endpoint",
+        "arm_id": 22,
+        "group": "inference",
+        "disposition": "EXCLUDED",
+        "exclusion_reason": "Endpoint-prior bridges are an expert-assisted extension and are outside the current core reproduction.",
+        "full_anchor": false,
+        "components": {
+          "model": "seg_constant_mode",
+          "estimator": "crps_energy",
+          "transfer": "full_finetune",
+          "finetune": "all",
+          "condition": [
+            "solar_elev"
+          ],
+          "integrator": "split",
+          "poa": "fp",
+          "bridge": "soft_endpoint",
+          "state_dim": 2,
+          "dt_seconds": 60
+        },
+        "component_identity_sha256": "77a0fdf674abb38eac1ae8728f44e7e15ac7cbfdf593b4dd55fb19fe6827e4b7",
+        "propagator": "fp",
+        "observation_interval_seconds": 60,
+        "prediction_cost_seconds": null
+      }
+    ],
+    "conceptual_arms": 22,
+    "ledger_slots": 36,
+    "required_slots": 28,
+    "excluded_slots": 8,
+    "required_propagator_counts": {
+      "fp": 26,
+      "mc": 1,
+      "crn": 1
+    },
+    "identical_component_groups": [
+      [
+        "arm-01/full",
+        "arm-06/dt60",
+        "arm-07/full",
+        "arm-11/full",
+        "arm-16/full",
+        "arm-18/full",
+        "arm-20/full"
+      ],
+      [
+        "arm-19/em",
+        "arm-19/euler"
+      ]
+    ],
+    "physical_execution_reuse_approved": false,
+    "reuse_caveat": "Current runner seeds include arm and subconfig; equal components do not imply equal predictions or interchangeable mechanism records.",
+    "observation_interval_caveat": "NEX326 dt changes training/observation resampling; it is not the terrain integrator's maximum step.",
+    "formal_adapter_ready": false,
+    "adapter_gap": "Legacy runner predicts from each resampled segment midpoint to its endpoint. Bind explicit causal origins, actual horizons, four scoring slots, block IDs and paired seeds before formal PIRC-17 use."
+  },
+  "terrain_matrix": [
+    {
+      "schema_version": "pirc17-history-preserving-terrain-config-v1",
+      "configuration_id": "base",
+      "terrain_factors": [],
+      "baseline_history": "retained_in_every_configuration",
+      "variant_ids": [
+        "history.direction"
+      ],
+      "composition_ids": [],
+      "pirc22_consumer_identity": "2b393cb8ce16e0dc9ea1b6f87c32be0744f1b5a713312955476f4ac89d374fb9",
+      "sha256": "c475e6ffba2669e5386a726fa846eb4635f14e863a4528313f4cea2b5a199c00"
+    },
+    {
+      "schema_version": "pirc17-history-preserving-terrain-config-v1",
+      "configuration_id": "all-terrain",
+      "terrain_factors": [
+        "road",
+        "river",
+        "worldcover",
+        "surface"
+      ],
+      "baseline_history": "retained_in_every_configuration",
+      "variant_ids": [
+        "road.distance_log1p",
+        "road.direction",
+        "river.distance_log1p",
+        "river.direction",
+        "worldcover.grouped",
+        "surface.orientation",
+        "history.direction"
+      ],
+      "composition_ids": [
+        "road.log_distance_x_direction",
+        "river.log_distance_x_direction",
+        "worldcover.grouped_x_road_distance",
+        "surface.orientation_x_history"
+      ],
+      "pirc22_consumer_identity": "2b393cb8ce16e0dc9ea1b6f87c32be0744f1b5a713312955476f4ac89d374fb9",
+      "sha256": "4f1c4ee9291470a3d0a4d275906e26678b97c6ae6652dbae7dfcf75666066f39"
+    },
+    {
+      "schema_version": "pirc17-history-preserving-terrain-config-v1",
+      "configuration_id": "loo-road",
+      "terrain_factors": [
+        "river",
+        "worldcover",
+        "surface"
+      ],
+      "baseline_history": "retained_in_every_configuration",
+      "variant_ids": [
+        "river.distance_log1p",
+        "river.direction",
+        "worldcover.grouped",
+        "surface.orientation",
+        "history.direction"
+      ],
+      "composition_ids": [
+        "river.log_distance_x_direction",
+        "surface.orientation_x_history"
+      ],
+      "pirc22_consumer_identity": "2b393cb8ce16e0dc9ea1b6f87c32be0744f1b5a713312955476f4ac89d374fb9",
+      "sha256": "e159a2316374b8ecb0b6bc341009d723d643c8f2933d48cbc794ea10bf5485a6"
+    },
+    {
+      "schema_version": "pirc17-history-preserving-terrain-config-v1",
+      "configuration_id": "loo-river",
+      "terrain_factors": [
+        "road",
+        "worldcover",
+        "surface"
+      ],
+      "baseline_history": "retained_in_every_configuration",
+      "variant_ids": [
+        "road.distance_log1p",
+        "road.direction",
+        "worldcover.grouped",
+        "surface.orientation",
+        "history.direction"
+      ],
+      "composition_ids": [
+        "road.log_distance_x_direction",
+        "worldcover.grouped_x_road_distance",
+        "surface.orientation_x_history"
+      ],
+      "pirc22_consumer_identity": "2b393cb8ce16e0dc9ea1b6f87c32be0744f1b5a713312955476f4ac89d374fb9",
+      "sha256": "2fed487f00e5a26adb7ebae672f81d6c20a0e1fc1db75c5b32a24e3b1ba89787"
+    },
+    {
+      "schema_version": "pirc17-history-preserving-terrain-config-v1",
+      "configuration_id": "loo-worldcover",
+      "terrain_factors": [
+        "road",
+        "river",
+        "surface"
+      ],
+      "baseline_history": "retained_in_every_configuration",
+      "variant_ids": [
+        "road.distance_log1p",
+        "road.direction",
+        "river.distance_log1p",
+        "river.direction",
+        "surface.orientation",
+        "history.direction"
+      ],
+      "composition_ids": [
+        "road.log_distance_x_direction",
+        "river.log_distance_x_direction",
+        "surface.orientation_x_history"
+      ],
+      "pirc22_consumer_identity": "2b393cb8ce16e0dc9ea1b6f87c32be0744f1b5a713312955476f4ac89d374fb9",
+      "sha256": "5136c8ab88c68199c16c897e131e721bdd4debc63c37516205fd7f52f451113c"
+    },
+    {
+      "schema_version": "pirc17-history-preserving-terrain-config-v1",
+      "configuration_id": "loo-surface",
+      "terrain_factors": [
+        "road",
+        "river",
+        "worldcover"
+      ],
+      "baseline_history": "retained_in_every_configuration",
+      "variant_ids": [
+        "road.distance_log1p",
+        "road.direction",
+        "river.distance_log1p",
+        "river.direction",
+        "worldcover.grouped",
+        "history.direction"
+      ],
+      "composition_ids": [
+        "road.log_distance_x_direction",
+        "river.log_distance_x_direction",
+        "worldcover.grouped_x_road_distance"
+      ],
+      "pirc22_consumer_identity": "2b393cb8ce16e0dc9ea1b6f87c32be0744f1b5a713312955476f4ac89d374fb9",
+      "sha256": "9c9de885ef4891b98a0c367b79e12bfb3050a909b6824024f14a682de59456c5"
+    },
+    {
+      "schema_version": "pirc17-history-preserving-terrain-config-v1",
+      "configuration_id": "lio-road",
+      "terrain_factors": [
+        "road"
+      ],
+      "baseline_history": "retained_in_every_configuration",
+      "variant_ids": [
+        "road.distance_log1p",
+        "road.direction",
+        "history.direction"
+      ],
+      "composition_ids": [
+        "road.log_distance_x_direction"
+      ],
+      "pirc22_consumer_identity": "2b393cb8ce16e0dc9ea1b6f87c32be0744f1b5a713312955476f4ac89d374fb9",
+      "sha256": "ce3ccb624e32379f88954fb85ef87dec65813a827e050af3db014f9cd5002392"
+    },
+    {
+      "schema_version": "pirc17-history-preserving-terrain-config-v1",
+      "configuration_id": "lio-river",
+      "terrain_factors": [
+        "river"
+      ],
+      "baseline_history": "retained_in_every_configuration",
+      "variant_ids": [
+        "river.distance_log1p",
+        "river.direction",
+        "history.direction"
+      ],
+      "composition_ids": [
+        "river.log_distance_x_direction"
+      ],
+      "pirc22_consumer_identity": "2b393cb8ce16e0dc9ea1b6f87c32be0744f1b5a713312955476f4ac89d374fb9",
+      "sha256": "c1b82393bfd70ce63f9496715236a9f09e3a5a4ebf2ac7545e7f0c49ca0542af"
+    },
+    {
+      "schema_version": "pirc17-history-preserving-terrain-config-v1",
+      "configuration_id": "lio-worldcover",
+      "terrain_factors": [
+        "worldcover"
+      ],
+      "baseline_history": "retained_in_every_configuration",
+      "variant_ids": [
+        "worldcover.grouped",
+        "history.direction"
+      ],
+      "composition_ids": [],
+      "pirc22_consumer_identity": "2b393cb8ce16e0dc9ea1b6f87c32be0744f1b5a713312955476f4ac89d374fb9",
+      "sha256": "5bdb28995ccc9fac6011a250a785e916e388181b1bc029cad8cf2d843cc84070"
+    },
+    {
+      "schema_version": "pirc17-history-preserving-terrain-config-v1",
+      "configuration_id": "lio-surface",
+      "terrain_factors": [
+        "surface"
+      ],
+      "baseline_history": "retained_in_every_configuration",
+      "variant_ids": [
+        "surface.orientation",
+        "history.direction"
+      ],
+      "composition_ids": [
+        "surface.orientation_x_history"
+      ],
+      "pirc22_consumer_identity": "2b393cb8ce16e0dc9ea1b6f87c32be0744f1b5a713312955476f4ac89d374fb9",
+      "sha256": "d1ffc7862515dba167f0d80e0fba4e437d1dce7f61353157f0d1ef72f8a53e92"
+    }
+  ],
+  "pilot_timing": {
+    "scope": "closed development pilot, not an isolated performance benchmark or numerical certificate",
+    "independent_blocks": 3,
+    "origins": 3,
+    "seeds": [
+      20260814,
+      20260815,
+      20260816,
+      20260817,
+      20260818
+    ],
+    "particles": 512,
+    "maximum_step_seconds": 5.0,
+    "nominal_horizon_seconds": 1800,
+    "scoring_slots_from_same_forecast": 4,
+    "timing_unit": "seconds per complete 512-particle forecast, including lazy map initialization",
+    "by_configuration": {
+      "base": {
+        "count": 15,
+        "mean_seconds": 1.6859284066672748,
+        "min_seconds": 1.5312590000103228,
+        "max_seconds": 1.8004217999987304
+      },
+      "all-terrain": {
+        "count": 15,
+        "mean_seconds": 36.84817108666757,
+        "min_seconds": 28.803553399979137,
+        "max_seconds": 69.93925330002094
+      },
+      "loo-road": {
+        "count": 15,
+        "mean_seconds": 30.888703840000865,
+        "min_seconds": 27.16665530001046,
+        "max_seconds": 38.1088696999941
+      },
+      "loo-river": {
+        "count": 15,
+        "mean_seconds": 30.47184920000145,
+        "min_seconds": 27.284048400004394,
+        "max_seconds": 35.89689329999965
+      },
+      "loo-worldcover": {
+        "count": 15,
+        "mean_seconds": 31.698001293337438,
+        "min_seconds": 27.927925600029994,
+        "max_seconds": 38.07513279997511
+      },
+      "loo-surface": {
+        "count": 15,
+        "mean_seconds": 30.732499199993132,
+        "min_seconds": 27.04379870003322,
+        "max_seconds": 37.449606299982406
+      }
+    },
+    "batch_internal_seconds": 2586.3543542000116,
+    "initialization_seconds": 102.74266250000801,
+    "rollout_seconds": 2434.877295400016,
+    "other_internal_seconds": 48.734396299987566,
+    "final_eval_label_prediction_metric_reads": 0,
+    "recomputed_scientific_or_numerical_qualification": false
+  },
+  "scenarios": [
+    {
+      "independent_blocks_scenario_only": 30,
+      "origins_per_block": 1,
+      "final_eval_available_blocks": null,
+      "terrain_forecasts_six_measured_configurations": 900,
+      "terrain_forecasts_four_unmeasured_lio_configurations": 600,
+      "method_slot_seed_origin_units_without_reuse": 4200,
+      "total_prediction_units_if_same_origins_without_reuse": 5700,
+      "terrain_six_configuration_rollout_estimate_seconds": 24348.772954000156,
+      "terrain_four_lio_assumption_seconds": 19276.70695440005,
+      "terrain_ten_configuration_rollout_estimate_hours": 12.118188863444502,
+      "lio_assumption": "Each LIO costs the mean of five measured terrain-bearing configurations; unmeasured, not an upper bound.",
+      "full_feature_wall_time_estimate_seconds": null,
+      "not_included": [
+        "actual LIO cost",
+        "method fitting and propagation",
+        "formal input qualification",
+        "full metric registry and independent replay",
+        "failure handling",
+        "tests/review",
+        "manuscript and PDF",
+        "human decision latency"
+      ],
+      "interpretation": "Serial, same hardware/model/settings conditional projection, not observed formal runtime or a compute cap."
+    },
+    {
+      "independent_blocks_scenario_only": 46,
+      "origins_per_block": 1,
+      "final_eval_available_blocks": null,
+      "terrain_forecasts_six_measured_configurations": 1380,
+      "terrain_forecasts_four_unmeasured_lio_configurations": 920,
+      "method_slot_seed_origin_units_without_reuse": 6440,
+      "total_prediction_units_if_same_origins_without_reuse": 8740,
+      "terrain_six_configuration_rollout_estimate_seconds": 37334.78519613358,
+      "terrain_four_lio_assumption_seconds": 29557.61733008008,
+      "terrain_ten_configuration_rollout_estimate_hours": 18.58122292394824,
+      "lio_assumption": "Each LIO costs the mean of five measured terrain-bearing configurations; unmeasured, not an upper bound.",
+      "full_feature_wall_time_estimate_seconds": null,
+      "not_included": [
+        "actual LIO cost",
+        "method fitting and propagation",
+        "formal input qualification",
+        "full metric registry and independent replay",
+        "failure handling",
+        "tests/review",
+        "manuscript and PDF",
+        "human decision latency"
+      ],
+      "interpretation": "Serial, same hardware/model/settings conditional projection, not observed formal runtime or a compute cap."
+    },
+    {
+      "independent_blocks_scenario_only": 62,
+      "origins_per_block": 1,
+      "final_eval_available_blocks": null,
+      "terrain_forecasts_six_measured_configurations": 1860,
+      "terrain_forecasts_four_unmeasured_lio_configurations": 1240,
+      "method_slot_seed_origin_units_without_reuse": 8680,
+      "total_prediction_units_if_same_origins_without_reuse": 11780,
+      "terrain_six_configuration_rollout_estimate_seconds": 50320.79743826699,
+      "terrain_four_lio_assumption_seconds": 39838.527705760105,
+      "terrain_ten_configuration_rollout_estimate_hours": 25.044256984451973,
+      "lio_assumption": "Each LIO costs the mean of five measured terrain-bearing configurations; unmeasured, not an upper bound.",
+      "full_feature_wall_time_estimate_seconds": null,
+      "not_included": [
+        "actual LIO cost",
+        "method fitting and propagation",
+        "formal input qualification",
+        "full metric registry and independent replay",
+        "failure handling",
+        "tests/review",
+        "manuscript and PDF",
+        "human decision latency"
+      ],
+      "interpretation": "Serial, same hardware/model/settings conditional projection, not observed formal runtime or a compute cap."
+    }
+  ],
+  "scenario_count_basis": "30 is the existing inferential floor; 46 is the prior limited pilot power scenario; 62 is development validation availability, not final-eval availability. None selects the formal sample count.",
+  "no_cartesian_cross": "28 required method slots PLUS 10 terrain configurations, never 28 times 10.",
+  "no_scoring_slot_multiplier": "Four terrain scoring times share one forecast; they are not four independent full rollouts.",
+  "stop_policy": "No automatic particle/step/seed/horizon expansion or old N2048 restart. Exact sealed workloads and finite phase/total caps require ACCEPT-01 before final evaluation.",
+  "open_before_formal_budget": [
+    "method explicit-origin/horizon adapter and cost evidence",
+    "four LIO costs and applicable numerical-evidence limitations",
+    "deterministic block/origin selection",
+    "secondary-origin dispositions",
+    "formal fit reuse/refit policy",
+    "complete scoring/audit overhead",
+    "hard phase and cumulative caps with non-cherry-picked failure dispositions"
+  ],
+  "sha256": "51638a1d86544305d416d432d952e14bec6fbabbeba8a36b50ca7282d35a65eb"
+}
