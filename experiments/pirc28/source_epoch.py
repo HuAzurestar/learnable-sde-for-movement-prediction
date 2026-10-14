@@ -8,6 +8,7 @@ No attempt, reservation, artifact or scientific result is created.
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import hashlib
 
 from application.research_admission import command_binding, data_binding, plugin_binding
@@ -66,10 +67,22 @@ def _protocols(store, historical, current, proposals):
 
 
 def register_source_epoch(store, historical_definition_hash, current_definition,
-                          *, execution_policy):
+                          *, execution_policy, synthetic_grant_expires_at=None):
     """Publish a scope-preserving current-code source matrix and bridge."""
     from application.research_execution_policy import resolve_policy
 
+    if synthetic_grant_expires_at is not None:
+        try:
+            _require(type(synthetic_grant_expires_at) is str and len(synthetic_grant_expires_at) <= 64,
+                     'explicit finite synthetic renewal expiry required')
+            expiry = datetime.fromisoformat(synthetic_grant_expires_at)
+            now = datetime.now(timezone.utc)
+            _require(expiry.tzinfo is not None and now < expiry <= now + timedelta(days=31),
+                     'synthetic renewal expiry must be future and bounded to 31 days')
+        except (ValueError, TypeError) as error:
+            if isinstance(error, ResearchError):
+                raise
+            raise ResearchError('CONTRACT_MISMATCH', 'invalid synthetic renewal expiry') from error
     _require(isinstance(current_definition, SyntheticStudyDefinition),
              "canonical current source definition required")
     current_value = current_definition.to_dict()
@@ -110,6 +123,10 @@ def register_source_epoch(store, historical_definition_hash, current_definition,
             resolve_source_bridge(store, existing[0], execution_policy=execution_policy,
                                   source_code_hash=current_value["runtime_code_hash"])
             bridge = store._manifest(existing[0]["manifest_id"])
+            if synthetic_grant_expires_at is not None:
+                scope = store._manifest('pirc28-synthetic-source-renewal-' + bridge['renewal_scope_hash'])
+                _require(scope.get('expires_at') == synthetic_grant_expires_at,
+                         'registered synthetic expiry cannot be changed in place', 'IDENTITY_CONFLICT')
             return {"source_bridge": existing[0],
                 "study_definition_hash": current_definition.definition_hash,
                 "study_ids": current_definition.study_ids,
@@ -170,7 +187,8 @@ def register_source_epoch(store, historical_definition_hash, current_definition,
             "purposes": deepcopy(baseline["purposes"]),
             "visibilities": deepcopy(baseline["visibilities"]),
             "test_authorization": False, "real_data_authorized": False,
-            "public_export_authorized": False, "expires_at": baseline["expires_at"]}
+            "public_export_authorized": False,
+            "expires_at": synthetic_grant_expires_at or baseline["expires_at"]}
         scope_hash = digest(renewal_scope)
         plugin = switching_plugin()
         grants, packages, admissions = {}, {}, {}
@@ -178,7 +196,7 @@ def register_source_epoch(store, historical_definition_hash, current_definition,
             study_id = proposal["study_id"]
             protocol = protocols[study_id]
             grant = {"authorization_id": "execute-" + study_id, "study_id": study_id,
-                "expires_at": old_grant["expires_at"], "evidence_hash": scope_hash,
+                "expires_at": synthetic_grant_expires_at or old_grant["expires_at"], "evidence_hash": scope_hash,
                 "protocol_hash": digest(protocol), "data_root": old_grant["data_root"],
                 "test_authorization": False, "purposes": deepcopy(old_grant["purposes"]),
                 "visibilities": deepcopy(old_grant["visibilities"]),

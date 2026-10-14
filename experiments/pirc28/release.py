@@ -54,14 +54,17 @@ def publish_resource_policy(store, *, task_id, session_id, instructions):
 
 def prepare_restart_release(store, *, historical_definition_hash, parent_attempt_id,
                             task_id, session_id, instructions, plan_path=None,
-                            prelaunch_cancellations=None, unfunded_supersession=None):
+                            prelaunch_cancellations=None, unfunded_supersession=None,
+                            synthetic_grant_expires_at=None):
     """Register the current source bridge and one non-running K1 retry child."""
     plan_path = Path(plan_path or Path(__file__).parent / "plans" / "identifiability-v1.json")
     definition = prepare_definition(load_plan(plan_path))
     policy = publish_resource_policy(store, task_id=task_id, session_id=session_id,
                                      instructions=instructions)
+    grant_options = ({} if synthetic_grant_expires_at is None
+                     else {'synthetic_grant_expires_at': synthetic_grant_expires_at})
     source = register_source_epoch(store, historical_definition_hash, definition,
-                                   execution_policy=policy)
+                                   execution_policy=policy, **grant_options)
     restart = adjudicate_restart(store, parent_attempt_id,
         source_bridge=source["source_bridge"], execution_policy=policy,
         source_code_hash=definition.to_dict()["runtime_code_hash"],
