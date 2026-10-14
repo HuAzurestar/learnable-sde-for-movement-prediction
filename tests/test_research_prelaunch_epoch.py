@@ -1,6 +1,7 @@
 """A cancelled source epoch remains visible and consumes its retry ordinal."""
 
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -41,8 +42,10 @@ def cancelled_epoch(tmp_path, monkeypatch):
                                               ResourceBudgetSpec(middle_policy, 'c' * 64))
     ResearchQueue(store).enqueue(reservation)
     stop = {'schema_version': 'pirc28-prelaunch-owner-stop-v1', 'task_id': 'test-only',
-        'session_id': 'epoch-recovery', 'pid': 123, 'created_at': '2026-01-01T00:00:00+00:00',
-        'stop_confirmed_at': '2026-01-01T00:00:01+00:00', 'native_child_count': 0,
+        'session_id': 'epoch-recovery', 'pid': 123,
+        'created_at': (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
+        'stop_confirmed_at': datetime.now(timezone.utc).isoformat(), 'native_child_count': 0,
+        'reservation_id': reservation['reservation_id'], 'attempt_id': prior_receipt['retry_attempt_id'],
         'native_identity_check': 'exact-command-parent-and-creation-time'}
     stop_ref = {'manifest_id': 'stop-' + digest(stop), 'sha256': digest(stop)}
     store.publish(stop_ref['manifest_id'], stop)

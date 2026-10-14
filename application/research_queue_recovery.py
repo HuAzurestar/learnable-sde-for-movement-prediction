@@ -36,7 +36,8 @@ def _published(store, reference):
 def _stop_evidence(store, reference):
     value = _published(store, reference)
     fields = {'schema_version', 'task_id', 'session_id', 'pid', 'created_at',
-              'stop_confirmed_at', 'native_child_count', 'native_identity_check'}
+              'stop_confirmed_at', 'native_child_count', 'native_identity_check',
+              'reservation_id', 'attempt_id'}
     _require(set(value) == fields and value['schema_version'] == STOP_SCHEMA
              and type(value['pid']) is int and value['pid'] > 1
              and type(value['native_child_count']) is int and value['native_child_count'] == 0
@@ -105,8 +106,13 @@ def resolve_prelaunch_cancellation(store, reference):
             'run_id', 'stop_evidence', 'event_hashes', 'worker_charged_ms'}
             and receipt['schema_version'] == SCHEMA and type(receipt['worker_charged_ms']) is int
             and receipt['worker_charged_ms'] == 0, 'prelaunch cancellation schema differs')
-        _stop_evidence(store, receipt['stop_evidence'])
+        stopped = _stop_evidence(store, receipt['stop_evidence'])
         events, reserve, queued, attempt = _unclaimed(store, receipt['reservation_id'])
+        _require(stopped['reservation_id'] == receipt['reservation_id']
+                 and stopped['attempt_id'] == receipt['attempt_id']
+                 and datetime.fromisoformat(stopped['stop_confirmed_at'])
+                     >= datetime.fromisoformat(queued['created_at']),
+                 'owner-stop evidence does not bind this queued reservation')
         selected = {}
         for name, kind in (('cancellation', 'QUEUE_PRELAUNCH_CANCELLED'), ('settlement', 'SETTLE'),
                            ('terminal', 'ATTEMPT')):
@@ -150,6 +156,10 @@ def cancel_unclaimed(store, reservation_id, *, stop_evidence):
         _require(not (store.path / 'recovery-hold.json').exists(), 'shared recovery hold remains')
         stopped = _stop_evidence(store, stop_evidence)
         events, reserve, queued, attempt = _unclaimed(store, reservation_id)
+        _require(stopped['reservation_id'] == reservation_id and stopped['attempt_id'] == attempt['attempt_id']
+                 and datetime.fromisoformat(stopped['stop_confirmed_at'])
+                     >= datetime.fromisoformat(queued['created_at']),
+                 'owner-stop evidence does not bind this queued reservation')
         cancellations = [e for e in events if e['event_id'] == event_id]
         payload = {'reservation_id': reservation_id, 'attempt_id': attempt['attempt_id'],
                    'run_id': attempt['run_id'], 'stop_evidence': deepcopy(stop_evidence),

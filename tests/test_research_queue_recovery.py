@@ -24,6 +24,7 @@ def pending(tmp_path):
         pid = owner.pid
     evidence = {'schema_version': 'pirc28-prelaunch-owner-stop-v1',
         'task_id': 'disposable-recovery-test', 'session_id': 'native-owner-only',
+        'reservation_id': reservation['reservation_id'], 'attempt_id': attempts[0],
         'pid': pid, 'created_at': created,
         'stop_confirmed_at': datetime.now(timezone.utc).isoformat(),
         'native_child_count': 0, 'native_identity_check': 'exact-command-parent-and-creation-time'}
@@ -48,7 +49,8 @@ def test_native_preclaim_stop_settles_only_own_zero_worker_cost_and_is_idempoten
     assert not any(e['event_kind'] in {'WORKER_STARTED', 'ARM_CLOSED'} for e in after)
 
 
-@pytest.mark.parametrize('fault', ['claimed', 'running', 'launch', 'prior-cost', 'live-owner', 'hold'])
+@pytest.mark.parametrize('fault', ['claimed', 'running', 'launch', 'prior-cost', 'live-owner', 'hold',
+                                 'other-attempt', 'other-reservation', 'earlier-stop'])
 def test_unsafe_prelaunch_recovery_is_refused_before_any_write(tmp_path, monkeypatch, fault):
     store, attempt_id, reservation, stop, queue = pending(tmp_path)
     if fault == 'claimed':
@@ -61,8 +63,17 @@ def test_unsafe_prelaunch_recovery_is_refused_before_any_write(tmp_path, monkeyp
         BudgetLedger(store).settle(reservation['reservation_id'], 17, outcome='FAILED')
     elif fault == 'live-owner':
         monkeypatch.setattr('infrastructure.process_tree.process_may_be_alive', lambda pid: True)
-    else:
+    elif fault == 'hold':
         (store.path / 'recovery-hold.json').write_text('{}')
+    else:
+        evidence = store.manifest(stop['manifest_id'])
+        if fault == 'earlier-stop':
+            evidence['created_at'] = '2026-01-01T00:00:00+00:00'
+            evidence['stop_confirmed_at'] = '2026-01-01T00:00:01+00:00'
+        else:
+            evidence['attempt_id' if fault == 'other-attempt' else 'reservation_id'] = 'f' * 64
+        stop = {'manifest_id': 'stop-' + digest(evidence), 'sha256': digest(evidence)}
+        store.publish(stop['manifest_id'], evidence)
     before = store.events()
     with pytest.raises(ResearchError):
         cancel_unclaimed(store, reservation['reservation_id'], stop_evidence=stop)
