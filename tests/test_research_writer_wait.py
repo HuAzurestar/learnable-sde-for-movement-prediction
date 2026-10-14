@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import infrastructure.research_store as module
-from infrastructure.research_store import ResearchError, file_lock
+from infrastructure.research_store import ResearchError, ResearchStore, file_lock
 
 
 def contention(monkeypatch):
@@ -39,3 +39,13 @@ def test_explicit_short_wait_still_refuses_the_owned_writer(tmp_path, monkeypatc
     with pytest.raises(ResearchError, match='WRITER_BUSY'):
         with file_lock(tmp_path / '.writer.lock', timeout=1):
             pytest.fail('writer exclusion was bypassed')
+
+
+def test_worker_store_default_inherits_merged_writer_wait(tmp_path, monkeypatch):
+    # The real worker constructs ResearchStore without operator CLI arguments.
+    # Merely increasing file_lock's default is ineffective if the store overrides it.
+    clock = contention(monkeypatch)
+    store = ResearchStore(tmp_path, 'worker-bootstrap-control', initialize=True)
+    assert store.lock_wait_seconds == 300
+    assert 20 <= clock.now < 21
+    assert store.events() == []

@@ -59,7 +59,7 @@ def require(ok, message):
         raise ResearchError("CONTRACT_MISMATCH", message)
 
 
-def connect(config_path, *, lock_wait_seconds=15):
+def connect(config_path, *, lock_wait_seconds=300):
     require(config_path.is_file() and not config_path.is_symlink(), "regular existing config required")
     raw = config_path.read_bytes()
     require(hashlib.sha256(raw).hexdigest() == CONFIG_HASH, "shared connection file changed")
