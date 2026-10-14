@@ -130,7 +130,10 @@ def test_workflow_preserves_versions_required_names_caps_and_full_verification()
     workflow = yaml.safe_load((root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
     jobs = workflow["jobs"]
     shards = jobs["python-shards"]
-    assert shards["timeout-minutes"] == jobs["python"]["timeout-minutes"] == 20
+    # A suite worker includes dependency setup and a complete module partition;
+    # the independent receipt verifier only recollects and checks coverage.
+    assert shards["timeout-minutes"] == 45
+    assert jobs["python"]["timeout-minutes"] == 20
     assert shards["strategy"]["fail-fast"] is False
     assert shards["strategy"]["matrix"] == {"python-version": ["3.10", "3.12"], "partition": [0, 1, 2, 3]}
     assert jobs["python"]["name"] == "test (${{ matrix.python-version }})"
