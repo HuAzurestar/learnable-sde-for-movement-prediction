@@ -134,10 +134,12 @@ def test_version_gate_also_requires_successful_shard_jobs_not_only_reports():
     jobs = workflow['jobs']
     assert jobs['required']['needs'] == ['policy', 'python']
     assert jobs['python']['name'] == 'test (${{ matrix.python-version }})'
-    assert jobs['python']['needs'] == ['python-suite']
+    assert jobs['python']['needs'] == ['python-shards']
     gate = next(step for step in jobs['python']['steps']
-                if step.get('name') == 'Require complete successful version inventory')
-    assert gate.get('env', {}).get('SUITES_RESULT') == '${{ needs.python-suite.result }}'
+                if step.get('name') == 'Require every suite worker to succeed')
+    assert gate.get('env', {}).get('SHARDS') == '${{ needs.python-shards.result }}'
     lines = gate['run'].strip().splitlines()
-    assert lines[0].strip() == 'test "$SUITES_RESULT" = success'
-    assert lines[1].strip().startswith('python scripts/pytest_shards.py verify --count 4 ')
+    assert lines == ['test "$SHARDS" = success']
+    verifier = next(step for step in jobs['python']['steps']
+                    if step.get('name') == 'Independently recollect and verify exhaustive coverage')
+    assert verifier['run'].startswith('python scripts/ci_pytest_partition.py verify --count 4 ')

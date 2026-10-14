@@ -59,7 +59,7 @@ def require(ok, message):
         raise ResearchError("CONTRACT_MISMATCH", message)
 
 
-def connect(config_path):
+def connect(config_path, *, lock_wait_seconds=15):
     require(config_path.is_file() and not config_path.is_symlink(), "regular existing config required")
     raw = config_path.read_bytes()
     require(hashlib.sha256(raw).hexdigest() == CONFIG_HASH, "shared connection file changed")
@@ -67,7 +67,8 @@ def connect(config_path):
     require(config["store_id"] == "pirc25-shared-research-v1"
             and "PIRC-27" in config["participants"], "original store/participant required")
     # Explicitly no initialize=True, no disposable-store fallback.
-    return ResearchStore(Path(config["runtime_root"]), config["store_id"])
+    return ResearchStore(Path(config["runtime_root"]), config["store_id"],
+                         lock_wait_seconds=lock_wait_seconds)
 
 
 def frozen_cells(arms):

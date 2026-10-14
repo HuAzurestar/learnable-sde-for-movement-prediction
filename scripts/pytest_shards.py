@@ -1,4 +1,8 @@
-"""Run the complete pytest inventory in disjoint, independently audited shards.
+"""Legacy shard runner/verifier retained for prior PIRC-28 CI receipts.
+
+Current CI uses ci_pytest_partition.py with module-stable partitions and an
+independently recollected full roster. Do not use this legacy verifier as the
+current required gate. Its historical receipt checks remain regression tested.
 
 Sharding changes placement only, not test bodies, marks, fixtures or deadlines.
 The required version check verifies all collected IDs were started exactly once

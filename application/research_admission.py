@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
-from .research_contracts import validate_package, validate_result, validate_failure
+from .research_contracts import validate_package, validate_result, validate_failure, invoke_validator
 from .research_data import EvaluationExposureLedger
 from .research_preregistration import PreregistrationGate, hash_reference, source_identity, validate_preregistration, protocol_binding
 from infrastructure.research_store import ResearchError, digest, encode, utc_now
@@ -32,13 +32,21 @@ def command_binding(builder):
 
 
 def plugin_binding(plugin):
-    value = {"plugin_id": plugin.plugin_id, "capabilities": sorted(plugin.capabilities),
+    binding = {"plugin_id": plugin.plugin_id, "capabilities": sorted(plugin.capabilities),
                    "state_order": list(plugin.state_order), "units": list(plugin.units),
                    "resume_level": plugin.resume_level, "command_hash": command_binding(plugin.command_builder),
                    "registry_entry_hash": digest(plugin.registry_entry.manifest())}
+    if plugin.pre_read_validator is not None:
+        binding["pre_read_validator_hash"] = command_binding(plugin.pre_read_validator)
+    if plugin.checkpoint_validator is not None:
+        binding["checkpoint_validator_hash"] = command_binding(plugin.checkpoint_validator)
+    if plugin.result_validator is not None:
+        binding["result_validator_hash"] = command_binding(plugin.result_validator)
+    if plugin.validator_store_context:
+        binding["validator_store_context"] = True
     if plugin.failure_validator is not None:
-        value['failure_validator_hash'] = command_binding(plugin.failure_validator)
-    return digest(value)
+        binding["failure_validator_hash"] = command_binding(plugin.failure_validator)
+    return digest(binding)
 
 
 class AdmissionGate:
@@ -262,6 +270,17 @@ class AdmissionGate:
             needs_prereg = mode == "formal" or block["split_role"] in {"test", "final-eval"}
             upstream_prereg = (self._document("preregistration", protocol.get("preregistration_hash"))
                                if needs_prereg else None)
+            if plugin.pre_read_validator is not None:
+                # Metadata-only consumer check before upstream/model artifact
+                # reads and the first scientific source verification. This
+                # neither qualifies a package nor replaces subsequent gates.
+                pre_read_documents = {"protocol": protocol, "package": package}
+                if model is not None:
+                    pre_read_documents["frozen_model"] = model
+                if upstream_prereg is not None:
+                    pre_read_documents["preregistration"] = upstream_prereg
+                invoke_validator(plugin, "pre_read_validator", self.store,
+                    {**receipt, "mode": mode, "documents": pre_read_documents})
             snapshot_evidence = prepare_upstream(self.store, spec, cell, package, upstream_prereg,
                                                 attempt_id=attempt_id, run_id=run["run_id"])
             documents = {"protocol": protocol, "authorization": grant, "package": package,
@@ -415,6 +434,8 @@ class AdmissionGate:
                 self.store.verify_artifact_read(calibrated["source_artifact"]["artifact_id"],
                     purpose="evaluate", authorization=calibrated["authorization"])
             result["admission_hash"] = receipt["admission_hash"]
+            if plugin.result_validator is not None:
+                invoke_validator(plugin, "result_validator", self.store, receipt, result)
         return validate
 
     def failure_validator(self, receipt, spec, cell, plugin):

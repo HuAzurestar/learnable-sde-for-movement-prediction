@@ -11,6 +11,7 @@ from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -200,7 +201,10 @@ def atomic_write(path: Path, content: bytes, *, before_replace=None, immutable=F
 
 
 @contextmanager
-def file_lock(path: Path, timeout: float = 15):
+def file_lock(path: Path, timeout: float = 300):
+    # Metadata publication can outlast 15s on an established Windows journal.
+    # Waiting is not compute exclusion: retain the same exclusive OS lock and
+    # independent worker/job watchdogs instead of failing a healthy admission.
     with path.open("a+b") as stream:
         stream.seek(0, os.SEEK_END)
         if stream.tell() == 0:
@@ -237,7 +241,12 @@ class ResearchStore:
     SCHEMA = "pirc25-contract-v1"
     TERMINAL = {"SUCCEEDED", "FAILED", "INTERRUPTED", "TIMEOUT", "BUDGET_EXHAUSTED", "PREFLIGHT_FAILED", "CANCELLED"}
 
-    def __init__(self, runtime_root: Path, store_id: str, *, initialize=False, allow_corrupt=False):
+    def __init__(self, runtime_root: Path, store_id: str, *, initialize=False, allow_corrupt=False,
+                 lock_wait_seconds=15):
+        if (type(lock_wait_seconds) not in (int, float)
+                or not math.isfinite(lock_wait_seconds) or not 0 <= lock_wait_seconds <= 3600):
+            raise ResearchError("CONTRACT_MISMATCH", "lock wait must be finite and between 0 and 3600 seconds")
+        self.lock_wait_seconds = lock_wait_seconds
         root = Path(runtime_root)
         if not root.is_absolute():
             raise ResearchError("CONTRACT_MISMATCH", "runtime root must be absolute")
@@ -274,7 +283,7 @@ class ResearchStore:
     def lock(self):
         if self._read_snapshot() is not None:
             return nullcontext()  # This thread still owns the outer OS lock.
-        return file_lock(self.path / ".writer.lock")
+        return file_lock(self.path / ".writer.lock", timeout=self.lock_wait_seconds)
 
     def _read_snapshot(self):
         snapshot = getattr(self._read_scope, 'snapshot', None)
@@ -611,7 +620,7 @@ class ResearchStore:
         if any(c.get("arm_id") not in {a["arm_id"] for a in arms} for c in spec["cells"]):
             raise ResearchError("CONTRACT_MISMATCH", "cell arm is not registered")
         object_id = "study-" + spec["study_id"]
-        with self.lock():
+        def verify_families():
             for event in self._events():
                 if event["event_kind"] != "MANIFEST" or not event["payload"]["object_id"].startswith("study-"):
                     continue
@@ -622,8 +631,16 @@ class ResearchStore:
                         same_family = all(registered[k] == proposed[k] for k in keys)
                         if (registered["arm_id"] == proposed["arm_id"]) != same_family:
                             raise ResearchError("IDENTITY_CONFLICT", "arm family cannot be relabeled to reset its budget")
+        # Reuse one physically verified prefix ONLY inside this owned writer
+        # scope. Otherwise every historical study lookup scans the full journal
+        # again, making registration quadratic in a real multi-study store.
+        # All actual manifests are still rehashed; final guards repeat on a fresh
+        # uncached physical prefix before the registration leaves this scope.
+        with self._read_transaction():
+            verify_families()
             sha = self._publish(object_id, {"spec": spec, "spec_hash": expected_hash})
             self._append("MANIFEST", {"object_id": object_id, "sha256": sha}, "manifest-" + digest([object_id, sha]))
+            self._read_completion(verify_families, lambda: None)
         return {"study_id": spec["study_id"], "experiment_id": spec["experiment_id"], "spec_hash": expected_hash}
 
     def register_run(self, study_id: str, cell: dict) -> str:

@@ -14,11 +14,13 @@ class BudgetSpec:
     job_seconds: float = 7200
     arm_seconds: int = 86400
     category: str = "job"
+    allocation_only: bool = False
 
     def validate(self):
         cap = {"smoke": 900, "pilot": 1800, "job": 7200}.get(self.category)
-        if (cap is None or not math.isfinite(self.job_seconds)
-                or not 0 < self.job_seconds <= cap or self.arm_seconds != 86400):
+        if (cap is None or type(self.allocation_only) is not bool or not math.isfinite(self.job_seconds)
+                or not 0 < self.job_seconds <= (86400 if self.allocation_only else cap)
+                or self.arm_seconds != 86400):
             raise ResearchError("CONTRACT_MISMATCH", "job/category or cumulative arm budget invalid")
 
 
@@ -41,17 +43,46 @@ class BudgetLedger:
         self.store = store
 
     def _state(self):
-        reservations, closed = {}, set()
-        for event in self.store._events():
+        reservations, closed, soft_arms, closures = {}, set(), set(), {}
+        events = self.store._events()
+        for event in events:
             data = event["payload"]
             if event["event_kind"] in {"RESERVE", "SETTLE"}:
                 reservations[data["reservation_id"]] = data
                 if event["event_kind"] == "SETTLE" and (
                         data["monotonic_elapsed_ms"] is None
-                        or data["outcome"] in {"TIMEOUT", "BUDGET_EXHAUSTED", "INTERRUPTED"}):
+                        or data["outcome"] == "BUDGET_EXHAUSTED"
+                        or (data["arm_id"] not in soft_arms
+                            and data["outcome"] in {"TIMEOUT", "INTERRUPTED"})):
                     closed.add(data["arm_id"])
             elif event["event_kind"] == "ARM_CLOSED":
                 closed.add(data["arm_id"])
+                closures.setdefault(data["arm_id"], []).append(event["hash"])
+            elif event["event_kind"] == "ARM_CONTINUATION":
+                from .research_continuation import approval
+                receipt = self.store._manifest(data["manifest_id"])
+                decision = approval(self.store, receipt["approval"])
+                arm = receipt["arm_id"]
+                costs = [r for r in reservations.values() if r["arm_id"] == arm]
+                used = sum(r["charged_ms"] if r["settled"] else r["reserved_ms"] for r in costs)
+                from datetime import datetime
+                approved_at = datetime.fromisoformat(event["created_at"])
+                stops = [e["hash"] for e in events[:event["sequence"] - 1]
+                         if e["event_kind"] in {"WORKER_TREE_STOPPED", "WORKER_STOP_CONFIRMED"}
+                         and e["payload"].get("reservation_id") in {r["reservation_id"] for r in costs}]
+                if (receipt.get("schema_version") != "pirc25-arm-continuation-v1"
+                        or digest(receipt) != data["sha256"] or arm not in decision["arm_ids"]
+                        or receipt["closed_event_hashes"] != closures.get(arm, [])
+                        or receipt["retained_cost_ms"] != used or used >= 86400000
+                        or receipt.get("stop_event_hashes") != stops
+                        or not datetime.fromisoformat(decision["work_started_at"]) <= approved_at
+                               < datetime.fromisoformat(decision["authorization_expires_at"]
+                                   if decision.get("work_deadline_policy") == "report-only"
+                                   else decision["work_deadline"])
+                        or not all(r["settled"] for r in costs)):
+                    raise ResearchError("CONTRACT_MISMATCH", "continuation cost/closure/approval differs")
+                closed.discard(arm)
+                soft_arms.add(arm)
         return reservations, closed
 
     def _balance(self, arm_id, *, resource_guarded=False, execution_policy=None,
@@ -74,19 +105,90 @@ class BudgetLedger:
 
     def balance(self, arm_id, *, execution_policy=None, source_code_hash=None,
                 attempt_id=None):
-        with (self.store._read_transaction() if execution_policy is not None else self.store.lock()):
+        # Both finite continuation and resource policy proofs use the same owned
+        # short scope; repeat all authority checks on the final physical prefix.
+        result = {}
+        def refresh():
             if execution_policy is not None:
                 from .research_execution_policy import resolve_policy
                 resolve_policy(self.store, execution_policy, arm_id=arm_id, source_code_hash=source_code_hash)
-            result = self._balance(arm_id, resource_guarded=execution_policy is not None,
-                                   execution_policy=execution_policy, source_code_hash=source_code_hash)
+            result.update(self._balance(arm_id, resource_guarded=execution_policy is not None,
+                                       execution_policy=execution_policy, source_code_hash=source_code_hash))
             if (result["closed"] and execution_policy is not None and attempt_id is not None
                     and not (self.store.path / "recovery-hold.json").exists()):
                 from .research_restart_adjudication import adjudication_for_attempt
                 adjudication_for_attempt(self.store, attempt_id, execution_policy=execution_policy,
                                          source_code_hash=source_code_hash)
                 result["closed"] = False
-            return result
+        with self.store._read_transaction():
+            refresh()
+            self.store._read_completion(refresh, lambda: None)
+        return result
+
+    def _continuation_policy(self, arm_id):
+        from .research_continuation import approval
+        reference = None
+        for event in self.store._events():
+            if event["event_kind"] == "ARM_CONTINUATION":
+                receipt = self.store._manifest(event["payload"]["manifest_id"])
+                if receipt["arm_id"] == arm_id:
+                    reference = receipt["approval"]
+        return None if reference is None else approval(self.store, reference, live=True)
+
+    def continue_arm(self, arm_id, *, approval_ref):
+        """Append bounded original-arm continuation after stopped/settled checks."""
+        from .research_continuation import approval
+        from infrastructure.process_tree import process_may_be_alive
+        with self.store._read_transaction():
+            decision = approval(self.store, approval_ref, live=True)
+            if arm_id not in decision["arm_ids"]:
+                raise ResearchError("UNAUTHORIZED_DATA", "arm continuation outside approval")
+            if (self.store.path / "recovery-hold.json").exists():
+                raise ResearchError("RECOVERY_REQUIRED", "recovery hold prohibits continuation")
+            event_id = "continue-" + digest([arm_id, approval_ref])
+            existing = [e for e in self.store._events() if e["event_id"] == event_id]
+            if existing:
+                self._state()
+                return existing[0]["payload"]
+            reservations, _ = self._state()
+            costs = [r for r in reservations.values() if r["arm_id"] == arm_id]
+            if not costs or any(not r["settled"] for r in costs):
+                raise ResearchError("RECOVERY_REQUIRED", "all original reservations must be settled")
+            used = sum(r["charged_ms"] for r in costs)
+            if used >= 86400000:
+                raise ResearchError("BUDGET_EXHAUSTED", "cumulative hard cap cannot be reopened")
+            events = self.store._events()
+            attempts = self.store._attempts()
+            stops = {e["payload"].get("reservation_id") for e in events
+                     if e["event_kind"] in {"WORKER_TREE_STOPPED", "WORKER_STOP_CONFIRMED"}}
+            relevant = {r["reservation_id"] for r in costs}
+            reuse_evidence = []
+            for worker_event in (e for e in events if e["event_kind"] == "WORKER_STARTED"
+                                 and e["payload"].get("reservation_id") in relevant):
+                worker = worker_event["payload"]
+                if (worker["reservation_id"] not in stops
+                        or attempts[worker["attempt_id"]]["state"] not in self.store.TERMINAL):
+                    raise ResearchError("RECOVERY_REQUIRED", "whole-tree stop/terminal proof absent")
+                if process_may_be_alive(worker.get("pid")):
+                    from .research_continuation import pid_reuse_observation
+                    reused = pid_reuse_observation(worker.get("pid"), worker_event["created_at"])
+                    if reused is None:
+                        raise ResearchError("WORKER_ACTIVE", "recorded worker may still be alive")
+                    reuse_evidence.append({**reused, "worker_event_hash": worker_event["hash"],
+                                           "reservation_id": worker["reservation_id"]})
+            receipt = {"schema_version": "pirc25-arm-continuation-v1", "arm_id": arm_id,
+                       "approval": approval_ref, "retained_cost_ms": used,
+                       "closed_event_hashes": [e["hash"] for e in events if e["event_kind"] == "ARM_CLOSED"
+                                              and e["payload"]["arm_id"] == arm_id],
+                       "stop_event_hashes": [e["hash"] for e in events
+                           if e["event_kind"] in {"WORKER_TREE_STOPPED", "WORKER_STOP_CONFIRMED"}
+                           and e["payload"].get("reservation_id") in relevant],
+                       "pid_reuse_evidence": reuse_evidence,
+                       "verified_prefix_hash": events[-1]["hash"]}
+            reference = {"manifest_id": "arm-continuation-" + digest(receipt), "sha256": digest(receipt)}
+            self.store.publish(reference["manifest_id"], receipt)
+            self.store._append("ARM_CONTINUATION", reference, event_id)
+            return reference
 
     def reserve(self, attempt_id: str, budget: BudgetSpec, *, worker_slot=0):
         budget.validate()
@@ -119,6 +221,9 @@ class BudgetLedger:
             if attempt["state"] != "REGISTERED":
                 raise ResearchError("CONTRACT_MISMATCH", "reservation requires registered attempt")
             balance = self._balance(run["arm_id"])
+            continuation_policy = self._continuation_policy(run["arm_id"])
+            if budget.allocation_only and continuation_policy is None:
+                raise ResearchError("UNAUTHORIZED_DATA", "soft allocation requires an approved continuation")
             if balance["closed"] or requested > balance["remaining_ms"]:
                 # Classify and persist rejection while still holding the same
                 # authority lock as the capacity check. No reservation exists
@@ -142,6 +247,13 @@ class BudgetLedger:
                     "attempt_id": attempt_id, "run_id": run["run_id"], "study_id": run["study_id"],
                     "reserved_ms": requested, "charged_ms": 0, "monotonic_elapsed_ms": None,
                     "worker_slot": worker_slot, "settled": False}
+            if continuation_policy is not None:
+                data["work_deadline"] = continuation_policy["work_deadline"]
+                # Explicit report-only opt-in never edits older approvals or
+                # reservations. Data permission expiry remains an execution cap.
+                if continuation_policy.get("work_deadline_policy") == "report-only":
+                    data["work_deadline_policy"] = "report-only"
+                    data["execution_deadline"] = continuation_policy["authorization_expires_at"]
             self.store._append("RESERVE", data, "reserve-" + reservation_id)
             return data
 
@@ -215,7 +327,12 @@ class BudgetLedger:
         data = {**reservation, "settled": True, "charged_ms": charged,
                 "monotonic_elapsed_ms": elapsed_ms, "outcome": outcome}
         self.store._append("SETTLE", data, "settle-" + reservation_id)
-        if (elapsed_ms is None or outcome in {"TIMEOUT", "BUDGET_EXHAUSTED", "INTERRUPTED"}
+        continued = any(e["event_kind"] == "ARM_CONTINUATION"
+                        and self.store._manifest(e["payload"]["manifest_id"])["arm_id"] == reservation["arm_id"]
+                        for e in self.store._events())
+        if (elapsed_ms is None or outcome == "BUDGET_EXHAUSTED"
+                or ((not continued or reservation["reserved_ms"] is None)
+                    and outcome in {"TIMEOUT", "INTERRUPTED"})
                 or (reservation["reserved_ms"] is not None
                     and self._balance(reservation["arm_id"])["remaining_ms"] == 0)):
             self.store._append("ARM_CLOSED", {"arm_id": reservation["arm_id"], "reason": outcome},
