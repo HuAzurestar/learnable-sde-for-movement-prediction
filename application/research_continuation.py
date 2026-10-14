@@ -29,6 +29,8 @@ def approval(store, reference, *, live=False):
             and value.get("public_export") is False,
             "registered continuation approval differs")
     try:
+        deadline_policy = value.get("work_deadline_policy", "hard-stop")
+        require(deadline_policy in {"hard-stop", "report-only"}, "unknown work deadline policy")
         start = datetime.fromisoformat(value["work_started_at"])
         deadline = datetime.fromisoformat(value["work_deadline"])
         expiry = datetime.fromisoformat(value["authorization_expires_at"])
@@ -36,8 +38,9 @@ def approval(store, reference, *, live=False):
                 and expiry.tzinfo is not None and 0 < (deadline - start).total_seconds() <= 86400
                 and expiry >= deadline, "bounded work/authorization window required")
         if live:
-            require(start <= datetime.now(timezone.utc) < deadline,
-                    "continuation work window expired", "UNAUTHORIZED_DATA")
+            execution_expiry = expiry if deadline_policy == "report-only" else deadline
+            require(start <= datetime.now(timezone.utc) < execution_expiry,
+                    "continuation execution authorization expired", "UNAUTHORIZED_DATA")
     except ResearchError:
         raise
     except (ValueError, KeyError, TypeError) as exc:

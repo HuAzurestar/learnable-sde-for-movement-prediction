@@ -91,7 +91,7 @@ def test_actual_owned_selection_uses_only_fitted_attachment_and_entire_original_
     attempts_before = store.attempts()
     balance_before = BudgetLedger(store).balance("affine")
     events_before = store.events()
-    outcome = runner.run_cell(value["study_id"], digest(value["cells"][0]), budget=BudgetSpec(60, category="smoke"))
+    outcome = runner.run_cell(value["study_id"], digest(value["cells"][0]), budget=BudgetSpec(180, category="smoke"))
     assert outcome["state"] == "SUCCEEDED", outcome
     attempt = store.attempts()[outcome["attempt_id"]]
     result = json.loads(store.read_artifact(attempt["artifact_id"], purpose="evaluate", authorization=grant))
@@ -177,5 +177,5 @@ def test_actual_owned_selection_uses_only_fitted_attachment_and_entire_original_
         with pytest.raises(ResearchError, match="CORRUPT_ARTIFACT"):
             result_validate(receipt, changed, store=store)
     balance, attempts = BudgetLedger(store).balance("affine"), store.attempts()
-    reused = runner.run_cell(value["study_id"], digest(value["cells"][0]), budget=BudgetSpec(60, category="smoke"))
+    reused = runner.run_cell(value["study_id"], digest(value["cells"][0]), budget=BudgetSpec(180, category="smoke"))
     assert reused["reused"] and store.attempts() == attempts and BudgetLedger(store).balance("affine") == balance

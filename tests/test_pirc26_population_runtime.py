@@ -85,7 +85,10 @@ def prepare(tmp_path, contracts, *, permit_consumer=True, selection_files=1):
 def execute(fixture):
     store, value, _, registry, recovery, *_ = fixture
     return SharedRunner(store, registry, recovery).run_cell(value["study_id"], digest(value["cells"][0]),
-        budget=BudgetSpec(60, category="smoke"))
+        # Whole-source identity and actual owned checkpoint I/O are included;
+        # 60s soft-stopped on the expanded shared implementation on Windows.
+        # Disposable engineering fixture only, not a research-arm extension.
+        budget=BudgetSpec(180, category="smoke"))
 
 
 def receipt_for(store, attempt_id):

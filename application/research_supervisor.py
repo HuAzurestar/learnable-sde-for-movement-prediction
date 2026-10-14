@@ -33,9 +33,10 @@ class ResearchSupervisor:
         try:
             queue.enqueue(reservation, run["cell"].get("resource_class", "cpu"))
             while queue.claim(reservation["reservation_id"], resource_sharing=resource_sharing) is None:
-                if (reservation.get("work_deadline") and datetime.fromisoformat(reservation["work_deadline"])
+                execution_expiry = reservation.get("execution_deadline", reservation.get("work_deadline"))
+                if (execution_expiry and datetime.fromisoformat(execution_expiry)
                         <= datetime.now(timezone.utc)):
-                    raise ResearchError("UNAUTHORIZED_DATA", "approved work window expired while queued")
+                    raise ResearchError("UNAUTHORIZED_DATA", "execution authorization expired while queued")
                 time.sleep(0.05)
         except BaseException as exc:
             # A duplicate caller must not release the original worker's claim.
@@ -62,9 +63,10 @@ class ResearchSupervisor:
             raise
         start = self.monotonic()
         allocation_seconds = budget.job_seconds
-        if reservation.get("work_deadline"):
+        execution_expiry = reservation.get("execution_deadline", reservation.get("work_deadline"))
+        if execution_expiry:
             allocation_seconds = min(allocation_seconds, max(0,
-                (datetime.fromisoformat(reservation["work_deadline"]) - datetime.now(timezone.utc)).total_seconds()))
+                (datetime.fromisoformat(execution_expiry) - datetime.now(timezone.utc)).total_seconds()))
         deadline = start + allocation_seconds
         from infrastructure.research_control import CheckpointExchange, ControlError, ENVIRONMENT
         channel = CheckpointExchange(work, attempt_id, deadline, maximum_result_bytes) if checkpoint_handler is not None else None

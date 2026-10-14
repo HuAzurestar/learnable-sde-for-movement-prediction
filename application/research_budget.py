@@ -62,7 +62,9 @@ class BudgetLedger:
                         or receipt["retained_cost_ms"] != used or used >= 86400000
                         or receipt.get("stop_event_hashes") != stops
                         or not datetime.fromisoformat(decision["work_started_at"]) <= approved_at
-                               < datetime.fromisoformat(decision["work_deadline"])
+                               < datetime.fromisoformat(decision["authorization_expires_at"]
+                                   if decision.get("work_deadline_policy") == "report-only"
+                                   else decision["work_deadline"])
                         or not all(r["settled"] for r in costs)):
                     raise ResearchError("CONTRACT_MISMATCH", "continuation cost/closure/approval differs")
                 closed.discard(arm)
@@ -201,6 +203,11 @@ class BudgetLedger:
                     "worker_slot": worker_slot, "settled": False}
             if continuation_policy is not None:
                 data["work_deadline"] = continuation_policy["work_deadline"]
+                # Explicit report-only opt-in never edits older approvals or
+                # reservations. Data permission expiry remains an execution cap.
+                if continuation_policy.get("work_deadline_policy") == "report-only":
+                    data["work_deadline_policy"] = "report-only"
+                    data["execution_deadline"] = continuation_policy["authorization_expires_at"]
             self.store._append("RESERVE", data, "reserve-" + reservation_id)
             return data
 

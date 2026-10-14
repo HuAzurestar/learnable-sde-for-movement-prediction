@@ -768,3 +768,14 @@ source-bound result. Registration, data/admission checks, native containment,
 job/arm accounting, integrity checks and recovery holds remain in force.
 This permission changes compute admission capacity, not data freezing, scientific
 qualification, available physical hardware or acceptance of a research result.
+
+### Explicit report-only delivery deadline
+
+A continuation approval may explicitly opt into
+`work_deadline_policy="report-only"`. Its original `work_deadline` is retained
+for overdue reporting, not silently extended or used to stop a funded worker.
+The distinct `authorization_expires_at` remains the execution limit and does
+not itself extend any source grant. Reservations record both dates; the
+supervisor still enforces the allocated job duration, original cumulative
+24-hour arm cap, native containment and all data checks. Missing policy keeps
+the historical hard-window behavior; unknown policy values are rejected.
