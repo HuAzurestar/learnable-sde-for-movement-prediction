@@ -134,3 +134,37 @@ pending[0]();await first;await settle();assert.equal(image(root),current);
 assert.equal(urls.length,1,'stale preview must not retain a blob URL');
 assert.equal(await urls[0].text(),contents[entries[2].sha256]);
 """)
+
+
+@pytest.mark.parametrize("known", [False, True])
+def test_shared_preparation_is_frozen_once_and_not_filtered_per_horizon(known):
+    run_script("const known=" + json.dumps(known) + r""";
+const captures=[];context.table=(headers,rows)=>{const v=new Element('table');v.headers=headers;v.rows=rows;captures.push(v);return v;};
+aggregate.calibration_evidence_hash='e'.repeat(64);
+aggregate.calibration_status_counts={CALIBRATED:1,FAILED:2,UNAVAILABLE:1};
+aggregate.calibration_cost={unique_attempts:2,scope:'unique-source-attempts-not-per-target',
+  charged_ms:known?23:null,reserved_ms:known?0:null,measured_ms:known?23:null,
+  sources:[{store_id:'original-store',attempt_id:'failed-parent',state:'PREFLIGHT_FAILED',status:'UNAVAILABLE',charged_ms:null,reserved_ms:null,measured_ms:null,event_hash:null},
+    {store_id:'original-store',attempt_id:'paid-failure',state:'FAILED',status:'MEASURED',charged_ms:23,reserved_ms:0,measured_ms:23,event_hash:'f'.repeat(64)}]};
+const original=JSON.stringify(aggregate),root=new Element('root');await context.showComparison(root,data);await settle();
+const shared=()=>descendants(root).filter(v=>v.id==='comparison-calibration-preparation');
+assert.equal(shared().length,1);assert.match(messages(shared()[0]),/Unknown is not zero/);
+assert.match(messages(shared()[0]),/not method qualification or independent scientific replication/);
+const globalCost=descendants(shared()[0]).find(v=>v.headers?.[0]==='Charged slot-ms');
+assert.deepEqual(Array.from(globalCost.rows[0]),known?[23,0,23]:['Unknown','Unknown','Unknown']);
+const originalCosts=descendants(shared()[0]).find(v=>v.headers?.[0]==='Store / original attempt');
+assert.equal(originalCosts.rows.length,2);assert.equal(originalCosts.rows[0][2],'UNAVAILABLE');
+assert.equal(originalCosts.rows[0][3],'Unknown');assert.equal(originalCosts.rows[1][3],23);
+selectors['comparison-horizon'].value='2';await selectors['comparison-horizon'].changed();await settle();
+assert.equal(shared().length,1);assert.equal(JSON.stringify(aggregate),original);
+assert.equal(requests.length,2,'preparation display must not request source replay');
+""")
+
+
+def test_legacy_comparison_does_not_invent_preparation():
+    run_script(r"""
+const root=new Element('root');await context.showComparison(root,data);await settle();
+assert.equal(descendants(root).filter(v=>v.id==='comparison-calibration-preparation').length,0);
+aggregate.calibration_evidence_hash='e'.repeat(64);
+await assert.rejects(context.showComparison(root,data),/Incomplete frozen calibration/);
+""")

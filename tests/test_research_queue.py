@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from application.research_budget import BudgetLedger, BudgetSpec
-from application.research_queue import ResearchQueue
+from application.research_queue import ResearchQueue, SHARED_CPU_POLICY
 from infrastructure.research_store import ResearchStore, ResearchError, digest
 from tests.test_research_store import spec
 
@@ -58,3 +58,29 @@ def test_concurrent_duplicate_claim_cannot_launch_twice(tmp_path):
     assert queue.claim(reservations[2]["reservation_id"])["slot"] == 0
     with pytest.raises(ResearchError, match="closed"):
         queue.claim(reservations[1]["reservation_id"])
+
+
+def test_explicit_shared_cpu_policy_overcommits_without_releasing_foreign_claim(tmp_path):
+    store, ledger, queue, reservations = fixture(tmp_path)
+    ids = [r["reservation_id"] for r in reservations]
+    first = queue.claim(ids[0])
+    assert first["slot"] == 0
+
+    shared = queue.claim(ids[2], resource_sharing=SHARED_CPU_POLICY)
+    assert shared["slot"] == 1
+    assert shared["resource_sharing"] == SHARED_CPU_POLICY
+    assert shared["configured_slots"] == 1
+
+    state, _ = ledger._state()
+    assert not state[ids[0]]["settled"]
+    assert not state[ids[2]]["settled"]
+
+
+def test_shared_resource_policy_is_explicit_and_cpu_only(tmp_path):
+    store, _, queue, reservations = fixture(tmp_path)
+    with pytest.raises(ResearchError, match="unknown resource-sharing"):
+        queue.claim(reservations[0]["reservation_id"], resource_sharing="unreviewed")
+
+    # A malformed policy fails before a claim is published, so the original
+    # reservation can still acquire the ordinary exclusive slot.
+    assert queue.claim(reservations[0]["reservation_id"])["slot"] == 0

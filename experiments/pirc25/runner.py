@@ -30,6 +30,10 @@ class SharedRunner:
         if len(cells) != 1:
             raise ResearchError("CONTRACT_MISMATCH", "cell not registered")
         cell = cells[0]
+        from application.research_disposition import declared_execution_disposition, record_declared_refusal
+        if declared_execution_disposition(cell) is not None:
+            return record_declared_refusal(self.store, study_id, cell,
+                parent_attempt_id=parent_attempt_id, reason=reason)
         plugin = resolve_execution(self.registry, cell)
         checkpoint_handler = None
         if self.recovery_registry is not None and plugin.resume_level != "restart-only":

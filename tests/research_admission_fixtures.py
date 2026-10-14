@@ -64,8 +64,16 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
                   upstream_dependencies=None, pirc22_cutover=None, upstream_visibility="synthetic", legacy_upstream=True,
                   execution_components=None, input_content=None, package_payload=None, split_role=None,
                   input_block_metadata=None, input_data_root=None,
-                  protocol_id="inputs", authorization_id="execution-fixture"):
-    bind_fixture_execution(value, plugin, execution_config, execution_inputs, execution_components)
+                  protocol_id="inputs", authorization_id="execution-fixture",
+                  fixture_prefix="", primary_metrics=None,
+                  preregistration_extra=None, preserve_execution=False):
+    if preserve_execution:
+        from application.research_execution import execution_plan
+        for cell in value["cells"]:
+            if cell.get("plugin_id") == plugin.plugin_id:
+                execution_plan(value, cell, plugin)
+    else:
+        bind_fixture_execution(value, plugin, execution_config, execution_inputs, execution_components)
     # Explicit engineering-only frozen metadata. These synthetic attestations
     # never claim acceptance of real PIRC-19--22 inputs or grant data access.
     if upstream_inputs is None:
@@ -101,17 +109,18 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
                              else [record["object_id"] for record in upstream_inputs])} for cell in value["cells"]]})
     snapshot_hash = store.publish("upstream-snapshot-" + snapshot.snapshot_hash, snapshot.definition)
     content = b"explicit synthetic plugin input" if input_content is None else input_content
-    (root / "plugin-input.bin").write_bytes(content)
+    input_filename = fixture_prefix+"plugin-input.bin"
+    (root / input_filename).write_bytes(content)
     blocks = [{"block_id": block, "dataset_id": "synthetic", "release_id": "v1",
                "source_block_id": block, "sha256": hashlib.sha256(content).hexdigest(),
-               "path": "plugin-input.bin", "split_role": split_role or ("final-eval" if formal else "train"),
+               "path": input_filename, "split_role": split_role or ("final-eval" if formal else "train"),
                "fit_scope": not formal and split_role in (None, "train"),
                **({"size_bytes": len(content)} if input_content is not None else {})}
               for block in sorted({cell["block_id"] for cell in value["cells"]})]
     if input_block_metadata is not None:
         assert len(blocks) == 1 and input_block_metadata["block_id"] == blocks[0]["block_id"]
         blocks = [dict(input_block_metadata)]
-    protocol = {"schema_version": "pirc25-data-protocol-v1", "protocol_id": protocol_id,
+    protocol = {"schema_version": "pirc25-data-protocol-v1", "protocol_id": fixture_prefix+protocol_id,
                 "study_id": value["study_id"], "blocks": blocks}
     if formal:
         gate = PreregistrationGate(store)
@@ -121,18 +130,18 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
         protocol["history_hash"] = gate.import_history(report, digest(report))
         plan = {"schema_version": "pirc25-preregistration-v1", "test_mode": "blind",
                 "study_ids": [value["study_id"]], "protocol_bindings": [protocol_binding(protocol)],
-                "primary_metrics": ["error"], "selection_rule": "fixed synthetic adapters",
+                "primary_metrics": primary_metrics or ["error"], "selection_rule": "fixed synthetic adapters",
                 "stopping_rule": "fixed matrix", "qualification_checks": ["contract"],
                 "upstream_bindings": {value["study_id"]: study_binding(snapshot_hash, catalog_hash, study)},
                 "comparisons": [{"reference": value["arms"][0]["arm_id"],
-                                 "candidates": [a["arm_id"] for a in value["arms"][1:]]}]}
+                                 "candidates": [a["arm_id"] for a in value["arms"][1:]]}], **(preregistration_extra or {})}
         protocol["preregistration_hash"] = gate.register_preregistration(plan, digest(plan))
         value["comparison_plan"] = {"reference_arm_id": value["arms"][0]["arm_id"],
             "candidate_arm_ids": [a["arm_id"] for a in value["arms"][1:]],
             "preregistration_hash": digest(plan), "failure_policy": "retain-and-exclude-incomplete-blocks"}
     EvaluationExposureLedger(store).register_protocol(protocol, digest(protocol))
     value.update(code_hash=code_hash(), protocol_hash=digest(protocol), data_hash=data_binding(protocol))
-    grant = {"authorization_id": authorization_id, "study_id": value["study_id"],
+    grant = {"authorization_id": fixture_prefix+authorization_id, "study_id": value["study_id"],
         "expires_at": "2099-01-01T00:00:00+00:00", "evidence_hash": digest("explicit synthetic operator grant"),
         "protocol_hash": digest(protocol), "data_root": str(root if input_data_root is None else input_data_root), "test_authorization": formal,
         "purposes": ["fit", "select", "validate", "execute", "evaluate", "preview", "export", "resume"],
@@ -164,7 +173,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
             "checks": [{"check_id": "contract", "artifact_id": artifact["artifact_id"]}]}
         package["qualification_hash"] = store.publish("qualification-" + digest(qualification), qualification)
     reference = store.publish("package-" + digest(package), package)
-    value["admission"] = {"mode": "formal" if formal else "fixture", "protocol_id": protocol_id,
+    value["admission"] = {"mode": "formal" if formal else "fixture", "protocol_id": protocol["protocol_id"],
         "authorization_id": grant["authorization_id"], "package_hash": reference,
         "upstream_snapshot_hash": snapshot_hash, "upstream_acceptance_hash": catalog_hash, "upstream_root": str(root),
         "upstream_ids": list(upstream_ids), "upstream_hash": upstream["manifest_hash"],
