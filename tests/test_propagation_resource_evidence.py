@@ -141,7 +141,8 @@ def exported(recorded):
 
 
 @pytest.mark.parametrize("mutation", ["unit", "scope", "counter", "negative", "boolean", "cpu-zero",
-    "unknown-zero", "resumed", "source-code", "extra-packet", "history", "missing-usage", "peak-sum", "settlement", "publication"])
+    "unknown-zero", "resumed", "source-code", "extra-packet", "history", "missing-usage", "peak-sum", "settlement", "publication",
+    "strip-registration", "empty-registration", "strip-both"])
 def test_independent_reader_refuses_resealed_invalid_resources(exported, mutation):
     bundle = deepcopy(exported)
     row = bundle["cells"][0]
@@ -182,6 +183,13 @@ def test_independent_reader_refuses_resealed_invalid_resources(exported, mutatio
         source["settlement_event"]["payload"]["charged_ms"] = 0
         source["settlement_event"]["hash"] = digest({k: v for k, v in source["settlement_event"].items() if k != "hash"})
         source["publication_event"]["payload"]["settlement_event_hash"] = source["settlement_event"]["hash"]
+    elif mutation in {"strip-registration", "empty-registration", "strip-both"}:
+        if mutation == "empty-registration":
+            row["registered_cell"] = {}
+        else:
+            del row["registered_cell"]
+        if mutation == "strip-both":
+            del row["resource_usage"]
     else:
         source["publication_event"]["sequence"] = 1
     # Reseal every outer transport/content pointer. Refusal must come from the
