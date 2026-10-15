@@ -566,6 +566,7 @@ class AdmissionGate:
         from .research_supervisor import ResearchSupervisor
         admitted = {}
         resource_plan = {}
+        observed = {}
         def command(output):
             try:
                 mode = "fixture" if builtin_fixture else spec.get("admission", {}).get("mode")
@@ -584,9 +585,24 @@ class AdmissionGate:
                 command = [*command, "--admission-hash", admitted["admission_hash"]]
             return command
         def validate(result):
-            return self.result_validator(admitted, spec, cell, plugin)(result)
+            self.result_validator(admitted, spec, cell, plugin)(result)
+            if "resource_observation_policy" in cell:
+                observed["packet"] = json.loads(encode(result["resource_observation"]))
         def checkpoint(state, progress, deadline):
             return checkpoint_handler(state, progress, admitted, deadline)
-        return ResearchSupervisor(self.store).run(attempt_id, command, budget, result_validator=validate,
-            resource_plan=resource_plan, checkpoint_handler=checkpoint if checkpoint_handler is not None else None,
-            resource_sharing=cell.get("resource_sharing"))
+        try:
+            outcome = ResearchSupervisor(self.store).run(attempt_id, command, budget, result_validator=validate,
+                resource_plan=resource_plan, checkpoint_handler=checkpoint if checkpoint_handler is not None else None,
+                resource_sharing=cell.get("resource_sharing"))
+        except BaseException:
+            if "resource_observation_policy" in cell:
+                try:
+                    from .propagation_resource_evidence import record_observation
+                    record_observation(self.store, attempt_id, spec, cell, admitted)
+                except Exception:
+                    pass  # Preserve the original owner failure; export retains unknown.
+            raise
+        if "resource_observation_policy" in cell:
+            from .propagation_resource_evidence import record_observation
+            record_observation(self.store, attempt_id, spec, cell, admitted, validated_packet=observed.get("packet"))
+        return outcome
