@@ -121,7 +121,7 @@ def export_evidence(store: ResearchStore, study_id: str, authorization: dict):
 
 
 def _export_data_snapshot(store, *, after=(), publication=None):
-    kinds = {"MANIFEST", "ATTEMPT", "RESERVE", "SETTLE", "ARM_CLOSED", "RECOVERY_HOLD"}
+    kinds = {"MANIFEST", "ATTEMPT", "RESERVE", "SETTLE", "ARM_CLOSED", "RECOVERY_HOLD", "PROPAGATION_RESOURCE_RECORDED"}
     result, publications = [], 0
     last_sequence = after[-1][0] if after else 0
     for event in store.events():
@@ -231,6 +231,10 @@ def _assemble_evidence(store, study_id, authorization):
         run = store.manifest("run-" + attempt["run_id"])
         if run["study_id"] == study_id:
             runs.setdefault(run["cell_hash"], []).append(attempt)
+    resource_index = None
+    if any("resource_observation_policy" in cell for cell in spec["cells"]):
+        from .propagation_resource_evidence import ResourceEventIndex
+        resource_index = ResourceEventIndex(cost_events)
     cells = []
     for cell in spec["cells"]:
         history = runs.get(digest(cell), [])
@@ -245,6 +249,9 @@ def _assemble_evidence(store, study_id, authorization):
                "history": [{"attempt_id": a["attempt_id"], "state": a["state"], "error_code": a["error_code"]} for a in history],
                "metrics": None, "metric_units": None, "qualification": None,
                "cost": frozen_cost(history, cost_events)}
+        if "resource_observation_policy" in cell:
+            from .propagation_resource_evidence import resource_history
+            row["resource_usage"] = resource_history(store, spec, cell, history, authorization, index=resource_index)
         if successful:
             result = json.loads(store.read_artifact(latest["artifact_id"], purpose="export", authorization=authorization))
             if result["spec_hash"] != digest(spec) or result["cell_hash"] != digest(cell):
