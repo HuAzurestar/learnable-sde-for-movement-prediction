@@ -16,6 +16,24 @@ MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 MAX_OPERATIONS = 20_000_000
 
 
+def computation_input_key(kind):
+    if type(kind) is not str or kind not in {"aggregate", "bundle"}:
+        raise ResearchError("CONTRACT_MISMATCH", "comparison input kind must be aggregate or bundle")
+    return "input_bundle_hash" if kind == "bundle" else "input_aggregate_hash"
+
+
+def computation_input(reference):
+    if type(reference) is not dict:
+        raise ResearchError("CONTRACT_MISMATCH", "comparison input reference must be an object")
+    kind = reference.get("input_kind", "aggregate")
+    key = computation_input_key(kind)
+    other = "input_aggregate_hash" if kind == "bundle" else "input_bundle_hash"
+    if (type(reference.get(key)) is not str or not reference[key] or other in reference
+            or kind == "bundle" and reference[key] != reference.get("source_bundle_hash")):
+        raise ResearchError("CONTRACT_MISMATCH", "comparison input reference is mixed or incomplete")
+    return key, kind
+
+
 def paper_identity(root):
     root = Path(os.path.abspath(root))
     directory = root / "scripts" / "pirc25"
@@ -149,6 +167,11 @@ def _verified_computation(store, reference, *, receipt=None, aggregate=None):
             raise ResearchError("CORRUPT_ARTIFACT", "computation has no successful authoritative attempt")
         run = store._manifest("run-" + attempt["run_id"])
         origin = store._manifest("study-" + run["study_id"])["spec"]["computation_origin"]
+        input_key, input_kind = computation_input(reference)
+        other_input = "input_aggregate_hash" if input_kind == "bundle" else "input_bundle_hash"
+        if (origin.get("input_kind", "aggregate") != input_kind or request.get("input_kind", "aggregate") != input_kind
+                or other_input in origin):
+            raise ResearchError("CORRUPT_ARTIFACT", "computation input kind changed")
         enabled = request.get("include_resource_summaries", False)
         if (type(enabled) is not bool or origin.get("include_resource_summaries", False) is not enabled
                 or request["resource_plan"].get("include_resource_summaries", False) is not enabled
@@ -156,7 +179,7 @@ def _verified_computation(store, reference, *, receipt=None, aggregate=None):
             raise ResearchError("CORRUPT_ARTIFACT", "computation resource opt-in changed")
         if (run["spec_hash"] != reference["computation_spec_hash"] or run["arm_id"] != proof["cost"]["arm_id"] or
                 run["study_id"] != request["computation_study_id"] or
-                origin["input_aggregate_hash"] != reference["input_aggregate_hash"] or
+                origin[input_key] != reference[input_key] or
                 origin["source_bundle_hash"] != reference["source_bundle_hash"] or
                 origin["paper_identity"] != request["paper_identity"] or origin["formal"] != request["formal"] or
                 attempt["artifact_id"] != proof["result_artifact_id"]):
@@ -205,9 +228,10 @@ def _verify_job_cost(store, reference, run, proof):
 
 
 def verified_computation(store, reference, *, receipt=None, aggregate=None):
+    computation_input(reference)
     if not isinstance(reference, dict) or not all(isinstance(reference.get(key), str) for key in (
             "manifest_id", "request_manifest_id", "attempt_id", "run_id", "computation_spec_hash",
-            "reservation_id", "input_aggregate_hash", "source_bundle_hash", "allocation")):
+            "reservation_id", "source_bundle_hash", "allocation")):
         raise ResearchError("CONTRACT_MISMATCH", "managed comparison reference is incomplete")
     try:
         return _verified_computation(store, reference, receipt=receipt, aggregate=aggregate)

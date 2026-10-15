@@ -10,7 +10,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from application.research_computation import paper_identity, comparison_plan, MAX_INPUT_BYTES, MAX_OUTPUT_BYTES
+from application.research_computation import paper_identity, comparison_plan, computation_input, MAX_INPUT_BYTES, MAX_OUTPUT_BYTES
 from experiments.pirc25.affine import code_hash
 from infrastructure.research_store import atomic_write, digest, encode
 
@@ -47,6 +47,11 @@ def main():
             code_hash() != request["runtime_code_hash"] or paper_identity(args.paper_root) != request["paper_identity"]):
         raise ValueError("computation code/source binding changed")
     enabled = request.get("include_resource_summaries", False)
+    reference = request["computation_ref"]
+    if "input_kind" in request or "input_kind" in reference or "input_bundle_hash" in reference:
+        _, kind = computation_input(reference)
+        if request.get("input_kind", "aggregate") != kind:
+            raise ValueError("computation input kind changed")
     if comparison_plan(bundle, request["resource_plan"]["maximum_operations"],
                        include_resource_summaries=enabled) != request["resource_plan"]:
         raise ValueError("RESOURCE_PLAN_REJECTED computation allocation differs from frozen source")

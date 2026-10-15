@@ -868,3 +868,23 @@ unqualified; a saved pilot pass is neither a new-code pass nor a distribution
 guarantee. Generic nonformal bundle validation does not claim these additional
 reports were verified. Actual statistical aggregation/figures still require
 their own funded comparison worker; this export adds no managed analysis proof.
+
+### First managed comparison from a frozen source bundle
+
+`compare-bundle STUDY BUNDLE_HASH --paper-root PATH --authorization-id ID`
+and `ComparisonRunner.run_bundle` start the first paid analysis directly from
+the existing immutable owner export. No standalone/unfunded aggregate or fake
+comparison package is needed beforehand. The complete registered source matrix,
+typed cell identities, original study and current export authority are checked
+before registration/reservation. Computation remains inside the same bounded
+OS worker, charges the original frozen reference arm and preserves its cap.
+The caller must also retain any narrower project-wide aggregate spending cap.
+
+Raw-bundle provenance explicitly freezes `input_kind: bundle` and
+`input_bundle_hash` into the computation origin/reference/request, distinct from
+legacy `input_aggregate_hash`. Mixed/stripped modes and source substitutions
+refuse; no bundle hash impersonates an aggregate hash. Legacy `compare` defaults
+and serialized reference shape remain unchanged. The same settled result may
+be reused exactly without a new worker or fee; a failed job is not retried
+automatically. Statistical/figure operation and byte caps, visibility, fresh
+publication guards and optional resource-summary scope are unchanged.

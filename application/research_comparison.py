@@ -10,7 +10,7 @@ import sys
 
 from application.research_budget import BudgetSpec
 from application.research_computation import (MAX_INPUT_BYTES, MAX_OUTPUT_BYTES, MAX_OPERATIONS,
-    comparison_plan, paper_identity, verified_computation)
+    comparison_plan, paper_identity, verified_computation, computation_input_key, computation_input)
 from application.research_evidence import (accept_evidence_package, authorize_evidence_publication,
     authorize_study, evidence_visibility,
     export_evidence, expected_metrics_csv, expected_paper_index)
@@ -26,6 +26,11 @@ class ComparisonRunner:
 
     def _validate_result(self, value, request, bundle):
         try:
+            reference = request["computation_ref"]
+            if "input_kind" in request or "input_kind" in reference or "input_bundle_hash" in reference:
+                _, kind = computation_input(reference)
+                if request.get("input_kind", "aggregate") != kind:
+                    raise ResearchError("CONTRACT_MISMATCH", "comparison input kind changed")
             aggregate = value["aggregate"]
             from application.propagation_resource_summary import validate_resource_summaries
             enabled = request.get("include_resource_summaries", False)
@@ -66,25 +71,38 @@ class ComparisonRunner:
 
     def _prepare_locked(self, study_id, input_aggregate_hash, *, authorization_id,
             max_operations, formal, parent_attempt_id, reason, authorization_version,
-            include_resource_summaries=False):
+            include_resource_summaries=False, input_kind="aggregate"):
+        input_key = computation_input_key(input_kind)
+        input_fields = {input_key: input_aggregate_hash,
+            **({"input_kind": "bundle"} if input_kind == "bundle" else {})}
         grant = self.store.authorization(authorization_id, version=authorization_version)
         authorize_study(self.store, study_id, grant, "export")
-        source = self.store.manifest("comparison-" + input_aggregate_hash)
-        if source["study_id"] != study_id:
-            raise ResearchError("UNAUTHORIZED_DATA", "comparison input is outside authorized study")
-        metadata = self.store.manifest("artifact-" + source["aggregate_id"])
-        if metadata["size_bytes"] > MAX_INPUT_BYTES:
-            raise ResearchError("RESOURCE_PLAN_REJECTED", "frozen aggregate input exceeds byte quota")
-        aggregate = json.loads(self.store.read_artifact(source["aggregate_id"], purpose="export", authorization=grant))
-        if aggregate["aggregate_hash"] != input_aggregate_hash:
-            raise ResearchError("CORRUPT_ARTIFACT", "input aggregate identity changed")
-        bundle = self.store.manifest("bundle-" + aggregate["source_bundle_hash"])
+        if input_kind == "bundle":
+            bundle = self.store.manifest("bundle-" + input_aggregate_hash)
+            if bundle.get("study_id") != study_id:
+                raise ResearchError("UNAUTHORIZED_DATA", "bundle input is outside authorized study")
+            if bundle.get("bundle_hash") != input_aggregate_hash:
+                raise ResearchError("CORRUPT_ARTIFACT", "frozen bundle input identity changed")
+        else:
+            source = self.store.manifest("comparison-" + input_aggregate_hash)
+            if source["study_id"] != study_id:
+                raise ResearchError("UNAUTHORIZED_DATA", "comparison input is outside authorized study")
+            metadata = self.store.manifest("artifact-" + source["aggregate_id"])
+            if metadata["size_bytes"] > MAX_INPUT_BYTES:
+                raise ResearchError("RESOURCE_PLAN_REJECTED", "frozen aggregate input exceeds byte quota")
+            aggregate = json.loads(self.store.read_artifact(source["aggregate_id"], purpose="export", authorization=grant))
+            if aggregate["aggregate_hash"] != input_aggregate_hash:
+                raise ResearchError("CORRUPT_ARTIFACT", "input aggregate identity changed")
+            bundle = self.store.manifest("bundle-" + aggregate["source_bundle_hash"])
         if len(encode(bundle)) > MAX_INPUT_BYTES:
             raise ResearchError("RESOURCE_PLAN_REJECTED", "frozen source bundle exceeds byte quota")
         original = self.store.manifest("study-" + study_id)["spec"]
-        if (bundle["spec_hash"] != digest(original) or bundle["cells"] != aggregate["cell_dispositions"] or
+        if (bundle["spec_hash"] != digest(original)
+                or input_kind == "aggregate" and bundle["cells"] != aggregate["cell_dispositions"] or
                 digest({k: v for k, v in bundle.items() if k != "bundle_hash"}) != bundle["bundle_hash"]):
             raise ResearchError("CORRUPT_ARTIFACT", "frozen comparison source differs from authority")
+        if input_kind == "bundle":
+            self._validate_bundle_input(bundle, original)
         # Revalidate every actual source/qualification disclosure under current
         # grants. Never replace the chosen frozen snapshot with this new export.
         export_evidence(self.store, study_id, grant)
@@ -103,7 +121,8 @@ class ComparisonRunner:
             if paper_identity(self.paper_root) != paper:
                 raise ResearchError("CONTRACT_MISMATCH", "Paper source changed during resource API preflight")
         runtime_hash = code_hash()
-        identity = digest(["shared-compare-v1", digest(original), input_aggregate_hash, runtime_hash, paper, formal, plan])
+        identity = digest(["shared-compare-bundle-v1" if input_kind == "bundle" else "shared-compare-v1",
+            digest(original), input_aggregate_hash, runtime_hash, paper, formal, plan])
         # The reference arm is frozen, not a caller-controlled new budget name.
         reference_arm = (original.get("comparison_plan") or {}).get("reference_arm_id", min(a["arm_id"] for a in original["arms"]))
         arm = next((a for a in original["arms"] if a["arm_id"] == reference_arm), None)
@@ -117,7 +136,7 @@ class ComparisonRunner:
             "cells": [{"arm_id": arm["arm_id"], "block_id": "computation-input", "seed": 0,
                 "visibility": visibility, "resource_class": "cpu", "plugin_id": "shared-comparison-v1"}],
             "computation_origin": {"study_id": study_id, "spec_hash": digest(original),
-                "input_aggregate_hash": input_aggregate_hash, "source_bundle_hash": bundle["bundle_hash"],
+                **input_fields, "source_bundle_hash": bundle["bundle_hash"],
                 "paper_identity": paper, "resource_plan": plan, "formal": formal,
                 **({"include_resource_summaries": True} if include_resource_summaries else {})}}
         self.store.register(derived, digest(derived))
@@ -129,17 +148,51 @@ class ComparisonRunner:
         attempt_id = self.store.new_attempt(run_id, parent_attempt_id=parent_attempt_id, reason=reason)
         reference = {"manifest_id": "computation-" + attempt_id, "attempt_id": attempt_id, "run_id": run_id,
             "computation_spec_hash": digest(derived), "request_manifest_id": "computation-request-" + attempt_id,
-            "reservation_id": digest([self.store.store_id, attempt_id]), "input_aggregate_hash": input_aggregate_hash,
+            "reservation_id": digest([self.store.store_id, attempt_id]), **input_fields,
             "source_bundle_hash": bundle["bundle_hash"], "allocation": plan["allocation"]}
         request = {"schema_version": "pirc25-computation-request-v1", "computation_ref": reference,
             "computation_study_id": derived["study_id"], "runtime_code_hash": runtime_hash,
             "paper_identity": paper, "resource_plan": plan, "formal": formal,
+            **({"input_kind": "bundle"} if input_kind == "bundle" else {}),
             **({"include_resource_summaries": True} if include_resource_summaries else {})}
         return grant, bundle, arm, None, attempt_id, reference, request
 
+    @staticmethod
+    def _validate_bundle_input(bundle, original):
+        """Bound full source metadata, not a statistical bootstrap or score."""
+        try:
+            registered = {digest(c): c for c in original["cells"]}
+            rows = {r["cell_hash"]: r for r in bundle["cells"]}
+            expected = {r["cell_hash"]: r for r in bundle["expected_cells"]}
+            if (bundle.get("schema_version") != "pirc25-evidence-bundle-v1"
+                    or encode(bundle.get("registered_spec")) != encode(original)
+                    or encode(bundle.get("comparison_plan")) != encode(original.get("comparison_plan"))
+                    or any(bundle[k] != original[k] for k in ("study_id", "code_hash", "protocol_hash", "data_hash",
+                        "feature_hash", "selection_hash", "comparison_family"))
+                    or len(rows) != len(bundle["cells"]) or len(expected) != len(bundle["expected_cells"])
+                    or rows.keys() != registered.keys() or expected.keys() != registered.keys()):
+                raise ValueError("whole frozen source matrix")
+            from application.research_dimensions import comparison_dimensions
+            for key, cell in registered.items():
+                if (encode(rows[key].get("registered_cell")) != encode(cell)
+                        or any(encode(rows[key][k]) != encode(cell[k]) or encode(expected[key][k]) != encode(cell[k])
+                            for k in ("arm_id", "block_id", "seed"))
+                        or encode(comparison_dimensions(rows[key])) != encode(comparison_dimensions(cell))
+                        or encode(comparison_dimensions(expected[key])) != encode(comparison_dimensions(cell))):
+                    raise ValueError("frozen cell binding")
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            raise ResearchError("CORRUPT_ARTIFACT", "frozen bundle source matrix differs from authority") from exc
+
+    def run_bundle(self, study_id, source_bundle_hash, **kwargs):
+        """First paid analysis directly from the stored immutable source bundle."""
+        if "input_kind" in kwargs:
+            raise ResearchError("CONTRACT_MISMATCH", "bundle input kind is fixed")
+        return self.run(study_id, source_bundle_hash, input_kind="bundle", **kwargs)
+
     def run(self, study_id, input_aggregate_hash, *, authorization_id, budget=BudgetSpec(),
             max_operations=MAX_OPERATIONS, formal=None, parent_attempt_id=None, reason=None, output=None,
-            authorization_version=None, include_resource_summaries=False):
+            authorization_version=None, include_resource_summaries=False, input_kind="aggregate"):
+        computation_input_key(input_kind)
         if type(include_resource_summaries) is not bool:
             raise ResearchError("CONTRACT_MISMATCH", "resource opt-in must be an explicit boolean")
         study_id, input_aggregate_hash = identifier(study_id), identifier(input_aggregate_hash)
@@ -148,7 +201,8 @@ class ComparisonRunner:
             study_id, input_aggregate_hash, authorization_id=authorization_id,
             max_operations=max_operations, formal=formal, parent_attempt_id=parent_attempt_id,
             reason=reason, authorization_version=authorization_version,
-            include_resource_summaries=include_resource_summaries)
+            include_resource_summaries=include_resource_summaries,
+            **({"input_kind": "bundle"} if input_kind == "bundle" else {}))
         if success:
             result = {"attempt_id": success["attempt_id"], "state": "SUCCEEDED",
                       "artifact_id": success["artifact_id"], "exit_code": 0, "reused": True}
