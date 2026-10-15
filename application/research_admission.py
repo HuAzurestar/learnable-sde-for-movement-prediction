@@ -393,6 +393,10 @@ class AdmissionGate:
                 raise ResearchError("CONTRACT_MISMATCH", "result resource/registry admission changed")
             validate_value(plugin.registry_entry.output_schema, result)
             validate_result(result, spec=spec, cell=cell, plugin=plugin)
+            if "resource_observation_policy" in cell or "resource_observation" in result:
+                from .propagation_resources import validate_packet
+                validate_packet(result.get("resource_observation"), spec, cell, receipt["attempt_id"],
+                                execution_state="SUCCEEDED")
             if "composition" in plan and result.get("component_plan_hash") != plan["composition"]["component_plan_hash"]:
                 raise ResearchError("CONTRACT_MISMATCH", "worker result internal component provenance differs")
             if (receipt["mode"] == "formal" and
@@ -437,6 +441,13 @@ class AdmissionGate:
         return validate
 
     def run(self, attempt_id, spec, cell, plugin, command_builder, budget, *, builtin_fixture=False, recovery_builder=None, checkpoint_handler=None):
+        if "resource_observation_policy" in cell:
+            from .propagation_resources import observation_enabled
+            try:
+                observation_enabled(cell)
+            except ResearchError as exc:
+                self.store.transition(attempt_id, "PREFLIGHT_FAILED", error_code=exc.code)
+                raise
         if plugin.plugin_id == "affine-path-production-chunk":
             from .propagation_execution import validate_propagation_cell
             from experiments.pirc27.path_production_plugin import production_policies

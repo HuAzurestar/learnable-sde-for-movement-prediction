@@ -75,7 +75,7 @@ def test_mlmc_checkpoint_fixture_calibration_preserves_all_levels_and_work_quota
 
 
 def prepare(tmp_path, method="euler", *, recovery=False, changes=None, level_samples=None, unbound_steps=None,
-            synthetic=False, formal=False, pilot_changes=None, cubature_qualification=False):
+            synthetic=False, formal=False, pilot_changes=None, cubature_qualification=False, resource_observation=False):
     # A disposable test store, not a new scientific ledger or protected input.
     store = ResearchStore(tmp_path, "propagation-unit", initialize=True)
     case = oracle_suite()[0]
@@ -108,6 +108,9 @@ def prepare(tmp_path, method="euler", *, recovery=False, changes=None, level_sam
         # reaches method accounting rather than an earlier snapshot hash veto.
         cell["propagation_request"]["steps"] = unbound_steps
     cell["resource_class"] = "cpu"
+    if resource_observation:
+        from application.propagation_resources import resource_policy
+        cell["resource_observation_policy"] = resource_policy()
     cell["execution"] = execution_binding(plugin.registry_entry, config, inputs, matrix_cells=1)
     if cubature_qualification:
         cell.update(execution_role="qualification", cubature_qualification_policy=policy.manifest())
