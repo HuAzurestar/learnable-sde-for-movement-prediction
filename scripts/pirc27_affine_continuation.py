@@ -41,10 +41,15 @@ DECISION = {
 
 
 def accounting(store):
+    # Derived comparison/render studies keep their original source arm, but
+    # have content-addressed study names without the research issue prefix.
+    # Count the union once by reservation ID, including holds and failures.
+    arm_ids = {a["arm_id"] for a in store.manifest(original.ORIGINAL)["arms"]}
     reservations = {}
     for e in store.events():
         if (e["event_kind"] in {"RESERVE", "SETTLE"}
-                and e["payload"].get("study_id", "").startswith("pirc27-")):
+                and (e["payload"].get("study_id", "").startswith("pirc27-")
+                     or e["payload"].get("arm_id") in arm_ids)):
             reservations[e["payload"]["reservation_id"]] = e["payload"]
     return {"charged_ms": sum(r["charged_ms"] for r in reservations.values() if r["settled"]),
             "reserved_ms": sum(r["reserved_ms"] for r in reservations.values() if not r["settled"])}

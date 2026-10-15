@@ -151,6 +151,7 @@ def test_continuation_freezes_seven_cells_and_restores_only_original_costs(tmp_p
     cells = batch.frozen_cells(arms)
     store = ResearchStore(tmp_path, "pirc27-continuation-control", initialize=True)
     with store._read_transaction():
+        store.publish(batch.ORIGINAL, {"arms": list(arms.values())})
         for study, matrix in ((continuation.original.STUDY, cells),
                               (continuation.supplement.STUDY, [cells[5], cells[7]])):
             value = {**spec(), "study_id": study, "experiment_id": study, "arms": list(arms.values()),

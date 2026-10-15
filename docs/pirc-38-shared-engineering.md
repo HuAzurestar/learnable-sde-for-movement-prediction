@@ -805,6 +805,13 @@ live continuation attempt. There is no automatic retry or budget reset. Export
 old and new complete matrices separately; do not relabel mixed-source pilot
 results as formal or independent scientific replication.
 
+The PIRC-27 operator's aggregate14400-slot-second accounting covers the union
+of `pirc27-` studies and all reservations charged to the original preparation's
+arms. Derived comparison/render study names need not have that prefix; their
+settled failures/unknown-cost charges and pending reservations still count.
+Each reservation contributes its latest authoritative state once. This does
+not reset the original arm budgets or grant permission for derived jobs.
+
 ### Explicit report-only delivery deadline
 
 A continuation approval may explicitly opt into
