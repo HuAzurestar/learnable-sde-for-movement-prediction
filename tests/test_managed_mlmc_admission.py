@@ -99,16 +99,20 @@ def test_actual_formal_mlmc_save_ack_reopened_resume_retains_stream_receipt_and_
     # Fixed engineering-only pilot policy before any reservation. The actual
     # pilot's measured allocation, not an inflated or hand-written allocation,
     # supplies the independently registered production workload.
-    # Predeclare at most four linked continuations: a correctly budget-stopped
+    # Predeclare at most two linked continuations: a correctly budget-stopped
     # resume may itself save at80%, never requiring a longer live deadline.
-    maximum_resumes = 4
+    maximum_resumes = 2
     startup_seconds = _worker_startup_seconds()
     # This is the save/ACK success control, not the separate hard-fuse control.
     # Freeze a stricter/larger engineering workload before its pilot so the
     # 80% signal has work left, and reserve >=1.6s for real fsync/ACK/native exit.
     # The former 3s floor left only0.6s and occasionally hit the actual hard fuse
     # on Linux. No live deadline, work quota or scientific research cap changes.
-    sampling_tolerance = .0005
+    # Windows native publication/qualification has a larger fixed cost; keep
+    # its original precision/workload. Faster POSIX runs use stricter precision
+    # so the real worker still has work at the80% boundary. Both are declared
+    # before pilot registration and obey the same two-retry/60s limits.
+    sampling_tolerance = .001 if sys.platform == "win32" else .0005
     store, spec, registry, recovery, grant, _, _ = prepared_source(tmp_path,
         sampling_tolerance=sampling_tolerance, counts=(1024, 1024, 1024), request_changes={"chunk_size": 1})
     cell = spec["cells"][0]
