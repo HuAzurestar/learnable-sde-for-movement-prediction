@@ -308,20 +308,18 @@ def exported(source, completed):
     return export_evidence(store, spec["study_id"], grant)
 
 
-def test_actual_formal_mixture_save_ack_reopened_resume_retains_current_receipt_lineage_and_all_costs(tmp_path):
-    import time
+def test_actual_formal_mixture_save_ack_reopened_resume_retains_current_receipt_lineage_and_all_costs(tmp_path, monkeypatch):
     from application.propagation_execution import validate_propagation_cell
     from application.research_recovery import RecoveryRegistry, SharedRecovery
     from inference.mixture_propagation import mixture_estimate
     from infrastructure.research_store import ResearchStore
-    from tests.test_mixture_shared_adapter import _mixture_checkpoint_job_seconds, _mixture_worker_startup_seconds
+    from tests.mixture_checkpoint_worker import install
 
     # Frozen engineering request/caps before the source reservation. The fixed
     # worst-case reference allocation remains400001, not the pass threshold.
     # At most two fixed60s linked continuations; never retry a hard fuse/failure.
     maximum_resumes = 2
     steps = (1_000_000-400001)//(8*(1+1+4**3))
-    startup = _mixture_worker_startup_seconds()
     # A nonzero endpoint threshold with a nontrivial frozen probability-error
     # target, not the zero-threshold symmetric case or a scientific default.
     store, spec, registry, grant, _, _ = prepare_target(tmp_path, 1,
@@ -333,18 +331,20 @@ def test_actual_formal_mixture_save_ack_reopened_resume_retains_current_receipt_
     model, request, config, _ = validate_propagation_cell(spec, cell)
     mixture = MixturePolicy.from_manifest(cell["mixture_policy"])
     # Unprotected pure-kernel unit control, not a formal result or extra grant.
-    # Size the first disposable job BEFORE its reservation, never a live deadline.
-    started = time.monotonic()
+    # The ordinary fast kernel and the bounded physical save have different
+    # timing needs. Keep the unchanged work quota and20s initial-job cap, but
+    # predeclare test-only20ms pacing of real numerical steps. This is an
+    # engineering restore control, not a scientific runtime measurement.
     expected = mixture_estimate(model, request, mixture).manifest()
-    job_seconds = _mixture_checkpoint_job_seconds(time.monotonic()-started, startup)
+    job_seconds = 20.
+    install(monkeypatch)
     arm = cell["arm_id"]
     pilot_cost = BudgetLedger(store).balance(arm)["committed_ms"]
     adapters = RecoveryRegistry()
     adapters.register(mixture_production_recovery_plugin())
     interrupted = SharedRunner(store, registry, recovery_registry=adapters).run_cell(
         spec["study_id"], digest(cell), budget=BudgetSpec(job_seconds))
-    assert interrupted["state"] == "FAILED", {**interrupted,
-        "engineering_calibration_seconds": {"startup": startup, "job": job_seconds}}
+    assert interrupted["state"] == "FAILED", interrupted
     parent = store.attempts()[interrupted["attempt_id"]]
     assert parent["error_code"] == "CHECKPOINT_SAVED", interrupted
     saved = interrupted["checkpoint"]

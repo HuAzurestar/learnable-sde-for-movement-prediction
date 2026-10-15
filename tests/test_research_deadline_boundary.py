@@ -155,7 +155,7 @@ def test_wrapper_self_containment_uses_native_pseudo_handle_and_fails_closed(mon
         assert calls == [("assign", 1234, ctypes.c_void_p(-1).value), ("close", 1234)]
 
 
-def _inject_stale_control_pipe(monkeypatch):
+def _inject_stale_control_pipe(monkeypatch, *, delayed_release=False):
     import errno
     import application.research_supervisor as supervision
     original_popen = supervision.subprocess.Popen
@@ -165,6 +165,11 @@ def _inject_stale_control_pipe(monkeypatch):
         def write(self, value):
             return self.stream.write(value)
         def flush(self):
+            if delayed_release:
+                # Make the exceptional-finally path deterministic: the native
+                # fuse kills the unreleased tree before GO can be flushed.
+                time.sleep(0.3)
+                raise OSError(errno.EPIPE, "synthetic release after hard stop")
             return self.stream.flush()
         def close(self):
             try:
@@ -282,10 +287,11 @@ def test_stale_control_pipe_close_cannot_mask_deadline_settlement(tmp_path, monk
 
 
 @pytest.mark.parametrize("failure", ["settlement-io", "settlement-corruption", "diagnostic-corruption"])
-def test_optional_cleanup_never_swallows_authority_failures_or_restores_costs(tmp_path, monkeypatch, failure):
+@pytest.mark.parametrize("delayed_release", [False, True])
+def test_optional_cleanup_never_swallows_authority_failures_or_restores_costs(tmp_path, monkeypatch, failure, delayed_release):
     import errno
     store, attempts = registered(tmp_path)
-    _inject_stale_control_pipe(monkeypatch)
+    _inject_stale_control_pipe(monkeypatch, delayed_release=delayed_release)
     supervisor = ResearchSupervisor(store)
     if failure == "diagnostic-corruption":
         original_append = store.append

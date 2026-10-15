@@ -20,7 +20,7 @@ def _checkpoint_fixture_samples(calibration_seconds):
     # Size this engineering-only workload BEFORE registration/reservation. Fast
     # CI otherwise finishes before the old ten-second minimum can request save.
     # Keep actual work under the shared one-million-update declaration.
-    return max(1024, min(1_000_000 // 128, math.ceil(16.0 * 128 / calibration_seconds)))
+    return max(1024, min(1_000_000 // 128, math.ceil(24.0 * 128 / calibration_seconds)))
 
 
 @pytest.mark.parametrize("seconds", [0.01, 0.5, 1.0, 4.0, 10.0])

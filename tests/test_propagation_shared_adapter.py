@@ -25,13 +25,13 @@ from tests.research_admission_fixtures import admit_fixture
 def _mlmc_checkpoint_allocation(calibration_seconds):
     # Engineering-only sizing before creating/registering/reserving the store.
     # Three levels at 128 base steps cost 2048 real fine+coarse updates per unit.
-    units = max(16, min(1_000_000 // 2048, math.ceil(16.0 * 16 / calibration_seconds)))
+    units = max(16, min(1_000_000 // 2048, math.ceil(24.0 * 16 / calibration_seconds)))
     return (4*units, 2*units, units)
 
 
 def _path_checkpoint_samples(calibration_seconds):
     # The same pre-store sizing for each actual method, not a budget extension.
-    return max(1024, min(1_000_000 // 128, math.ceil(16.0 * 128 / calibration_seconds)))
+    return max(1024, min(1_000_000 // 128, math.ceil(24.0 * 128 / calibration_seconds)))
 
 
 def _worker_startup_seconds():
@@ -47,11 +47,13 @@ def _worker_startup_seconds():
 
 def _checkpoint_job_seconds(compute_seconds, startup_seconds):
     # One predeclared job, never a live deadline extension or save grace period.
-    return max(3., min(20., .5*compute_seconds+startup_seconds))
+    # Successful physical save controls need >=2.4s for fsync/ACK/native exit,
+    # not the old0.6s window. Work is sized first, within the unchanged quota.
+    return max(12., min(20., .5*compute_seconds+startup_seconds))
 
 
-@pytest.mark.parametrize("compute,startup,expected", [(12., 6., 12.), (16., .5, 8.5),
-    (1., .1, 3.), (100., 10., 20.)])
+@pytest.mark.parametrize("compute,startup,expected", [(12., 6., 12.), (16., .5, 12.),
+    (1., .1, 12.), (100., 10., 20.)])
 def test_checkpoint_job_sizing_includes_fresh_startup_with_existing_fixture_cap(compute, startup, expected):
     assert _checkpoint_job_seconds(compute, startup) == expected
 

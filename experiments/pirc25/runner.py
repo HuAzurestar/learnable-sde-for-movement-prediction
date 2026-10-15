@@ -24,7 +24,8 @@ class SharedRunner:
         self.registry = registry if registry is not None else affine_registry(store)
         self.recovery_registry = recovery_registry
 
-    def run_cell(self, study_id, cell_hash, *, budget=BudgetSpec(60, category="smoke"), parent_attempt_id=None, reason=None):
+    def run_cell(self, study_id, cell_hash, *, budget=BudgetSpec(60, category="smoke"), parent_attempt_id=None, reason=None,
+                 source_transition_ref=None):
         spec = self.store.manifest("study-" + study_id)["spec"]
         cells = [cell for cell in spec["cells"] if digest(cell) == cell_hash]
         if len(cells) != 1:
@@ -45,7 +46,8 @@ class SharedRunner:
             if attempt["run_id"] == run_id and attempt["state"] == "SUCCEEDED":
                 from application.research_reuse import verified_reuse
                 return verified_reuse(self.store, attempt, spec, cell, plugin)
-        attempt = self.store.new_attempt(run_id, parent_attempt_id=parent_attempt_id, reason=reason)
+        attempt = self.store.new_attempt(run_id, parent_attempt_id=parent_attempt_id, reason=reason,
+                                         source_transition_ref=source_transition_ref)
         if self.recovery_registry is not None and plugin.resume_level != "restart-only":
             checkpoint_handler = recovery.checkpoint_handler(attempt)
         context = {"root": str(self.store.path.parent), "store_id": self.store.store_id}
