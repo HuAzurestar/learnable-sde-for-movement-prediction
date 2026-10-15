@@ -797,7 +797,10 @@ excluding only source-derived policy/resource hashes and CPU-sharing metadata.
 Changed requests, methods, thresholds, arms or data are refused. Settled costs
 and whole-tree-stop proofs are required. At most two explicit retries count
 across source versions; subsequent same-run retries inherit that source record.
-Scientific failures and successful original cells cannot use this bridge.
+Canonical numerical identity includes JSON scalar types, not Python's boolean/
+number equality. Every related historical failure must be infrastructure-only:
+a later queue failure cannot hide an earlier numerical failure. Scientific
+failures and successful original cells cannot use this bridge.
 
 `run-next` executes one cell through `SharedRunner`, never holds the metadata
 transaction while a worker runs, and stops the operator batch on any failed or

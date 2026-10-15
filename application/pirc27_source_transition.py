@@ -51,7 +51,7 @@ def validate_restart(store, run, parent_id, reference):
             and original["cell"]["affine_qualification_policy"]["code_hash"] == source["code_hash"]
             and run["cell"]["affine_qualification_policy"]["code_hash"] == target["code_hash"]
             and source["arms"] and original["arm_id"] == run["arm_id"]
-            and numerical_identity(original["cell"]) == numerical_identity(run["cell"]),
+            and digest(numerical_identity(original["cell"])) == digest(numerical_identity(run["cell"])),
             "source restart changes numerical configuration or original arm")
     states = store._attempts()
     related = []
@@ -59,11 +59,11 @@ def validate_restart(store, run, parent_id, reference):
         saved_run = store._manifest("run-" + attempt["run_id"])
         if (saved_run["arm_id"] == run["arm_id"]
                 and saved_run["cell"].get("block_id") == FAMILY
-                and numerical_identity(saved_run["cell"]) == numerical_identity(run["cell"])):
+                and digest(numerical_identity(saved_run["cell"])) == digest(numerical_identity(run["cell"]))):
             related.append(attempt)
     require(related and related[-1]["attempt_id"] == parent_id
-            and all(a["state"] in store.TERMINAL - {"SUCCEEDED"} for a in related)
-            and related[-1]["error_code"] in INFRASTRUCTURE_FAILURES,
+            and all(a["state"] in store.TERMINAL - {"SUCCEEDED"}
+                    and a["error_code"] in INFRASTRUCTURE_FAILURES for a in related),
             "latest stopped infrastructure-failure parent required")
     require(states[document["source_parent_attempt_id"]]["run_id"] == original["run_id"]
             and any(a["attempt_id"] == document["source_parent_attempt_id"] for a in related),

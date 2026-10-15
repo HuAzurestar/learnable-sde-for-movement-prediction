@@ -30,7 +30,7 @@ def configuration():
 
 
 @pytest.fixture
-def bridge(tmp_path, configuration):
+def bridge(tmp_path, configuration, request):
     arms, frozen = configuration
     target_cell = deepcopy(frozen)
     source_cell = deepcopy(target_cell)
@@ -45,7 +45,7 @@ def bridge(tmp_path, configuration):
         store.register(value, digest(value))
         runs.append(store.register_run(study, cell))
     parent = store.new_attempt(runs[0])
-    store.transition(parent, "PREFLIGHT_FAILED", error_code="QUEUE_REJECTED")
+    store.transition(parent, "PREFLIGHT_FAILED", error_code=getattr(request, "param", "QUEUE_REJECTED"))
     approval_ref = approved(store, arm_ids=[arms["exact"]["arm_id"]],
                             pirc27_total_slot_seconds=14400, infrastructure_retries=True)
     value = {"schema_version": "pirc27-source-transition-v1", "source_run_id": runs[0],
@@ -75,7 +75,22 @@ def test_explicit_cross_source_parent_keeps_history_and_count_across_restart(bri
     assert len(reopened.attempts()) == 3
 
 
-@pytest.mark.parametrize("fault", ["ref", "reason", "parent", "live", "scientific", "scope", "expiry", "cost", "stop", "seed", "threshold"])
+@pytest.mark.parametrize("bridge", ["NONFINITE", "WORKER_FAILED", "TIMEOUT"], indirect=True)
+def test_later_infrastructure_failure_cannot_hide_prior_scientific_failure(bridge):
+    store, runs, first, reference = bridge
+    # Genuine immutable disposable history, not editing a terminal error or
+    # inventing a new arm. Generic attempt creation alone is not permission
+    # to launder scientific failure through a later infrastructure parent.
+    second = store.new_attempt(runs[0], parent_attempt_id=first, reason="disposable infrastructure preflight")
+    store.transition(second, "PREFLIGHT_FAILED", error_code="QUEUE_REJECTED")
+    before = store.attempts()
+    with pytest.raises(ResearchError):
+        store.new_attempt(runs[1], parent_attempt_id=second, reason="not an infrastructure-only history",
+                          source_transition_ref=reference)
+    assert store.attempts() == before
+
+
+@pytest.mark.parametrize("fault", ["ref", "reason", "parent", "live", "scientific", "scope", "expiry", "cost", "stop", "seed", "threshold", "boolean-origin"])
 def test_refuses_unsafe_source_restart_without_creating_attempt(bridge, fault):
     store, runs, parent, reference = bridge
     reference = deepcopy(reference)
@@ -105,13 +120,15 @@ def test_refuses_unsafe_source_restart_without_creating_attempt(bridge, fault):
                 "authorization_expires_at": "2020-01-01T02:00:00+00:00"} if fault == "expiry" else {}))
         reference = {"manifest_id": "changed-transition-" + digest(value), "sha256": digest(value)}
         store.publish(reference["manifest_id"], value)
-    if fault in {"seed", "threshold"}:
+    if fault in {"seed", "threshold", "boolean-origin"}:
         target = store.manifest("study-new-pilot")["spec"]
         target["study_id"] = "changed-pilot"
         target["cells"] = deepcopy(target["cells"])
         cell = target["cells"][0]
         if fault == "seed":
             cell["seed"] += 1
+        elif fault == "boolean-origin":
+            cell["propagation_request"]["origin"] = False
         else:
             cell["affine_qualification_policy"]["maximum_time_bias"] = 10
             cell["execution"]["config"]["qualification_policy_hash"] = digest(cell["affine_qualification_policy"])
