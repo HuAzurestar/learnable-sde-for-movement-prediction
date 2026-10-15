@@ -624,6 +624,23 @@ legacy engineering-only descriptive packages remain readable.
 python -B -m experiments.pirc25 --root RUNTIME_DIR --store-id STORE_ID compare STUDY_ID INPUT_AGGREGATE_HASH --authorization-id GRANT_ID --paper-root TSDE_ROOT --seconds 7200 --output NEW_PACKAGE_DIR
 ```
 
+Propagation resources may be explicitly included with `--include-resource-summaries`
+or `ComparisonRunner.run(..., include_resource_summaries=True)`. Default is false;
+legacy requests/serializations remain unchanged. The opt-in is frozen in the
+derived study, request and whole-package work plan, including bounded source
+sorting and figure provenance under the same operation ceiling and original arm.
+Before registering a computation attempt, the owner checks the paired Paper's
+default-off API without executing its source. The worker independently rechecks
+the plan and forwards the flag. Runtime then independently checks every summary
+against frozen all-attempt source packets, including failed/partial/unknown rows;
+matching CSV/index/figure hashes alone cannot authenticate a forged summary.
+Unmanaged resource summaries cannot substitute for a paid computation proof.
+Native self-lifetime RSS maxima are not additive memory, a solver-only delta or
+process-tree peak. Pipeline nanoseconds do not replace settled slot-ms charges.
+This bridge does not qualify a method, rerun scientific failures, grant new data
+access or enable the opt-in for existing studies automatically. Saved pilot
+qualification-proof transport and full study analysis remain separate work.
+
 The original-study grant must authorize export of the complete source matrix.
 The runtime retains the selected frozen input version, checks current source
 disclosure, bounds registered-size operations and bytes, and launches the TSDE
@@ -825,3 +842,49 @@ not itself extend any source grant. Reservations record both dates; the
 supervisor still enforces the allocated job duration, original cumulative
 24-hour arm cap, native containment and all data checks. Missing policy keeps
 the historical hard-window behavior; unknown policy values are rejected.
+
+### Opt-in saved path-pilot evidence export
+
+`export --include-path-pilot-evidence` adds the actual existing successful
+`affine-path-qualification` result and its artifact metadata, admission, original
+run/attempt and unique reserve/start/native-stop/settlement/completion events.
+The API option is a strict boolean, defaults to false and requires the same
+fresh export authority before assembly, immutable publication and file rename.
+It never starts a worker, creates a grant, replays a sampler/reference or changes
+the recorded classification. Failed/missing cells and all-attempt costs/resources
+remain in the full matrix. Non-opted exports keep their legacy shape.
+
+An opted export is a new immutable bundle with its own hash/file, not an update
+to any previously sealed scalar export. Keep it outside Git. The independent
+Paper `scripts/pirc25/validate_path_pilots.py --expected-hash ...` command checks
+saved reports, including numerical PASSED and FAILED, against the actual result,
+frozen policy, sufficient statistics, certificates and measured native job proof.
+It reports computational noncompletion separately. The trusted owner bundle hash
+is required; self-resealed transport is not proof of authenticity.
+
+This report-only reader is separate from production-source admission, which
+still requires numerical PASSED. Every pilot remains fixture and scientifically
+unqualified; a saved pilot pass is neither a new-code pass nor a distribution
+guarantee. Generic nonformal bundle validation does not claim these additional
+reports were verified. Actual statistical aggregation/figures still require
+their own funded comparison worker; this export adds no managed analysis proof.
+
+### First managed comparison from a frozen source bundle
+
+`compare-bundle STUDY BUNDLE_HASH --paper-root PATH --authorization-id ID`
+and `ComparisonRunner.run_bundle` start the first paid analysis directly from
+the existing immutable owner export. No standalone/unfunded aggregate or fake
+comparison package is needed beforehand. The complete registered source matrix,
+typed cell identities, original study and current export authority are checked
+before registration/reservation. Computation remains inside the same bounded
+OS worker, charges the original frozen reference arm and preserves its cap.
+The caller must also retain any narrower project-wide aggregate spending cap.
+
+Raw-bundle provenance explicitly freezes `input_kind: bundle` and
+`input_bundle_hash` into the computation origin/reference/request, distinct from
+legacy `input_aggregate_hash`. Mixed/stripped modes and source substitutions
+refuse; no bundle hash impersonates an aggregate hash. Legacy `compare` defaults
+and serialized reference shape remain unchanged. The same settled result may
+be reused exactly without a new worker or fee; a failed job is not retried
+automatically. Statistical/figure operation and byte caps, visibility, fresh
+publication guards and optional resource-summary scope are unchanged.

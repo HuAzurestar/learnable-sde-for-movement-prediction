@@ -95,13 +95,16 @@ def require_export_visibility(store, spec, cells, authorization, *, calibration=
     return visibility
 
 
-def export_evidence(store: ResearchStore, study_id: str, authorization: dict):
+def export_evidence(store: ResearchStore, study_id: str, authorization: dict, *, include_path_pilot_evidence=False):
+    if type(include_path_pilot_evidence) is not bool:
+        raise ResearchError("CONTRACT_MISMATCH", "pilot evidence opt-in must be an explicit boolean")
     # Retain one current-thread/PID verified scope and its actual OS lock for
     # the whole source/cost assembly. This is not a persistent grant cache.
     with store._read_transaction():
         authorize_study(store, study_id, authorization, "export")
         snapshot = _export_data_snapshot(store)
-        bundle = _assemble_evidence(store, study_id, authorization)
+        options = {"include_path_pilot_evidence": True} if include_path_pilot_evidence else {}
+        bundle = _assemble_evidence(store, study_id, authorization, **options)
         grants = _fresh_export_authority(store, bundle, authorization)
         if _export_data_snapshot(store) != snapshot:
             raise ResearchError("INDEX_STALE", "authority changed while assembling evidence; retry export")
@@ -214,7 +217,7 @@ def authorize_evidence_publication(store, bundle, authorization):
     _require_current_export_grants(store, grants)
 
 
-def _assemble_evidence(store, study_id, authorization):
+def _assemble_evidence(store, study_id, authorization, *, include_path_pilot_evidence=False):
     spec = store.manifest("study-" + study_id)["spec"]
     from .probability_calibration_consumption import require_calibration_export_support
     require_calibration_export_support(spec)
@@ -236,6 +239,10 @@ def _assemble_evidence(store, study_id, authorization):
         from .propagation_resource_evidence import ResourceEventIndex
         resource_index = ResourceEventIndex(cost_events)
     cells = []
+    pilot_index = None
+    if include_path_pilot_evidence:
+        from .path_pilot_export import PilotEventIndex
+        pilot_index = PilotEventIndex(cost_events)
     for cell in spec["cells"]:
         history = runs.get(digest(cell), [])
         successful = [a for a in history if a["state"] == "SUCCEEDED"]
@@ -310,6 +317,10 @@ def _assemble_evidence(store, study_id, authorization):
                 row.update(admission=admission, admission_hash=result["admission_hash"])
             elif result["qualification"] == "qualified" or "cell_packages" in (spec.get("admission") or {}):
                 raise ResearchError("UNQUALIFIED", "qualified or per-cell-bound result lacks execution admission evidence")
+        if (include_path_pilot_evidence and successful
+                and cell.get("plugin_id") == "affine-path-qualification"):
+            from .path_pilot_export import attach_pilot_result
+            attach_pilot_result(store, row, result, latest, pilot_index)
         cells.append(row)
     visibility = require_export_visibility(store, spec, cells, authorization, calibration=calibration)
     payload = {"schema_version": "pirc25-evidence-bundle-v1", "study_id": study_id,
@@ -322,6 +333,8 @@ def _assemble_evidence(store, study_id, authorization):
                "expected_cells": [{"cell_hash": digest(c), "arm_id": c["arm_id"], "block_id": c["block_id"], "seed": c["seed"],
                                    "comparison_dimensions": comparison_dimensions(c)} for c in spec["cells"]],
                "cells": cells, "disclosure_scope": "authorized-local-export"}
+    if include_path_pilot_evidence:
+        payload["path_pilot_evidence"] = "owned-saved-path-pilot-results-and-native-execution-v1"
     if calibration is not None:
         from .probability_calibration_export import calibration_recorded_at
         payload.update(probability_calibration=calibration,
@@ -357,6 +370,8 @@ def accept_aggregate(store, aggregate, study_id):
     # result. Removing both proof fields must never promote a fixture or an
     # operator-rehashed summary to formal evidence.
     managed = "adjudication" in aggregate or "computation_ref" in aggregate
+    if not managed and any("resource_usage_summary" in arm for arm in aggregate.get("arms", [])):
+        raise ResearchError("UNQUALIFIED", "resource summaries require a managed computation proof")
     qualification = aggregate.get("qualification")
     if qualification == "formal" and not managed:
         raise ResearchError("UNQUALIFIED", "formal aggregate requires its managed computation proof")
@@ -391,6 +406,8 @@ def _calibration_summary(aggregate):
 
 def expected_metrics_csv(aggregate):
     """Validate the frozen v1 table serialization without recalculating scores."""
+    from application.propagation_resource_summary import validate_resource_summaries
+    validate_resource_summaries(aggregate)
     stream = io.StringIO(newline="")
     writer = csv.writer(stream, lineterminator="\n")
     extra = [name for name in ("adjudication", "computation_ref") if name in aggregate]
@@ -403,7 +420,8 @@ def expected_metrics_csv(aggregate):
     if current_eligibility and any(not all(name in arm for name in eligibility_fields) for arm in aggregate["arms"]):
         raise ResearchError("CONTRACT_MISMATCH", "incomplete frozen CSV eligibility fields")
     columns = list(eligibility_fields) if current_eligibility else []
-    fields = ["aggregate_hash", "arm_id", "metric", "value", "unit", "independent_n", "expected_cells", "successful_cells", "status", "stratum_id", "comparison_dimensions", "charged_ms", "reserved_ms", "measured_ms", "cost_unit", "cost_scope", "status_rates", *columns, *shared_columns, *extra]
+    resource_columns = ["resource_usage_summary"] if any("resource_usage_summary" in a for a in aggregate["arms"]) else []
+    fields = ["aggregate_hash", "arm_id", "metric", "value", "unit", "independent_n", "expected_cells", "successful_cells", "status", "stratum_id", "comparison_dimensions", "charged_ms", "reserved_ms", "measured_ms", "cost_unit", "cost_scope", "status_rates", *columns, *resource_columns, *shared_columns, *extra]
     writer.writerow(fields)
     frozen = [encode(aggregate[name]).decode() for name in extra]
     for arm in aggregate["arms"]:
@@ -411,14 +429,15 @@ def expected_metrics_csv(aggregate):
         rates = encode(arm.get("status_rates")).decode()
         dimensions = encode(arm["comparison_dimensions"]).decode()
         eligibility = [arm["comparison_eligible_cells"], encode(arm["path_output_dispositions"]).decode()] if current_eligibility else []
+        resources = [encode(arm.get("resource_usage_summary")).decode()] if resource_columns else []
         if not arm["metrics"]:
             writer.writerow([aggregate["aggregate_hash"], arm["arm_id"], "", "", "", arm["independent_n"],
                              arm["expected_cells"], arm["successful_cells"], arm["status"], arm["stratum_id"],
-                             dimensions, *costs, rates, *eligibility, *arm_shared, *frozen])
+                             dimensions, *costs, rates, *eligibility, *resources, *arm_shared, *frozen])
         for metric, value in sorted(arm["metrics"].items()):
             writer.writerow([aggregate["aggregate_hash"], arm["arm_id"], metric, value, arm["metric_units"][metric],
                              arm["independent_n"], arm["expected_cells"], arm["successful_cells"], arm["status"],
-                             arm["stratum_id"], dimensions, *costs, rates, *eligibility, *arm_shared, *frozen])
+                             arm["stratum_id"], dimensions, *costs, rates, *eligibility, *resources, *arm_shared, *frozen])
     if calibration:
         cost = calibration["calibration_cost"]
         # One study-level row, even when every target is missing. It is neither
@@ -434,6 +453,8 @@ def expected_metrics_csv(aggregate):
 
 
 def expected_paper_index(aggregate, table, figure_index=None):
+    from application.propagation_resource_summary import validate_resource_summaries
+    validate_resource_summaries(aggregate)
     claims = []
     for arm in aggregate["arms"]:
         for metric, number in sorted(arm["metrics"].items()):
@@ -441,6 +462,7 @@ def expected_paper_index(aggregate, table, figure_index=None):
                 "metric": metric, "value": number, "arm_id": arm["arm_id"], "stratum_id": arm["stratum_id"],
                 "comparison_dimensions": arm["comparison_dimensions"], "evidence_status": arm["status"],
                 "independent_n": arm["independent_n"], "cost": arm["cost"],
+                **({"resource_usage_summary": arm["resource_usage_summary"]} if "resource_usage_summary" in arm else {}),
                 "unit": arm["metric_units"][metric], "aggregate_hash": aggregate["aggregate_hash"],
                 "attempt_ids": [cell["attempt_id"] for cell in aggregate["cell_dispositions"]
                                 if cell["arm_id"] == arm["arm_id"] and cell["status"] == "SUCCEEDED"
@@ -450,6 +472,11 @@ def expected_paper_index(aggregate, table, figure_index=None):
             "aggregate_hash": aggregate["aggregate_hash"], "table_sha256": hashlib.sha256(table).hexdigest(),
             "code_hash": aggregate["code_hash"], "evidence_status": "active", "relation": None,
             "disclosure_scope": aggregate["disclosure_scope"], "claims": claims,
+            **({"resource_usage_summaries": [
+                {"arm_id": arm["arm_id"], "stratum_id": arm["stratum_id"],
+                 "comparison_dimensions": arm["comparison_dimensions"],
+                 "resource_usage_summary": arm.get("resource_usage_summary")} for arm in aggregate["arms"]]}
+               if any("resource_usage_summary" in arm for arm in aggregate["arms"]) else {}),
             **_calibration_summary(aggregate),
             **({"figure_index_hash": digest(figure_index)} if figure_index is not None else {}),
             **{name: aggregate[name] for name in ("adjudication", "computation_ref") if name in aggregate}}

@@ -57,20 +57,28 @@ def main(argv=None):
     export.add_argument("study")
     export.add_argument("--authorization-id", required=True)
     export.add_argument("--output", type=Path, required=True)
+    export.add_argument("--include-path-pilot-evidence", action="store_true",
+                        help="include actual saved pilot results and native execution sources; no admission promotion")
     evidence = commands.add_parser("import-evidence")
     evidence.add_argument("directory", type=Path)
     evidence.add_argument("--expected-hash", required=True)
     comparison = commands.add_parser("compare", help="supervised statistical comparison of a frozen aggregate")
     comparison.add_argument("study")
     comparison.add_argument("aggregate_hash")
-    comparison.add_argument("--paper-root", type=Path, required=True)
-    comparison.add_argument("--authorization-id", required=True)
-    comparison.add_argument("--seconds", type=float, default=7200)
-    comparison.add_argument("--max-operations", type=int, default=20_000_000)
-    comparison.add_argument("--formal", action="store_true", default=None)
-    comparison.add_argument("--parent-attempt")
-    comparison.add_argument("--reason")
-    comparison.add_argument("--output", type=Path)
+    bundle_comparison = commands.add_parser("compare-bundle", help="first supervised comparison directly from a frozen source bundle")
+    bundle_comparison.add_argument("study")
+    bundle_comparison.add_argument("bundle_hash")
+    for comparison_command in (comparison, bundle_comparison):
+        comparison_command.add_argument("--paper-root", type=Path, required=True)
+        comparison_command.add_argument("--authorization-id", required=True)
+        comparison_command.add_argument("--seconds", type=float, default=7200)
+        comparison_command.add_argument("--max-operations", type=int, default=20_000_000)
+        comparison_command.add_argument("--formal", action="store_true", default=None)
+        comparison_command.add_argument("--include-resource-summaries", action="store_true",
+                            help="explicit bounded all-attempt propagation resource summaries")
+        comparison_command.add_argument("--parent-attempt")
+        comparison_command.add_argument("--reason")
+        comparison_command.add_argument("--output", type=Path)
     case = commands.add_parser('render-case', help='offline supervised graphics from saved authorized paths')
     case.add_argument('artifact_id')
     case.add_argument('--authorization-id', required=True)
@@ -81,7 +89,7 @@ def main(argv=None):
     server = commands.add_parser("serve")
     server.add_argument("--authorization-id", required=True)
     server.add_argument("--port", type=int, default=0)
-    for authorized_command in (export, comparison, case, server):
+    for authorized_command in (export, comparison, bundle_comparison, case, server):
         authorized_command.add_argument("--authorization-version", help="exact immutable version; omit only for a legacy unversioned grant")
     args = parser.parse_args(argv)
     if not args.root:
@@ -125,7 +133,8 @@ def main(argv=None):
             from infrastructure.research_store import atomic_write, encode
             from infrastructure.research_publication import prepare_directory, opened_directory
             grant = store.authorization(args.authorization_id, version=args.authorization_version)
-            bundle = export_evidence(store, args.study, grant)
+            options = {"include_path_pilot_evidence": True} if args.include_path_pilot_evidence else {}
+            bundle = export_evidence(store, args.study, grant, **options)
             output = Path(os.path.abspath(args.output))
             if any((parent / ".git").exists() for parent in (output.parent, *output.parents)):
                 raise ResearchError("UNAUTHORIZED_DATA", "export must stay outside Git")
@@ -137,11 +146,15 @@ def main(argv=None):
         elif args.command == "import-evidence":
             from application.research_evidence import accept_evidence_package
             result = accept_evidence_package(store, args.directory, args.expected_hash)
-        elif args.command == "compare":
+        elif args.command in {"compare", "compare-bundle"}:
             from application.research_comparison import ComparisonRunner
-            result = ComparisonRunner(store, args.paper_root).run(args.study, args.aggregate_hash,
+            owner = ComparisonRunner(store, args.paper_root)
+            operation = owner.run_bundle if args.command == "compare-bundle" else owner.run
+            source_hash = args.bundle_hash if args.command == "compare-bundle" else args.aggregate_hash
+            result = operation(args.study, source_hash,
                 authorization_id=args.authorization_id, authorization_version=args.authorization_version, budget=BudgetSpec(args.seconds),
                 max_operations=args.max_operations, formal=args.formal,
+                include_resource_summaries=args.include_resource_summaries,
                 parent_attempt_id=args.parent_attempt, reason=args.reason, output=args.output)
         elif args.command == 'render-case':
             from application.research_cases import CaseGraphRunner

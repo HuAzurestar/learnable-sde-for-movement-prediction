@@ -2,17 +2,36 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 from pathlib import Path
 import subprocess
 
 from infrastructure.research_store import ResearchError, digest, encode
-from infrastructure.research_files import source_file_hash
+from infrastructure.research_files import source_file_hash, opened_regular_file
 
 MAX_INPUT_BYTES = 16 * 1024 * 1024
 MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 MAX_OPERATIONS = 20_000_000
+
+
+def computation_input_key(kind):
+    if type(kind) is not str or kind not in {"aggregate", "bundle"}:
+        raise ResearchError("CONTRACT_MISMATCH", "comparison input kind must be aggregate or bundle")
+    return "input_bundle_hash" if kind == "bundle" else "input_aggregate_hash"
+
+
+def computation_input(reference):
+    if type(reference) is not dict:
+        raise ResearchError("CONTRACT_MISMATCH", "comparison input reference must be an object")
+    kind = reference.get("input_kind", "aggregate")
+    key = computation_input_key(kind)
+    other = "input_aggregate_hash" if kind == "bundle" else "input_bundle_hash"
+    if (type(reference.get(key)) is not str or not reference[key] or other in reference
+            or kind == "bundle" and reference[key] != reference.get("source_bundle_hash")):
+        raise ResearchError("CONTRACT_MISMATCH", "comparison input reference is mixed or incomplete")
+    return key, kind
 
 
 def paper_identity(root):
@@ -43,8 +62,33 @@ def paper_identity(root):
             "source_tree_hash": digest(files), "files": files, "source_tree_dirty": dirty}
 
 
-def comparison_plan(bundle, max_operations):
+def require_resource_summary_support(root):
+    """Check the opt-in API without importing or executing Paper source."""
+    root = Path(root)
+    try:
+        for filename, function in (("comparison.py", "compare_package"),
+                                   ("computation_plan.py", "comparison_package_plan")):
+            path = root/"scripts"/"pirc25"/filename
+            with opened_regular_file(root, path, maximum_bytes=MAX_INPUT_BYTES) as (stream, size, _):
+                body = stream.read(size+1)
+            if len(body) != size:
+                raise ValueError("source moved")
+            definitions = [n for n in ast.parse(body.decode("utf-8")).body
+                           if isinstance(n, ast.FunctionDef) and n.name == function]
+            if len(definitions) != 1:
+                raise ValueError("missing API")
+            defaults = {a.arg: d for a, d in zip(definitions[0].args.kwonlyargs, definitions[0].args.kw_defaults)}
+            option = defaults.get("include_resource_summaries")
+            if not isinstance(option, ast.Constant) or option.value is not False:
+                raise ValueError("missing default-off resource API")
+    except (OSError, ValueError, SyntaxError, UnicodeError) as exc:
+        raise ResearchError("CONTRACT_MISMATCH", "paired Paper lacks the default-off resource summary API") from exc
+
+
+def comparison_plan(bundle, max_operations, *, include_resource_summaries=False):
     """A conservative registered-size bound; no metric computation here."""
+    if type(include_resource_summaries) is not bool:
+        raise ResearchError("CONTRACT_MISMATCH", "resource opt-in must be an explicit boolean")
     if type(max_operations) is not int or not 0 < max_operations <= MAX_OPERATIONS:
         raise ResearchError("RESOURCE_PLAN_REJECTED", "invalid statistical operation quota")
     rows = bundle.get("cells")
@@ -67,7 +111,9 @@ def comparison_plan(bundle, max_operations):
     metric_count = max((len(row.get("metrics") or {}) for row in rows), default=0)
     if metric_count > 256:
         raise ResearchError("RESOURCE_PLAN_REJECTED", "metric quota exceeded")
-    preparation = len(rows) * (4 + 4 * metric_count)
+    from application.propagation_resource_summary import resource_work
+    summary_work, graph_sources = resource_work(rows) if include_resource_summaries else (0, 0)
+    preparation = len(rows) * (4 + 4 * metric_count) + summary_work
     interval = (policy.get("interval") or {}) if isinstance(policy, dict) else {}
     if not isinstance(interval, dict):
         raise ResearchError("RESOURCE_PLAN_REJECTED", "interval policy must be a mapping")
@@ -89,7 +135,7 @@ def comparison_plan(bundle, max_operations):
     if len(horizons) > 256:
         raise ResearchError("RESOURCE_PLAN_REJECTED", "comparison figure horizon quota exceeded")
     figure_count = 1 + len(horizons)
-    graph_operations = figure_count * (256 + len(rows) * (8 + 8 * metric_count))
+    graph_operations = figure_count * (256 + len(rows) * (8 + 8 * metric_count) + graph_sources)
     planned = preparation + resampling + graph_operations
     if planned > max_operations:
         raise ResearchError("RESOURCE_PLAN_REJECTED", "registered statistical plan exceeds operation quota")
@@ -99,7 +145,8 @@ def comparison_plan(bundle, max_operations):
             "preparation_operation_bound": preparation, "bootstrap_operation_bound": resampling,
             "comparison_figure_count_bound": figure_count, "figure_byte_bound": 2 * 1024 * 1024,
             "graph_operation_bound": graph_operations,
-            "planned_operation_bound": planned, "allocation": "shared-job-on-frozen-reference-arm"}
+            "planned_operation_bound": planned, "allocation": "shared-job-on-frozen-reference-arm",
+            **({"include_resource_summaries": True} if include_resource_summaries else {})}
 
 
 def _verified_computation(store, reference, *, receipt=None, aggregate=None):
@@ -120,9 +167,19 @@ def _verified_computation(store, reference, *, receipt=None, aggregate=None):
             raise ResearchError("CORRUPT_ARTIFACT", "computation has no successful authoritative attempt")
         run = store._manifest("run-" + attempt["run_id"])
         origin = store._manifest("study-" + run["study_id"])["spec"]["computation_origin"]
+        input_key, input_kind = computation_input(reference)
+        other_input = "input_aggregate_hash" if input_kind == "bundle" else "input_bundle_hash"
+        if (origin.get("input_kind", "aggregate") != input_kind or request.get("input_kind", "aggregate") != input_kind
+                or other_input in origin):
+            raise ResearchError("CORRUPT_ARTIFACT", "computation input kind changed")
+        enabled = request.get("include_resource_summaries", False)
+        if (type(enabled) is not bool or origin.get("include_resource_summaries", False) is not enabled
+                or request["resource_plan"].get("include_resource_summaries", False) is not enabled
+                or origin["resource_plan"] != request["resource_plan"]):
+            raise ResearchError("CORRUPT_ARTIFACT", "computation resource opt-in changed")
         if (run["spec_hash"] != reference["computation_spec_hash"] or run["arm_id"] != proof["cost"]["arm_id"] or
                 run["study_id"] != request["computation_study_id"] or
-                origin["input_aggregate_hash"] != reference["input_aggregate_hash"] or
+                origin[input_key] != reference[input_key] or
                 origin["source_bundle_hash"] != reference["source_bundle_hash"] or
                 origin["paper_identity"] != request["paper_identity"] or origin["formal"] != request["formal"] or
                 attempt["artifact_id"] != proof["result_artifact_id"]):
@@ -139,6 +196,8 @@ def _verified_computation(store, reference, *, receipt=None, aggregate=None):
                 result["aggregate"]["source_bundle_hash"] != reference["source_bundle_hash"] or
                 (aggregate is not None and aggregate != result["aggregate"])):
             raise ResearchError("CORRUPT_ARTIFACT", "imported adjudication is not the managed worker output")
+        from application.propagation_resource_summary import validate_resource_summaries
+        validate_resource_summaries(result["aggregate"], enabled=enabled)
         _verify_job_cost(store, reference, run, proof)
         return proof, result
 
@@ -169,9 +228,10 @@ def _verify_job_cost(store, reference, run, proof):
 
 
 def verified_computation(store, reference, *, receipt=None, aggregate=None):
+    computation_input(reference)
     if not isinstance(reference, dict) or not all(isinstance(reference.get(key), str) for key in (
             "manifest_id", "request_manifest_id", "attempt_id", "run_id", "computation_spec_hash",
-            "reservation_id", "input_aggregate_hash", "source_bundle_hash", "allocation")):
+            "reservation_id", "source_bundle_hash", "allocation")):
         raise ResearchError("CONTRACT_MISMATCH", "managed comparison reference is incomplete")
     try:
         return _verified_computation(store, reference, receipt=receipt, aggregate=aggregate)
