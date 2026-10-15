@@ -842,3 +842,29 @@ not itself extend any source grant. Reservations record both dates; the
 supervisor still enforces the allocated job duration, original cumulative
 24-hour arm cap, native containment and all data checks. Missing policy keeps
 the historical hard-window behavior; unknown policy values are rejected.
+
+### Opt-in saved path-pilot evidence export
+
+`export --include-path-pilot-evidence` adds the actual existing successful
+`affine-path-qualification` result and its artifact metadata, admission, original
+run/attempt and unique reserve/start/native-stop/settlement/completion events.
+The API option is a strict boolean, defaults to false and requires the same
+fresh export authority before assembly, immutable publication and file rename.
+It never starts a worker, creates a grant, replays a sampler/reference or changes
+the recorded classification. Failed/missing cells and all-attempt costs/resources
+remain in the full matrix. Non-opted exports keep their legacy shape.
+
+An opted export is a new immutable bundle with its own hash/file, not an update
+to any previously sealed scalar export. Keep it outside Git. The independent
+Paper `scripts/pirc25/validate_path_pilots.py --expected-hash ...` command checks
+saved reports, including numerical PASSED and FAILED, against the actual result,
+frozen policy, sufficient statistics, certificates and measured native job proof.
+It reports computational noncompletion separately. The trusted owner bundle hash
+is required; self-resealed transport is not proof of authenticity.
+
+This report-only reader is separate from production-source admission, which
+still requires numerical PASSED. Every pilot remains fixture and scientifically
+unqualified; a saved pilot pass is neither a new-code pass nor a distribution
+guarantee. Generic nonformal bundle validation does not claim these additional
+reports were verified. Actual statistical aggregation/figures still require
+their own funded comparison worker; this export adds no managed analysis proof.

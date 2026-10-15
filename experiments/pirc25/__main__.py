@@ -57,6 +57,8 @@ def main(argv=None):
     export.add_argument("study")
     export.add_argument("--authorization-id", required=True)
     export.add_argument("--output", type=Path, required=True)
+    export.add_argument("--include-path-pilot-evidence", action="store_true",
+                        help="include actual saved pilot results and native execution sources; no admission promotion")
     evidence = commands.add_parser("import-evidence")
     evidence.add_argument("directory", type=Path)
     evidence.add_argument("--expected-hash", required=True)
@@ -127,7 +129,8 @@ def main(argv=None):
             from infrastructure.research_store import atomic_write, encode
             from infrastructure.research_publication import prepare_directory, opened_directory
             grant = store.authorization(args.authorization_id, version=args.authorization_version)
-            bundle = export_evidence(store, args.study, grant)
+            options = {"include_path_pilot_evidence": True} if args.include_path_pilot_evidence else {}
+            bundle = export_evidence(store, args.study, grant, **options)
             output = Path(os.path.abspath(args.output))
             if any((parent / ".git").exists() for parent in (output.parent, *output.parents)):
                 raise ResearchError("UNAUTHORIZED_DATA", "export must stay outside Git")

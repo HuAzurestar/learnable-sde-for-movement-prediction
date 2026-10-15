@@ -95,13 +95,16 @@ def require_export_visibility(store, spec, cells, authorization, *, calibration=
     return visibility
 
 
-def export_evidence(store: ResearchStore, study_id: str, authorization: dict):
+def export_evidence(store: ResearchStore, study_id: str, authorization: dict, *, include_path_pilot_evidence=False):
+    if type(include_path_pilot_evidence) is not bool:
+        raise ResearchError("CONTRACT_MISMATCH", "pilot evidence opt-in must be an explicit boolean")
     # Retain one current-thread/PID verified scope and its actual OS lock for
     # the whole source/cost assembly. This is not a persistent grant cache.
     with store._read_transaction():
         authorize_study(store, study_id, authorization, "export")
         snapshot = _export_data_snapshot(store)
-        bundle = _assemble_evidence(store, study_id, authorization)
+        options = {"include_path_pilot_evidence": True} if include_path_pilot_evidence else {}
+        bundle = _assemble_evidence(store, study_id, authorization, **options)
         grants = _fresh_export_authority(store, bundle, authorization)
         if _export_data_snapshot(store) != snapshot:
             raise ResearchError("INDEX_STALE", "authority changed while assembling evidence; retry export")
@@ -214,7 +217,7 @@ def authorize_evidence_publication(store, bundle, authorization):
     _require_current_export_grants(store, grants)
 
 
-def _assemble_evidence(store, study_id, authorization):
+def _assemble_evidence(store, study_id, authorization, *, include_path_pilot_evidence=False):
     spec = store.manifest("study-" + study_id)["spec"]
     from .probability_calibration_consumption import require_calibration_export_support
     require_calibration_export_support(spec)
@@ -236,6 +239,10 @@ def _assemble_evidence(store, study_id, authorization):
         from .propagation_resource_evidence import ResourceEventIndex
         resource_index = ResourceEventIndex(cost_events)
     cells = []
+    pilot_index = None
+    if include_path_pilot_evidence:
+        from .path_pilot_export import PilotEventIndex
+        pilot_index = PilotEventIndex(cost_events)
     for cell in spec["cells"]:
         history = runs.get(digest(cell), [])
         successful = [a for a in history if a["state"] == "SUCCEEDED"]
@@ -310,6 +317,10 @@ def _assemble_evidence(store, study_id, authorization):
                 row.update(admission=admission, admission_hash=result["admission_hash"])
             elif result["qualification"] == "qualified" or "cell_packages" in (spec.get("admission") or {}):
                 raise ResearchError("UNQUALIFIED", "qualified or per-cell-bound result lacks execution admission evidence")
+        if (include_path_pilot_evidence and successful
+                and cell.get("plugin_id") == "affine-path-qualification"):
+            from .path_pilot_export import attach_pilot_result
+            attach_pilot_result(store, row, result, latest, pilot_index)
         cells.append(row)
     visibility = require_export_visibility(store, spec, cells, authorization, calibration=calibration)
     payload = {"schema_version": "pirc25-evidence-bundle-v1", "study_id": study_id,
@@ -322,6 +333,8 @@ def _assemble_evidence(store, study_id, authorization):
                "expected_cells": [{"cell_hash": digest(c), "arm_id": c["arm_id"], "block_id": c["block_id"], "seed": c["seed"],
                                    "comparison_dimensions": comparison_dimensions(c)} for c in spec["cells"]],
                "cells": cells, "disclosure_scope": "authorized-local-export"}
+    if include_path_pilot_evidence:
+        payload["path_pilot_evidence"] = "owned-saved-path-pilot-results-and-native-execution-v1"
     if calibration is not None:
         from .probability_calibration_export import calibration_recorded_at
         payload.update(probability_calibration=calibration,

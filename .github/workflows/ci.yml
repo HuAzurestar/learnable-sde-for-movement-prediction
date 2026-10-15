@@ -63,7 +63,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: HuAzurestar/learnable-sde-paper-to-predict-movement
-          ref: 068b55f670936619e5c63017df2e8afb77854676
+          ref: b0d9da8ccdef8a5434498017faa082813abfcf8d
           path: TSDE-SDE
           persist-credentials: false
       - uses: actions/setup-python@v7
@@ -118,7 +118,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: HuAzurestar/learnable-sde-paper-to-predict-movement
-          ref: 068b55f670936619e5c63017df2e8afb77854676
+          ref: b0d9da8ccdef8a5434498017faa082813abfcf8d
           path: TSDE-SDE
           persist-credentials: false
       - uses: actions/setup-python@v7
