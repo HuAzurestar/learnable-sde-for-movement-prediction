@@ -357,6 +357,8 @@ def accept_aggregate(store, aggregate, study_id):
     # result. Removing both proof fields must never promote a fixture or an
     # operator-rehashed summary to formal evidence.
     managed = "adjudication" in aggregate or "computation_ref" in aggregate
+    if not managed and any("resource_usage_summary" in arm for arm in aggregate.get("arms", [])):
+        raise ResearchError("UNQUALIFIED", "resource summaries require a managed computation proof")
     qualification = aggregate.get("qualification")
     if qualification == "formal" and not managed:
         raise ResearchError("UNQUALIFIED", "formal aggregate requires its managed computation proof")
@@ -391,6 +393,8 @@ def _calibration_summary(aggregate):
 
 def expected_metrics_csv(aggregate):
     """Validate the frozen v1 table serialization without recalculating scores."""
+    from application.propagation_resource_summary import validate_resource_summaries
+    validate_resource_summaries(aggregate)
     stream = io.StringIO(newline="")
     writer = csv.writer(stream, lineterminator="\n")
     extra = [name for name in ("adjudication", "computation_ref") if name in aggregate]
@@ -403,7 +407,8 @@ def expected_metrics_csv(aggregate):
     if current_eligibility and any(not all(name in arm for name in eligibility_fields) for arm in aggregate["arms"]):
         raise ResearchError("CONTRACT_MISMATCH", "incomplete frozen CSV eligibility fields")
     columns = list(eligibility_fields) if current_eligibility else []
-    fields = ["aggregate_hash", "arm_id", "metric", "value", "unit", "independent_n", "expected_cells", "successful_cells", "status", "stratum_id", "comparison_dimensions", "charged_ms", "reserved_ms", "measured_ms", "cost_unit", "cost_scope", "status_rates", *columns, *shared_columns, *extra]
+    resource_columns = ["resource_usage_summary"] if any("resource_usage_summary" in a for a in aggregate["arms"]) else []
+    fields = ["aggregate_hash", "arm_id", "metric", "value", "unit", "independent_n", "expected_cells", "successful_cells", "status", "stratum_id", "comparison_dimensions", "charged_ms", "reserved_ms", "measured_ms", "cost_unit", "cost_scope", "status_rates", *columns, *resource_columns, *shared_columns, *extra]
     writer.writerow(fields)
     frozen = [encode(aggregate[name]).decode() for name in extra]
     for arm in aggregate["arms"]:
@@ -411,14 +416,15 @@ def expected_metrics_csv(aggregate):
         rates = encode(arm.get("status_rates")).decode()
         dimensions = encode(arm["comparison_dimensions"]).decode()
         eligibility = [arm["comparison_eligible_cells"], encode(arm["path_output_dispositions"]).decode()] if current_eligibility else []
+        resources = [encode(arm.get("resource_usage_summary")).decode()] if resource_columns else []
         if not arm["metrics"]:
             writer.writerow([aggregate["aggregate_hash"], arm["arm_id"], "", "", "", arm["independent_n"],
                              arm["expected_cells"], arm["successful_cells"], arm["status"], arm["stratum_id"],
-                             dimensions, *costs, rates, *eligibility, *arm_shared, *frozen])
+                             dimensions, *costs, rates, *eligibility, *resources, *arm_shared, *frozen])
         for metric, value in sorted(arm["metrics"].items()):
             writer.writerow([aggregate["aggregate_hash"], arm["arm_id"], metric, value, arm["metric_units"][metric],
                              arm["independent_n"], arm["expected_cells"], arm["successful_cells"], arm["status"],
-                             arm["stratum_id"], dimensions, *costs, rates, *eligibility, *arm_shared, *frozen])
+                             arm["stratum_id"], dimensions, *costs, rates, *eligibility, *resources, *arm_shared, *frozen])
     if calibration:
         cost = calibration["calibration_cost"]
         # One study-level row, even when every target is missing. It is neither
@@ -434,6 +440,8 @@ def expected_metrics_csv(aggregate):
 
 
 def expected_paper_index(aggregate, table, figure_index=None):
+    from application.propagation_resource_summary import validate_resource_summaries
+    validate_resource_summaries(aggregate)
     claims = []
     for arm in aggregate["arms"]:
         for metric, number in sorted(arm["metrics"].items()):
@@ -441,6 +449,7 @@ def expected_paper_index(aggregate, table, figure_index=None):
                 "metric": metric, "value": number, "arm_id": arm["arm_id"], "stratum_id": arm["stratum_id"],
                 "comparison_dimensions": arm["comparison_dimensions"], "evidence_status": arm["status"],
                 "independent_n": arm["independent_n"], "cost": arm["cost"],
+                **({"resource_usage_summary": arm["resource_usage_summary"]} if "resource_usage_summary" in arm else {}),
                 "unit": arm["metric_units"][metric], "aggregate_hash": aggregate["aggregate_hash"],
                 "attempt_ids": [cell["attempt_id"] for cell in aggregate["cell_dispositions"]
                                 if cell["arm_id"] == arm["arm_id"] and cell["status"] == "SUCCEEDED"
@@ -450,6 +459,11 @@ def expected_paper_index(aggregate, table, figure_index=None):
             "aggregate_hash": aggregate["aggregate_hash"], "table_sha256": hashlib.sha256(table).hexdigest(),
             "code_hash": aggregate["code_hash"], "evidence_status": "active", "relation": None,
             "disclosure_scope": aggregate["disclosure_scope"], "claims": claims,
+            **({"resource_usage_summaries": [
+                {"arm_id": arm["arm_id"], "stratum_id": arm["stratum_id"],
+                 "comparison_dimensions": arm["comparison_dimensions"],
+                 "resource_usage_summary": arm.get("resource_usage_summary")} for arm in aggregate["arms"]]}
+               if any("resource_usage_summary" in arm for arm in aggregate["arms"]) else {}),
             **_calibration_summary(aggregate),
             **({"figure_index_hash": digest(figure_index)} if figure_index is not None else {}),
             **{name: aggregate[name] for name in ("adjudication", "computation_ref") if name in aggregate}}

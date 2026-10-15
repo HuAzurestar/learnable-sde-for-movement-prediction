@@ -68,6 +68,8 @@ def main(argv=None):
     comparison.add_argument("--seconds", type=float, default=7200)
     comparison.add_argument("--max-operations", type=int, default=20_000_000)
     comparison.add_argument("--formal", action="store_true", default=None)
+    comparison.add_argument("--include-resource-summaries", action="store_true",
+                            help="explicit bounded all-attempt propagation resource summaries")
     comparison.add_argument("--parent-attempt")
     comparison.add_argument("--reason")
     comparison.add_argument("--output", type=Path)
@@ -142,6 +144,7 @@ def main(argv=None):
             result = ComparisonRunner(store, args.paper_root).run(args.study, args.aggregate_hash,
                 authorization_id=args.authorization_id, authorization_version=args.authorization_version, budget=BudgetSpec(args.seconds),
                 max_operations=args.max_operations, formal=args.formal,
+                include_resource_summaries=args.include_resource_summaries,
                 parent_attempt_id=args.parent_attempt, reason=args.reason, output=args.output)
         elif args.command == 'render-case':
             from application.research_cases import CaseGraphRunner

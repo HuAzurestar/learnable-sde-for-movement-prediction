@@ -46,12 +46,15 @@ def main():
             digest({k: v for k, v in bundle.items() if k != "bundle_hash"}) != bundle["bundle_hash"] or
             code_hash() != request["runtime_code_hash"] or paper_identity(args.paper_root) != request["paper_identity"]):
         raise ValueError("computation code/source binding changed")
-    if comparison_plan(bundle, request["resource_plan"]["maximum_operations"]) != request["resource_plan"]:
+    enabled = request.get("include_resource_summaries", False)
+    if comparison_plan(bundle, request["resource_plan"]["maximum_operations"],
+                       include_resource_summaries=enabled) != request["resource_plan"]:
         raise ValueError("RESOURCE_PLAN_REJECTED computation allocation differs from frozen source")
     sys.path.insert(0, str(args.paper_root.resolve()))
     from scripts.pirc25.comparison import compare_package
+    options = {"include_resource_summaries": True} if enabled else {}
     package = compare_package(bundle, request["computation_ref"], formal=request["formal"],
-                              max_operations=request["resource_plan"]["maximum_operations"])
+                              max_operations=request["resource_plan"]["maximum_operations"], **options)
     if code_hash() != request["runtime_code_hash"] or paper_identity(args.paper_root) != request["paper_identity"]:
         raise ValueError("computation implementation moved while running")
     result = {"schema_version": "pirc25-computation-result-v1", "request_hash": digest(request),

@@ -624,6 +624,23 @@ legacy engineering-only descriptive packages remain readable.
 python -B -m experiments.pirc25 --root RUNTIME_DIR --store-id STORE_ID compare STUDY_ID INPUT_AGGREGATE_HASH --authorization-id GRANT_ID --paper-root TSDE_ROOT --seconds 7200 --output NEW_PACKAGE_DIR
 ```
 
+Propagation resources may be explicitly included with `--include-resource-summaries`
+or `ComparisonRunner.run(..., include_resource_summaries=True)`. Default is false;
+legacy requests/serializations remain unchanged. The opt-in is frozen in the
+derived study, request and whole-package work plan, including bounded source
+sorting and figure provenance under the same operation ceiling and original arm.
+Before registering a computation attempt, the owner checks the paired Paper's
+default-off API without executing its source. The worker independently rechecks
+the plan and forwards the flag. Runtime then independently checks every summary
+against frozen all-attempt source packets, including failed/partial/unknown rows;
+matching CSV/index/figure hashes alone cannot authenticate a forged summary.
+Unmanaged resource summaries cannot substitute for a paid computation proof.
+Native self-lifetime RSS maxima are not additive memory, a solver-only delta or
+process-tree peak. Pipeline nanoseconds do not replace settled slot-ms charges.
+This bridge does not qualify a method, rerun scientific failures, grant new data
+access or enable the opt-in for existing studies automatically. Saved pilot
+qualification-proof transport and full study analysis remain separate work.
+
 The original-study grant must authorize export of the complete source matrix.
 The runtime retains the selected frozen input version, checks current source
 disclosure, bounds registered-size operations and bytes, and launches the TSDE

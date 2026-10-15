@@ -27,6 +27,11 @@ class ComparisonRunner:
     def _validate_result(self, value, request, bundle):
         try:
             aggregate = value["aggregate"]
+            from application.propagation_resource_summary import validate_resource_summaries
+            enabled = request.get("include_resource_summaries", False)
+            if type(enabled) is not bool:
+                raise ResearchError("CONTRACT_MISMATCH", "resource opt-in must be an explicit boolean")
+            validate_resource_summaries(aggregate, enabled=enabled)
             decision = aggregate["adjudication"]
             table = value["metrics_csv"].encode()
             from application.research_figures import validate_figure_package
@@ -60,7 +65,8 @@ class ComparisonRunner:
             return self._prepare_locked(*args, **kwargs)
 
     def _prepare_locked(self, study_id, input_aggregate_hash, *, authorization_id,
-            max_operations, formal, parent_attempt_id, reason, authorization_version):
+            max_operations, formal, parent_attempt_id, reason, authorization_version,
+            include_resource_summaries=False):
         grant = self.store.authorization(authorization_id, version=authorization_version)
         authorize_study(self.store, study_id, grant, "export")
         source = self.store.manifest("comparison-" + input_aggregate_hash)
@@ -82,7 +88,7 @@ class ComparisonRunner:
         # Revalidate every actual source/qualification disclosure under current
         # grants. Never replace the chosen frozen snapshot with this new export.
         export_evidence(self.store, study_id, grant)
-        plan = comparison_plan(bundle, max_operations)
+        plan = comparison_plan(bundle, max_operations, include_resource_summaries=include_resource_summaries)
         if formal is None:
             # Standalone Paper packages are descriptive inputs. Determine the
             # execution mode from the frozen source admission, not an imported
@@ -91,6 +97,11 @@ class ComparisonRunner:
         if type(formal) is not bool:
             raise ResearchError("CONTRACT_MISMATCH", "formal mode must be explicit boolean")
         paper = paper_identity(self.paper_root)
+        if include_resource_summaries:
+            from application.research_computation import require_resource_summary_support
+            require_resource_summary_support(self.paper_root)
+            if paper_identity(self.paper_root) != paper:
+                raise ResearchError("CONTRACT_MISMATCH", "Paper source changed during resource API preflight")
         runtime_hash = code_hash()
         identity = digest(["shared-compare-v1", digest(original), input_aggregate_hash, runtime_hash, paper, formal, plan])
         # The reference arm is frozen, not a caller-controlled new budget name.
@@ -107,7 +118,8 @@ class ComparisonRunner:
                 "visibility": visibility, "resource_class": "cpu", "plugin_id": "shared-comparison-v1"}],
             "computation_origin": {"study_id": study_id, "spec_hash": digest(original),
                 "input_aggregate_hash": input_aggregate_hash, "source_bundle_hash": bundle["bundle_hash"],
-                "paper_identity": paper, "resource_plan": plan, "formal": formal}}
+                "paper_identity": paper, "resource_plan": plan, "formal": formal,
+                **({"include_resource_summaries": True} if include_resource_summaries else {})}}
         self.store.register(derived, digest(derived))
         run_id = self.store.register_run(derived["study_id"], derived["cells"][0])
         related = [a for a in self.store.attempts().values() if a["run_id"] == run_id]
@@ -121,18 +133,22 @@ class ComparisonRunner:
             "source_bundle_hash": bundle["bundle_hash"], "allocation": plan["allocation"]}
         request = {"schema_version": "pirc25-computation-request-v1", "computation_ref": reference,
             "computation_study_id": derived["study_id"], "runtime_code_hash": runtime_hash,
-            "paper_identity": paper, "resource_plan": plan, "formal": formal}
+            "paper_identity": paper, "resource_plan": plan, "formal": formal,
+            **({"include_resource_summaries": True} if include_resource_summaries else {})}
         return grant, bundle, arm, None, attempt_id, reference, request
 
     def run(self, study_id, input_aggregate_hash, *, authorization_id, budget=BudgetSpec(),
             max_operations=MAX_OPERATIONS, formal=None, parent_attempt_id=None, reason=None, output=None,
-            authorization_version=None):
+            authorization_version=None, include_resource_summaries=False):
+        if type(include_resource_summaries) is not bool:
+            raise ResearchError("CONTRACT_MISMATCH", "resource opt-in must be an explicit boolean")
         study_id, input_aggregate_hash = identifier(study_id), identifier(input_aggregate_hash)
         budget.validate()
         grant, bundle, arm, success, attempt_id, reference, request = self._prepare(
             study_id, input_aggregate_hash, authorization_id=authorization_id,
             max_operations=max_operations, formal=formal, parent_attempt_id=parent_attempt_id,
-            reason=reason, authorization_version=authorization_version)
+            reason=reason, authorization_version=authorization_version,
+            include_resource_summaries=include_resource_summaries)
         if success:
             result = {"attempt_id": success["attempt_id"], "state": "SUCCEEDED",
                       "artifact_id": success["artifact_id"], "exit_code": 0, "reused": True}
