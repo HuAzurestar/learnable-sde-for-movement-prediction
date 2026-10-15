@@ -9,12 +9,14 @@ from experiments.pirc25 import compare_worker
 from infrastructure.research_store import digest, encode
 
 
-def inputs(tmp_path, monkeypatch):
+def inputs(tmp_path, monkeypatch, *, resource_summaries=False):
     bundle = {'cells': []}
     bundle['bundle_hash'] = digest(bundle)
     request = {'computation_ref': {'source_bundle_hash': bundle['bundle_hash']},
                'runtime_code_hash': 'fixture-code', 'paper_identity': 'fixture-paper',
                'resource_plan': {'maximum_operations': 1}}
+    if resource_summaries:
+        request['include_resource_summaries'] = True
     paths = {name: tmp_path / (name + '.json') for name in ('request', 'bundle')}
     paths['request'].write_bytes(encode(request))
     paths['bundle'].write_bytes(encode(bundle))
@@ -23,7 +25,8 @@ def inputs(tmp_path, monkeypatch):
     monkeypatch.setattr(compare_worker, 'code_hash', lambda: 'fixture-code')
     monkeypatch.setattr(compare_worker, 'paper_identity', lambda _: 'fixture-paper')
 
-    def stop_before_computation(*args):
+    def stop_before_computation(*args, **kwargs):
+        assert kwargs == {'include_resource_summaries': resource_summaries}
         raise LookupError('both input reads completed')
 
     monkeypatch.setattr(compare_worker, 'comparison_plan', stop_before_computation)
@@ -31,8 +34,9 @@ def inputs(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize('name', ['request', 'bundle'])
-def test_actual_worker_reads_input_with_explicit_byte_bound(tmp_path, monkeypatch, name):
-    paths = inputs(tmp_path, monkeypatch)
+@pytest.mark.parametrize('resource_summaries', [False, True])
+def test_actual_worker_reads_input_with_explicit_byte_bound(tmp_path, monkeypatch, name, resource_summaries):
+    paths = inputs(tmp_path, monkeypatch, resource_summaries=resource_summaries)
     target = paths[name]
     original = Path.open
     reads = []
@@ -67,8 +71,9 @@ def test_actual_worker_reads_input_with_explicit_byte_bound(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize('name', ['request', 'bundle'])
-def test_growth_after_size_check_is_rejected_before_json_parse(tmp_path, monkeypatch, name):
-    paths = inputs(tmp_path, monkeypatch)
+@pytest.mark.parametrize('resource_summaries', [False, True])
+def test_growth_after_size_check_is_rejected_before_json_parse(tmp_path, monkeypatch, name, resource_summaries):
+    paths = inputs(tmp_path, monkeypatch, resource_summaries=resource_summaries)
     target = paths[name]
     original = Path.open
     monkeypatch.setattr(compare_worker, 'MAX_INPUT_BYTES', 512)
@@ -104,8 +109,9 @@ def test_growth_after_size_check_is_rejected_before_json_parse(tmp_path, monkeyp
     assert not (tmp_path / 'unused-output.json').exists()
 
 
-def test_exact_input_limit_is_accepted_without_truncation(tmp_path, monkeypatch):
-    paths = inputs(tmp_path, monkeypatch)
+@pytest.mark.parametrize('resource_summaries', [False, True])
+def test_exact_input_limit_is_accepted_without_truncation(tmp_path, monkeypatch, resource_summaries):
+    paths = inputs(tmp_path, monkeypatch, resource_summaries=resource_summaries)
     limit = max(path.stat().st_size for path in paths.values())
     monkeypatch.setattr(compare_worker, 'MAX_INPUT_BYTES', limit)
     with pytest.raises(LookupError, match='both input reads completed'):
