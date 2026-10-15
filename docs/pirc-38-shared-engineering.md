@@ -778,6 +778,33 @@ job/arm accounting, integrity checks and recovery holds remain in force.
 This permission changes compute admission capacity, not data freezing, scientific
 qualification, available physical hardware or acceptance of a research result.
 
+### PIRC-27 infrastructure source continuation
+
+`scripts/pirc27_affine_continuation.py` is an explicit operator addendum for the
+original synthetic four-state affine qualification pilot. It does not mutate
+the old studies or transfer their qualification to new source. `prepare`
+records the actual owner reply, retains the original exact/Gaussian arm IDs and
+all historic costs, and calls `BudgetLedger.continue_arm` only after its native
+stop, terminal and settlement checks. A fixed hard four-hour execution window
+and the original aggregate 14400 slot-second cap both remain in force.
+
+The seven unfinished original cells are separately frozen against current code;
+the old Gaussian/stable success remains separate old-source evidence. An
+infrastructure retry uses an immutable `pirc27-source-transition-v1` reference
+with exact old/new run and code identities, original failed parent and approval.
+The narrowly scoped attempt API compares the complete numerical configuration,
+excluding only source-derived policy/resource hashes and CPU-sharing metadata.
+Changed requests, methods, thresholds, arms or data are refused. Settled costs
+and whole-tree-stop proofs are required. At most two explicit retries count
+across source versions; subsequent same-run retries inherit that source record.
+Scientific failures and successful original cells cannot use this bridge.
+
+`run-next` executes one cell through `SharedRunner`, never holds the metadata
+transaction while a worker runs, and stops the operator batch on any failed or
+live continuation attempt. There is no automatic retry or budget reset. Export
+old and new complete matrices separately; do not relabel mixed-source pilot
+results as formal or independent scientific replication.
+
 ### Explicit report-only delivery deadline
 
 A continuation approval may explicitly opt into
