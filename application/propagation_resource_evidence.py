@@ -3,13 +3,15 @@ import json
 
 from .propagation_resources import observation_enabled, validate_packet, require
 from infrastructure.research_files import opened_regular_file
-from infrastructure.research_store import ResearchError, digest, encode
+from infrastructure.research_store import digest, encode
 from infrastructure.research_visibility import study_visibility, admission_visibility, combine_visibility
 
 
 EVENT = "PROPAGATION_RESOURCE_RECORDED"
 ROLE = "propagation-resource-observation"
 PEAK_SCOPE = "not-additive;not-a-phase-delta;not-a-tree-peak"
+REASONS = frozenset({"NOT_LAUNCHED", "UNCONFIRMED_STOP", "UNSETTLED_COST",
+                     "MISSING_OBSERVATION", "INVALID_OBSERVATION"})
 
 
 class ResourceEventIndex:
@@ -46,6 +48,36 @@ def _binding(spec, cell, attempt):
         "attempt_state": attempt["state"], "result_artifact_id": attempt["artifact_id"]}
 
 
+def _publication(index, event, spec, cell, attempt):
+    payload = event["payload"]
+    binding = _binding(spec, cell, attempt)
+    require(set(payload) == set(binding) | {"status", "reason", "artifact_id", "packet_hash",
+            "worker_stop_event_hash", "settlement_event_hash"}, "resource publication fields differ")
+    require(encode({k: payload[k] for k in binding}) == encode(binding), "published resource source changed")
+    stop, settled, reason = index.proof(attempt["attempt_id"])
+    require(payload["worker_stop_event_hash"] == (stop["hash"] if stop else None)
+            and payload["settlement_event_hash"] == (settled["hash"] if settled else None),
+            "published stop/cost source changed")
+    for source in (stop, settled):
+        if source:
+            require(source["sequence"] < event["sequence"], "resource publication precedes stop/cost source")
+    if settled:
+        require(all(settled["payload"][k] == v for k, v in
+                    {"run_id": attempt["run_id"], "study_id": spec["study_id"], "arm_id": cell["arm_id"]}.items()),
+                "resource cost belongs to another run/study/arm")
+    if payload["status"] == "RECORDED":
+        require(reason is None and payload["reason"] is None
+                and type(payload["artifact_id"]) is str
+                and payload["artifact_id"] == payload["packet_hash"], "invalid recorded resource publication")
+    else:
+        require(payload["status"] == "UNAVAILABLE" and payload["reason"] in REASONS
+                and payload["artifact_id"] is None and payload["packet_hash"] is None
+                and (payload["reason"] == reason if reason else
+                     payload["reason"] in {"MISSING_OBSERVATION", "INVALID_OBSERVATION"}),
+                "unknown observation became a measurement")
+    return stop, settled
+
+
 def record_observation(store, attempt_id, spec, cell, receipt, *, validated_packet=None):
     """Called after supervisor cleanup/settlement, including linked resumes.
 
@@ -65,8 +97,8 @@ def record_observation(store, attempt_id, spec, cell, receipt, *, validated_pack
         prior = [e for e in index.by_attempt.get(attempt_id, []) if e["event_kind"] == EVENT]
         binding = _binding(spec, cell, attempt)
         if prior:
-            require(len(prior) == 1 and encode({k: prior[0]["payload"].get(k) for k in binding}) == encode(binding),
-                    "resource publication replay changed binding")
+            require(len(prior) == 1, "duplicate resource publication replay")
+            _publication(index, prior[0], spec, cell, attempt)
             return prior[0]
         stop, settlement, reason = index.proof(attempt_id)
         packet = validated_packet if attempt["state"] == "SUCCEEDED" else None
@@ -99,7 +131,9 @@ def record_observation(store, attempt_id, spec, cell, receipt, *, validated_pack
             "packet_hash": digest(packet) if artifact else None,
             "worker_stop_event_hash": stop["hash"] if stop else None,
             "settlement_event_hash": settlement["hash"] if settlement else None}
-        return store.append(EVENT, payload, "pirc27-resources-"+attempt_id)
+        event = store.append(EVENT, payload, "pirc27-resources-"+attempt_id)
+        _publication(index, event, spec, cell, attempt)
+        return event
 
 
 def resource_history(store, spec, cell, attempts, authorization, *, index=None):
@@ -111,23 +145,23 @@ def resource_history(store, spec, cell, attempts, authorization, *, index=None):
         require(len(sources) <= 1, "duplicate resource publications")
         row = {"attempt_id": attempt["attempt_id"], "status": "UNAVAILABLE", "reason": "NOT_RECORDED",
                "artifact": None, "packet": None, "publication_event": None,
-               "worker_stop_event": None, "settlement_event": None}
+               "worker_stop_event": None, "settlement_event": None, "resume_event": None}
+        resumes = [e for e in index.by_attempt.get(attempt["attempt_id"], []) if e["event_kind"] == "RESUME"]
+        require(len(resumes) <= 1, "duplicate resource resume source")
+        row["resume_event"] = resumes[0] if resumes else None
         if sources:
             event = sources[0]
             payload = event["payload"]
-            binding = _binding(spec, cell, attempt)
-            require(encode({k: payload.get(k) for k in binding}) == encode(binding), "published resource source changed")
-            stop, settled, proof_reason = index.proof(attempt["attempt_id"])
-            require(payload["worker_stop_event_hash"] == (stop["hash"] if stop else None)
-                    and payload["settlement_event_hash"] == (settled["hash"] if settled else None), "published stop/cost source changed")
+            stop, settled = _publication(index, event, spec, cell, attempt)
             row.update(status=payload["status"], reason=payload["reason"], publication_event=event,
                        worker_stop_event=stop, settlement_event=settled)
             if payload["status"] == "RECORDED":
-                require(proof_reason is None and settled["sequence"] < event["sequence"]
-                        and payload["reason"] is None, "observation published before native stop/settlement")
                 metadata = store.manifest("artifact-"+payload["artifact_id"])
                 require(metadata["role"] == ROLE and metadata["study_id"] == spec["study_id"]
-                        and metadata["size_bytes"] <= 16384, "resource artifact scope/size differs")
+                        and metadata["block_ids"] == [cell["block_id"]]
+                        and metadata["sha256"] == metadata["artifact_id"] == payload["packet_hash"]
+                        and type(metadata["size_bytes"]) is int and 0 < metadata["size_bytes"] <= 16384,
+                        "resource artifact scope/size differs")
                 content = store.read_artifact(metadata["artifact_id"], purpose="export", authorization=authorization)
                 packet = json.loads(content)
                 require(content == encode(packet) and digest(packet) == payload["packet_hash"] == metadata["artifact_id"],
@@ -135,12 +169,8 @@ def resource_history(store, spec, cell, attempts, authorization, *, index=None):
                 validate_packet(packet, spec, cell, attempt["attempt_id"],
                     execution_state="SUCCEEDED" if attempt["state"] == "SUCCEEDED" else
                                     "CHECKPOINTED" if attempt["error_code"] == "CHECKPOINT_SAVED" else None)
-                resumed = any(e["event_kind"] == "RESUME" for e in index.by_attempt.get(attempt["attempt_id"], []))
+                resumed = bool(resumes)
                 require(packet["resumed"] is resumed, "resource resume history changed")
                 row.update(artifact=metadata, packet=packet)
-            else:
-                require(payload["status"] == "UNAVAILABLE" and payload["artifact_id"] is None
-                        and payload["packet_hash"] is None and type(payload["reason"]) is str,
-                        "unknown observation became a measurement")
         rows.append(row)
     return {"schema_version": "pirc27-resource-history-v1", "peak_aggregation": PEAK_SCOPE, "attempts": rows}

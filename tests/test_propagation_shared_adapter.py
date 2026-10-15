@@ -219,7 +219,7 @@ def test_actual_chunk_worker_stops_and_reopened_resume_preserves_computation_and
     changes = {"samples": sum(allocation) if allocation else samples, "steps": 128, "chunk_size": 1}
     startup_seconds = _worker_startup_seconds()
     store, spec, registry = prepare(tmp_path, method, recovery=True, changes=changes,
-        level_samples=allocation)
+        level_samples=allocation, resource_observation=True)
     cell = spec["cells"][0]
     started = time.monotonic()
     expected = execute_propagation(spec, cell)
@@ -240,6 +240,15 @@ def test_actual_chunk_worker_stops_and_reopened_resume_preserves_computation_and
     assert saved["progress"]["total_steps"] == cell["execution"]["config"]["work_steps"]
     before = BudgetLedger(store).balance("affine-method")
     assert before["committed_ms"] > 0 and not before["closed"]
+    from application.research_evidence import export_evidence
+    from tests.test_propagation_resource_evidence import paper_check
+    grant = store.authorization(spec["admission"]["authorization_id"])
+    interrupted_bundle = export_evidence(store, spec["study_id"], grant)
+    original_source = interrupted_bundle["cells"][0]["resource_usage"]["attempts"][0]
+    assert original_source["status"] == "RECORDED"
+    assert original_source["packet"]["execution_state"] == "CHECKPOINTED"
+    checked = paper_check(interrupted_bundle)
+    assert checked.returncode == 0, checked.stderr
     reopened = ResearchStore(tmp_path, "propagation-unit")
     grant = reopened.manifest("authorization-" + spec["admission"]["authorization_id"])
     resumed = SharedRecovery(reopened, registry, adapters).resume(interrupted["attempt_id"], saved["artifact_id"],
@@ -252,6 +261,15 @@ def test_actual_chunk_worker_stops_and_reopened_resume_preserves_computation_and
     assert after["committed_ms"] > before["committed_ms"] and not after["closed"]
     assert reopened.attempts()[resumed["attempt_id"]]["parent_attempt_id"] == interrupted["attempt_id"]
     assert actual["resume_level"] == "chunk" and actual["admission_hash"]
+    bundle = export_evidence(reopened, spec["study_id"], grant)
+    sources = bundle["cells"][0]["resource_usage"]["attempts"]
+    assert sources[0] == original_source  # Resume cannot replace old cost/RSS.
+    assert len(sources) == 2 and sources[1]["packet"]["resumed"] is True
+    assert sources[1]["resume_event"]["payload"]["parent_attempt_id"] == interrupted["attempt_id"]
+    assert all(s["status"] == "RECORDED" and s["packet"]["includes_previous_attempts"] is False for s in sources)
+    assert bundle["cells"][0]["cost"]["charged_ms"] == after["committed_ms"]
+    checked = paper_check(bundle)
+    assert checked.returncode == 0, checked.stderr
 
 
 def test_chunk_resource_plan_refuses_total_work_not_just_finest_grid(tmp_path):
