@@ -55,6 +55,32 @@ def _prime_scope(store, previous, bridge):
                  'one-time recovery must follow an original source restart, never another exception')
         _prime_restart(store, previous)
         prime_source_definitions(store, bridge)
+        # v3 also compares cancelled and unfunded predecessor definitions.
+        # Load their immutable syntax in separate physical read scopes, not
+        # for the first time inside the multi-object authority transaction.
+        cancellations = value.get('prelaunch_cancellations', [])
+        _require(type(cancellations) is list and len(cancellations) <= 1,
+                 'bounded historical prelaunch lineage required')
+        references = list(cancellations)
+        if value.get('unfunded_supersession') is not None:
+            references.append(value['unfunded_supersession'])
+        definitions = []
+        with store._read_transaction():
+            for reference in references:
+                predecessor = _published(store, reference, 'historical preflight predecessor')
+                _require(type(predecessor) is dict and type(predecessor.get('attempt_id')) is str,
+                         'historical preflight predecessor identity required')
+                attempt = store._attempts().get(predecessor['attempt_id'])
+                _require(attempt is not None, 'historical preflight predecessor missing')
+                run = store._manifest('run-' + attempt['run_id'])
+                study = store._manifest('study-' + run['study_id'])['spec']
+                definition = study.get('pirc28_study_definition_hash')
+                _require(type(definition) is str and re.fullmatch('[0-9a-f]{64}', definition),
+                         'historical predecessor definition identity required')
+                definitions.append(definition)
+        for definition in definitions:
+            document = store.manifest('pirc28-study-definition-' + definition)
+            _require(digest(document) == definition, 'historical predecessor definition hash differs')
 
 
 def prime_recovery(store, value):
