@@ -29,6 +29,13 @@ def native_case(tmp_path, monkeypatch, request):
     if getattr(request, 'param', None) == 'v2':
         from tests.test_pirc28_approximation import v2_master
         monkeypatch.setattr('tests.test_pirc28_source_epoch.definition_value', v2_master)
+    elif getattr(request, 'param', None) == 'full64':
+        from experiments.pirc28.plan import REFERENCE_PLAN, load_plan, prepare_definition
+        def full_master():
+            value = prepare_definition(load_plan(REFERENCE_PLAN)).to_dict()
+            value['runtime_code_hash'] = 'a' * 64
+            return value
+        monkeypatch.setattr('tests.test_pirc28_source_epoch.definition_value', full_master)
     with monkeypatch.context() as legacy:
         legacy.setattr('experiments.pirc28.runtime.VERSION', '1.1.0')
         for name in ('tests.test_pirc28_study.code_hash', 'tests.test_pirc28_source_epoch.code_hash',

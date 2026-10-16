@@ -12,7 +12,8 @@ import re
 from infrastructure.research_store import ResearchError, digest, encode
 from .research_restart_adjudication import (_published, _reference, _require,
     _resolve_receipt as resolve_previous, _prime_restart, prime_source_definitions,
-    resolve_source_bridge, scientific_cell_identity)
+    resolve_source_bridge, scientific_cell_identity, SCHEMA as RESTART_SCHEMA,
+    PRELAUNCH_SCHEMA, SUPERSESSION_SCHEMA)
 
 SCHEMA = 'pirc28-preflight-recovery-adjudication-v1'
 DECISION_SCHEMA = 'pirc28-preflight-recovery-decision-v1'
@@ -47,6 +48,11 @@ def _parent_reference(store, parent_id):
 
 def _prime_scope(store, previous, bridge):
     if store._read_snapshot() is None:
+        _reference(previous, 'previous preflight adjudication')
+        value = store.manifest(previous['manifest_id'])
+        _require(type(value) is dict and digest(value) == previous['sha256']
+                 and value.get('schema_version') in {RESTART_SCHEMA, PRELAUNCH_SCHEMA, SUPERSESSION_SCHEMA},
+                 'one-time recovery must follow an original source restart, never another exception')
         _prime_restart(store, previous)
         prime_source_definitions(store, bridge)
 
@@ -56,11 +62,12 @@ def prime_recovery(store, value):
         return
     _require(type(value) is dict, 'preflight metadata must be an object')
     if value.get('schema_version') == SCHEMA:
-        reference = value['decision']
+        reference = value.get('decision')
         _reference(reference, 'preflight decision')
         value = store.manifest(reference['manifest_id'])
         _require(digest(value) == reference['sha256'], 'preflight decision hash differs')
-    _require(value.get('schema_version') == DECISION_SCHEMA, 'preflight decision schema differs')
+    _require(type(value) is dict and value.get('schema_version') == DECISION_SCHEMA,
+             'preflight decision schema differs')
     scope = value.get('scope')
     _require(type(scope) is dict and {'previous_adjudication', 'source_bridge'} <= set(scope),
              'preflight scope is incomplete')
@@ -234,11 +241,13 @@ def approve_preflight_recovery(store, *, parent_attempt_id, source_bridge, execu
                      'one-time decision cannot change source, parent or provenance', 'IDENTITY_CONFLICT')
             reference = {'manifest_id': DECISION_ID, 'sha256': digest(value)}
             if not any(e['event_kind'] == APPROVAL_EVENT for e in store._events()):
+                _active_scope(store, facts)
                 _require(not any(a['run_id'] == facts['current_run_id'] for a in store._attempts().values()),
                          'unapproved one-time target has work', 'RECOVERY_REQUIRED')
                 store._append(APPROVAL_EVENT, reference, EVENT_ID + '-approval')
             _decision(store, reference)
             return reference
+        _active_scope(store, facts)
         _require(not any(a['run_id'] == facts['current_run_id'] for a in store._attempts().values()),
                  'one-time target already has an attempt', 'IDENTITY_CONFLICT')
         _require(store.register_run(spec['study_id'], cell) == facts['current_run_id'], 'target run differs')
