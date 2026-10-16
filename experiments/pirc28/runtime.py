@@ -11,7 +11,8 @@ from infrastructure.research_store import ResearchError, atomic_write, digest, e
 from .pipeline import recipe_resources
 
 PLUGIN_ID = 'pirc28-switching'
-VERSION = '1.1.0'
+# The retained 1.1.0 catalog belongs to an earlier immutable module identity.
+VERSION = '1.1.1'
 
 
 def command(output, spec, cell):
