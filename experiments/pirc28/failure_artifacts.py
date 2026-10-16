@@ -1,0 +1,145 @@
+"""Canonical numerical failures bound to ordinary managed admission and costs."""
+
+from dataclasses import replace
+
+import numpy as np
+
+from application.research_preregistration import hash_reference
+from infrastructure.research_store import ResearchError, digest
+from .failures import NUMERICAL_CODES, valid_numerical_diagnostic, POST_REFERENCE_STAGES
+from .pipeline import validate_recipe
+
+
+def failure_result(diagnostic, spec, cell, plugin):
+    payload = {'failure': diagnostic, 'source_schema': 'pirc28-synthetic-failure-v4' if 'k1_boundary_execution' in diagnostic
+               else 'pirc28-synthetic-failure-v3' if 'reference_execution' in diagnostic
+               else 'pirc28-synthetic-failure-v2'
+               if 'approximation_checks' in diagnostic else 'pirc28-synthetic-failure-v1'}
+    return {'schema_version': 'pirc25-failure-v1', 'status': 'FAILED', 'qualification': 'failed',
+        'spec_hash': digest(spec), 'cell_hash': digest(cell), 'protocol_hash': spec['protocol_hash'],
+        'input_hash': spec['data_hash'], 'output_hash': digest(payload), 'error_code': diagnostic['error_code'],
+        'state_order': list(plugin.state_order), 'units': list(plugin.units), 'time_unit': 's',
+        'resume_level': plugin.resume_level, 'qualified_identifiability': False, 'real_data_authorized': False,
+        **payload}
+
+
+def validate_cell_failure(result, spec, cell):
+    """Bounded metadata only; no fitting, forecasting or numerical aggregation."""
+    from .evidence import validate_initialization_history
+    value = result.get('failure')
+    keys = {'schema_version', 'stage', 'error_code', 'initializations', 'selection', 'cause',
+            'recipe_hash', 'generated_inputs'}
+    stages = {'generation', 'fit', 'selection', 'test-inference', 'forecast', 'evaluation'}
+    native_reference = result.get('source_schema') == 'pirc28-synthetic-failure-v3'
+    approximation = native_reference or result.get('source_schema') == 'pirc28-synthetic-failure-v2'
+    k1_boundary = result.get('source_schema') == 'pirc28-synthetic-failure-v4'
+    if k1_boundary:
+        keys |= {'k1_boundary_checks', 'k1_boundary_execution'}
+        stages |= {'k1-boundary'}
+    if approximation:
+        keys |= {'approximation_checks'}
+        stages |= {'approximation'}
+    if native_reference:
+        keys |= {'reference_execution'}
+    if (result.get('source_schema') not in {'pirc28-synthetic-failure-v1', 'pirc28-synthetic-failure-v2', 'pirc28-synthetic-failure-v3', 'pirc28-synthetic-failure-v4'} or type(value) is not dict
+            or set(value) != keys or value['schema_version'] != 'pirc28-numerical-cell-failure-v1'
+            or type(value['stage']) is not str or value['stage'] not in stages
+            or type(value['error_code']) is not str or value['error_code'] not in NUMERICAL_CODES
+            or value['error_code'] != result['error_code']
+            or value['recipe_hash'] != digest({'recipe': spec['switching_recipe'], 'K': cell['fit_K'], 'seed': cell['seed']})):
+        raise ResearchError('CONTRACT_MISMATCH', 'numerical failure recipe/stage/schema differs')
+    scenario, models, inference, prior_mean, prior_covariance = validate_recipe(spec['switching_recipe'], cell['fit_K'])
+    if k1_boundary:
+        from .approximation import RECIPE_SCHEMA
+        if (cell['fit_K'] != 1 or spec['switching_recipe']['schema_version'] != RECIPE_SCHEMA
+                or spec.get('admission', {}).get('mode') not in ('fixture', 'pilot')
+                or value['stage'] not in {'k1-boundary', *POST_REFERENCE_STAGES}):
+            raise ResearchError('CONTRACT_MISMATCH', 'native K1 failure scope differs')
+        report = value['k1_boundary_checks']
+        if (value['stage'] in POST_REFERENCE_STAGES and
+                (type(report) is not dict or report.get('state') != 'NUMERICAL_CHECKS_PASSED')
+                or value['stage'] == 'k1-boundary' and report is not None
+                and (type(report) is not dict or report.get('state') != 'INFERENCE_INAPPLICABLE')):
+            raise ResearchError('CONTRACT_MISMATCH', 'native K1 failure disposition differs')
+    if approximation:
+        from .approximation import ApproximationSpec, RECIPE_SCHEMA
+        from .approximation_evidence import reference_seed
+        post_reference = value['stage'] in POST_REFERENCE_STAGES
+        if (value['stage'] != 'approximation' and not post_reference or cell['fit_K'] != 2
+                or spec['switching_recipe']['schema_version'] != RECIPE_SCHEMA
+                or spec.get('admission', {}).get('mode') not in ('fixture', 'pilot')
+                or spec.get('admission', {}).get('mode') == 'pilot' and not native_reference):
+            raise ResearchError('CONTRACT_MISMATCH', 'admitted approximation failure scope differs')
+        report = value['approximation_checks']
+        if post_reference and (type(report) is not dict or report.get('state') != 'NUMERICAL_CHECKS_PASSED'):
+            raise ResearchError('CONTRACT_MISMATCH', 'later cell failure requires complete passed prefix evidence')
+        if report is not None:
+            if (type(report) is not dict or report.get('state') != (
+                    'NUMERICAL_CHECKS_PASSED' if post_reference else 'INFERENCE_INAPPLICABLE')
+                    or report.get('spec_hash') != ApproximationSpec.from_dict(spec['switching_recipe']['approximation_spec']).spec_hash
+                    or report.get('reference_seed') != reference_seed(spec['switching_recipe'], cell['seed'])
+                    or report.get('origin_index') != spec['switching_recipe']['forecast_origin_index']
+                    or any(report.get(name) is not False for name in (
+                        'managed_evidence_bound', 'qualified_identifiability', 'real_data_authorized'))):
+                raise ResearchError('CONTRACT_MISMATCH', 'failed prefix report identity/disposition differs')
+    generated = value['generated_inputs']
+    if (type(generated) is not list or any(type(item) is not dict for item in generated)
+            or not 0 <= len(generated) <= 3 or (value['stage'] != 'generation' and len(generated) != 3)
+            or (value['stage'] == 'generation' and len(generated) == 3)):
+        raise ResearchError('CONTRACT_MISMATCH', 'failure generated-source history differs')
+    seeds = np.random.default_rng(cell['seed']).integers(0, 2**63, size=3, dtype=np.int64)
+    for index, role in enumerate(('train', 'selection', 'test')[:len(generated)]):
+        frozen = replace(scenario, seed=int(seeds[index]), sample_count=spec['switching_recipe'][role+'_paths'],
+                         scenario_id=scenario.scenario_id+'-'+role)
+        if (set(generated[index]) != {'role', 'scenario_hash', 'observations_hash', 'truth_hash'}
+                or generated[index]['role'] != role or generated[index]['scenario_hash'] != frozen.scenario_hash
+                or not hash_reference(generated[index]['observations_hash'])
+                or not hash_reference(generated[index]['truth_hash'])):
+            raise ResearchError('IDENTITY_CONFLICT', 'failure roles differ from registered source streams')
+    histories = value['initializations']
+    if value['stage'] == 'generation':
+        expected = [{'initialization_id': 'init-'+str(index), 'state': 'NOT_RUN',
+                     'initial_model_hash': digest(model.to_dict())} for index, model in enumerate(models)]
+        if histories != expected or value['selection'] is not None:
+            raise ResearchError('CONTRACT_MISMATCH', 'generation failure cannot invent fitted initializations')
+    else:
+        chosen = validate_initialization_history(spec, cell, value, generated,
+            allow_failed_selection=value['stage'] in {'fit', 'selection'})
+        if (value['stage'] == 'fit' and (value['selection'] is not None or chosen is not None)
+                or value['stage'] == 'selection' and (value['selection'] is None or chosen is not None
+                    or not any(history['state'] == 'SUCCEEDED' for history in histories))):
+            raise ResearchError('CONTRACT_MISMATCH', 'failed initialization stage/disposition differs')
+        if approximation and report is not None:
+            probability = np.ones(cell['fit_K']) / cell['fit_K']
+            means = np.tile(prior_mean, (cell['fit_K'], 1))
+            covariances = np.tile(prior_covariance, (cell['fit_K'], 1, 1))
+            if (chosen is None or report.get('model_hash') != chosen['model_hash']
+                    or report.get('schema_version') != 'pirc28-approximation-numerical-check-v1'
+                    or report.get('inference_hash') != digest(inference.to_dict())
+                    or report.get('initial_state_hash') != digest({'probability': probability.tolist(),
+                        'means': means.tolist(), 'covariances': covariances.tolist()})):
+                raise ResearchError('CONTRACT_MISMATCH', 'failed prefix selected-model/prior identity differs')
+        if native_reference:
+            from .reference_execution import validate_reference_execution
+            record = value['reference_execution']
+            # Actual attempt/command/cost provenance is checked by reuse/collector;
+            # this handler binds the bounded source/report metadata only.
+            attempt = {'attempt_id': record.get('attempt_id'), 'run_id': record.get('run_id')} if type(record) is dict else {}
+            if chosen is None:
+                raise ResearchError('CONTRACT_MISMATCH', 'native reference has no selected fit')
+            validate_reference_execution(record, spec, cell, attempt, chosen['model'], report)
+        if k1_boundary:
+            from .k1_execution import validate_execution
+            record = value['k1_boundary_execution']
+            attempt = {'attempt_id': record.get('attempt_id'), 'run_id': record.get('run_id')} if type(record) is dict else {}
+            if chosen is None:
+                raise ResearchError('CONTRACT_MISMATCH', 'native K1 failure has no selected fit')
+            validate_execution(record, spec, cell, attempt, chosen['model'], report)
+    cause = value['cause']
+    if value['stage'] in {'fit', 'selection'}:
+        if cause is not None or value['error_code'] != 'INFERENCE_INAPPLICABLE':
+            raise ResearchError('CONTRACT_MISMATCH', 'all-initializer failure must retain its individual causes')
+    elif (not valid_numerical_diagnostic(cause, value['stage'], None)
+            or set(cause) != {'schema_version', 'state', 'initialization_id', 'stage', 'error_code', 'exception_type'}
+            or cause['error_code'] != value['error_code']):
+        raise ResearchError('CONTRACT_MISMATCH', 'whole-cell numerical cause differs')

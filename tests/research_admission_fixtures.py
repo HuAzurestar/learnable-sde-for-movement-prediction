@@ -54,7 +54,9 @@ def bind_fixture_execution(value, plugin, config=None, inputs=None, components=N
     for cell in value["cells"]:
         if cell.get("plugin_id") == plugin.plugin_id:
             cell["resource_class"] = plugin.registry_entry.resource_class
-            cell["execution"] = execution_binding(plugin.registry_entry, config or {}, inputs or {}, matrix_cells=len(value["cells"]),
+            configuration = config(cell) if callable(config) else config or {}
+            declared_inputs = inputs(cell) if callable(inputs) else inputs or {}
+            cell["execution"] = execution_binding(plugin.registry_entry, configuration, declared_inputs, matrix_cells=len(value["cells"]),
                 components=components, component_registries=plugin.component_registries)
 
 
@@ -62,11 +64,12 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
                   execution_config=None, execution_inputs=None, recovery_command_builder=None,
                   upstream_ids=(), upstream_inputs=None, accepted_versions=None,
                   upstream_dependencies=None, pirc22_cutover=None, upstream_visibility="synthetic", legacy_upstream=True,
+                  pilot=False, source_content=None, dataset_id="synthetic", preregistration_extra=None,
+                  protocol_id="inputs", authorization_id="execution-fixture",
+                  fixture_prefix="", primary_metrics=None, preserve_execution=False,
                   execution_components=None, input_content=None, package_payload=None, split_role=None,
                   input_block_metadata=None, input_data_root=None,
-                  protocol_id="inputs", authorization_id="execution-fixture",
-                  fixture_prefix="", primary_metrics=None,
-                  preregistration_extra=None, preserve_execution=False):
+                  ):
     if preserve_execution:
         from application.research_execution import execution_plan
         for cell in value["cells"]:
@@ -109,9 +112,11 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
                              else [record["object_id"] for record in upstream_inputs])} for cell in value["cells"]]})
     snapshot_hash = store.publish("upstream-snapshot-" + snapshot.snapshot_hash, snapshot.definition)
     content = b"explicit synthetic plugin input" if input_content is None else input_content
+    if source_content is not None:
+        content = source_content
     input_filename = fixture_prefix+"plugin-input.bin"
     (root / input_filename).write_bytes(content)
-    blocks = [{"block_id": block, "dataset_id": "synthetic", "release_id": "v1",
+    blocks = [{"block_id": block, "dataset_id": dataset_id, "release_id": "v1",
                "source_block_id": block, "sha256": hashlib.sha256(content).hexdigest(),
                "path": input_filename, "split_role": split_role or ("final-eval" if formal else "train"),
                "fit_scope": not formal and split_role in (None, "train"),
@@ -122,7 +127,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
         blocks = [dict(input_block_metadata)]
     protocol = {"schema_version": "pirc25-data-protocol-v1", "protocol_id": fixture_prefix+protocol_id,
                 "study_id": value["study_id"], "blocks": blocks}
-    if formal:
+    if formal or pilot:
         gate = PreregistrationGate(store)
         history = {"records": [{**source_identity(block), "status": "unexposed"} for block in blocks]}
         report = {"schema_version": "pirc25-exposure-history-v1", "source": "synthetic fixture history",
@@ -134,7 +139,8 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
                 "stopping_rule": "fixed matrix", "qualification_checks": ["contract"],
                 "upstream_bindings": {value["study_id"]: study_binding(snapshot_hash, catalog_hash, study)},
                 "comparisons": [{"reference": value["arms"][0]["arm_id"],
-                                 "candidates": [a["arm_id"] for a in value["arms"][1:]]}], **(preregistration_extra or {})}
+                                 "candidates": [a["arm_id"] for a in value["arms"][1:]]}]}
+        plan.update(preregistration_extra or {})
         protocol["preregistration_hash"] = gate.register_preregistration(plan, digest(plan))
         value["comparison_plan"] = {"reference_arm_id": value["arms"][0]["arm_id"],
             "candidate_arm_ids": [a["arm_id"] for a in value["arms"][1:]],
@@ -173,7 +179,7 @@ def admit_fixture(store, value, plugin, root, *, formal=False, package_visibilit
             "checks": [{"check_id": "contract", "artifact_id": artifact["artifact_id"]}]}
         package["qualification_hash"] = store.publish("qualification-" + digest(qualification), qualification)
     reference = store.publish("package-" + digest(package), package)
-    value["admission"] = {"mode": "formal" if formal else "fixture", "protocol_id": protocol["protocol_id"],
+    value["admission"] = {"mode": "formal" if formal else "pilot" if pilot else "fixture", "protocol_id": protocol["protocol_id"],
         "authorization_id": grant["authorization_id"], "package_hash": reference,
         "upstream_snapshot_hash": snapshot_hash, "upstream_acceptance_hash": catalog_hash, "upstream_root": str(root),
         "upstream_ids": list(upstream_ids), "upstream_hash": upstream["manifest_hash"],

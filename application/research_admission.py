@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
-from .research_contracts import validate_package, validate_result, invoke_validator
+from .research_contracts import validate_package, validate_result, validate_failure, invoke_validator
 from .research_data import EvaluationExposureLedger
 from .research_preregistration import PreregistrationGate, hash_reference, source_identity, validate_preregistration, protocol_binding
 from infrastructure.research_store import ResearchError, digest, encode, utc_now
@@ -44,6 +44,8 @@ def plugin_binding(plugin):
         binding["result_validator_hash"] = command_binding(plugin.result_validator)
     if plugin.validator_store_context:
         binding["validator_store_context"] = True
+    if plugin.failure_validator is not None:
+        binding["failure_validator_hash"] = command_binding(plugin.failure_validator)
     return digest(binding)
 
 
@@ -440,6 +442,21 @@ class AdmissionGate:
                 invoke_validator(plugin, "result_validator", self.store, receipt, result)
         return validate
 
+    def failure_validator(self, receipt, spec, cell, plugin):
+        def validate(result):
+            from .research_execution import execution_plan
+            from .research_registry import validate_value
+            if (receipt.get('resource_plan') != execution_plan(spec, cell, plugin)
+                    or receipt.get('registry_entry') != plugin.registry_entry.manifest()
+                    or receipt.get('plugin_hash') != plugin_binding(plugin)):
+                raise ResearchError('CONTRACT_MISMATCH', 'failure resource/registry/handler admission changed')
+            validate_value(plugin.registry_entry.output_schema, result)
+            validate_failure(result, spec=spec, cell=cell, plugin=plugin)
+            if result.get('admission_hash', receipt['admission_hash']) != receipt['admission_hash']:
+                raise ResearchError('CONTRACT_MISMATCH', 'worker substituted another failure admission')
+            result['admission_hash'] = receipt['admission_hash']
+        return validate
+
     def run(self, attempt_id, spec, cell, plugin, command_builder, budget, *, builtin_fixture=False, recovery_builder=None, checkpoint_handler=None):
         if "resource_observation_policy" in cell:
             from .propagation_resources import observation_enabled
@@ -571,7 +588,7 @@ class AdmissionGate:
             try:
                 mode = "fixture" if builtin_fixture else spec.get("admission", {}).get("mode")
                 cap = {"fixture": 900, "pilot": 1800, "formal": 7200}.get(mode, 7200)
-                if budget.job_seconds > cap:
+                if budget.job_seconds is not None and budget.job_seconds > cap:
                     raise ResearchError("CONTRACT_MISMATCH", "execution stage budget exceeds its hard cap")
                 admitted.update(self.prepare(spec, cell, plugin, attempt_id, builtin_fixture=builtin_fixture,
                                              recovery_builder=recovery_builder))
@@ -585,13 +602,17 @@ class AdmissionGate:
                 command = [*command, "--admission-hash", admitted["admission_hash"]]
             return command
         def validate(result):
-            self.result_validator(admitted, spec, cell, plugin)(result)
+            validated = self.result_validator(admitted, spec, cell, plugin)(result)
             if "resource_observation_policy" in cell:
                 observed["packet"] = json.loads(encode(result["resource_observation"]))
+            return validated
+        def validate_failed(result):
+            return self.failure_validator(admitted, spec, cell, plugin)(result)
         def checkpoint(state, progress, deadline):
             return checkpoint_handler(state, progress, admitted, deadline)
         try:
             outcome = ResearchSupervisor(self.store).run(attempt_id, command, budget, result_validator=validate,
+                failure_validator=validate_failed if plugin.failure_validator is not None else None,
                 resource_plan=resource_plan, checkpoint_handler=checkpoint if checkpoint_handler is not None else None,
                 resource_sharing=cell.get("resource_sharing"))
         except BaseException:

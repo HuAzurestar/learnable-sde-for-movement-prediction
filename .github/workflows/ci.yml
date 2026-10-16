@@ -41,10 +41,8 @@ jobs:
   python-shards:
     name: suite (${{ matrix.python-version }}, partition ${{ matrix.partition }})
     runs-on: ubuntu-latest
-    # Covers dependency installation plus the complete version-specific suite.
-    # The preceding matrix's test steps alone took 24-25 minutes, before the
-    # additional source-owner, independent-reader and formal-restore controls.
-    # Shared research/fixture worker budgets and watchdog deadlines are separate.
+    # Preserve the job limit and all individual worker/watchdog deadlines.
+    # Each shard collects the COMPLETE inventory before selecting its partition.
     timeout-minutes: 45
     defaults:
       run:
@@ -87,12 +85,15 @@ jobs:
           python scripts/ci_pytest_partition.py run --count 4
           --index ${{ matrix.partition }}
           --report "${{ runner.temp }}/coverage-${{ matrix.python-version }}-${{ matrix.partition }}.json"
+          --junitxml "${{ runner.temp }}/junit-${{ matrix.python-version }}-${{ matrix.partition }}.xml"
       - name: Preserve coverage outcomes, including failures
         if: ${{ always() }}
         uses: actions/upload-artifact@v7.0.2
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.partition }}
-          path: ${{ runner.temp }}/coverage-${{ matrix.python-version }}-${{ matrix.partition }}.json
+          path: |
+            ${{ runner.temp }}/coverage-${{ matrix.python-version }}-${{ matrix.partition }}.json
+            ${{ runner.temp }}/junit-${{ matrix.python-version }}-${{ matrix.partition }}.xml
           if-no-files-found: error
           retention-days: 14
   python:

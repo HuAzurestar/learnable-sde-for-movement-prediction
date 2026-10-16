@@ -17,6 +17,7 @@ import uuid
 
 ENVIRONMENT = "PIRC25_WORKER_CONTROL"
 SCHEMA = "pirc25-worker-control-v1"
+RESOURCE_SCHEMA = "pirc25-worker-control-v2-resource-guarded"
 
 
 class ControlError(ValueError):
@@ -223,18 +224,19 @@ class CheckpointExchange:
     def __init__(self, directory, attempt_id, deadline, byte_limit):
         self.directory, self.attempt_id = Path(directory), attempt_id
         self.deadline, self.byte_limit = deadline, byte_limit
+        self.schema = RESOURCE_SCHEMA if deadline is None else SCHEMA
         self.token = secrets.token_hex(32)
         self.request_id = None
         self.accepted = False
 
     def environment(self):
-        descriptor = {"schema_version": SCHEMA, "directory": str(self.directory), "attempt_id": self.attempt_id,
+        descriptor = {"schema_version": self.schema, "directory": str(self.directory), "attempt_id": self.attempt_id,
             "deadline": self.deadline, "byte_limit": self.byte_limit, "token": self.token}
         return {ENVIRONMENT: canonical(descriptor, 16384).decode()}
 
     def request(self):
         self.request_id = uuid.uuid4().hex
-        value = {"schema_version": SCHEMA, "attempt_id": self.attempt_id, "token": self.token,
+        value = {"schema_version": self.schema, "attempt_id": self.attempt_id, "token": self.token,
             "request_id": self.request_id, "deadline": self.deadline}
         write_frame(self.directory / "checkpoint-request.json", value, 16384, deadline=self.deadline)
         return self.request_id
@@ -246,7 +248,7 @@ class CheckpointExchange:
         if value is None:
             return None
         if (type(value) is not dict or set(value) != {"schema_version", "attempt_id", "token", "request_id", "state", "progress"}
-                or value["schema_version"] != SCHEMA or value["attempt_id"] != self.attempt_id
+                or value["schema_version"] != self.schema or value["attempt_id"] != self.attempt_id
                 or value["token"] != self.token or self.request_id is None or value["request_id"] != self.request_id):
             raise ControlError("checkpoint response identity differs")
         return value
@@ -255,7 +257,7 @@ class CheckpointExchange:
         if (self.request_id is None or type(artifact_id) is not str
                 or re.fullmatch(r"[0-9a-f]{64}", artifact_id) is None):
             raise ControlError("checkpoint acknowledgement needs issued request and valid artifact")
-        write_frame(self.directory / "checkpoint-ack.json", {"schema_version": SCHEMA,
+        write_frame(self.directory / "checkpoint-ack.json", {"schema_version": self.schema,
             "request_id": self.request_id, "artifact_id": artifact_id}, 16384, deadline=self.deadline)
         self.accepted = True
 
@@ -263,14 +265,15 @@ class CheckpointExchange:
 class WorkerControl:
     def __init__(self, descriptor):
         if (type(descriptor) is not dict or set(descriptor) != {"schema_version", "directory", "attempt_id", "deadline", "byte_limit", "token"}
-                or descriptor["schema_version"] != SCHEMA or type(descriptor["directory"]) is not str
+                or descriptor["schema_version"] not in {SCHEMA, RESOURCE_SCHEMA} or type(descriptor["directory"]) is not str
                 or "\x00" in descriptor["directory"] or not Path(descriptor["directory"]).is_absolute()
                 or type(descriptor["attempt_id"]) is not str
                 or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", descriptor["attempt_id"]) is None
                 or type(descriptor["token"]) is not str or re.fullmatch(r"[0-9a-f]{64}", descriptor["token"]) is None
-                or type(descriptor["deadline"]) not in {float, int}
-                or (type(descriptor["deadline"]) is int and descriptor["deadline"].bit_length() > 256)
-                or not math.isfinite(descriptor["deadline"])
+                or not ((descriptor["schema_version"] == RESOURCE_SCHEMA and descriptor["deadline"] is None)
+                    or (descriptor["schema_version"] == SCHEMA and type(descriptor["deadline"]) in {float, int}
+                        and not (type(descriptor["deadline"]) is int and descriptor["deadline"].bit_length() > 256)
+                        and math.isfinite(descriptor["deadline"])))
                 or type(descriptor["byte_limit"]) is not int or not 0 < descriptor["byte_limit"] <= 64 * 1024 * 1024):
             raise ControlError("checkpoint control descriptor is invalid")
         self.descriptor = json.loads(canonical(descriptor, 16384))
@@ -304,17 +307,21 @@ class WorkerControl:
         return value
 
     def save(self, state, progress):
-        if self.request is None or time.monotonic() >= self.descriptor["deadline"]:
+        deadline = self.descriptor["deadline"]
+        if self.request is None or (deadline is not None and time.monotonic() >= deadline):
             raise ControlError("checkpoint save has no live request")
         frame = {key: self.request[key] for key in ("schema_version", "attempt_id", "token", "request_id")}
         write_frame(self.directory / "checkpoint-response.json", {**frame, "state": state, "progress": progress},
             self.descriptor["byte_limit"], deadline=self.descriptor["deadline"])
-        while time.monotonic() < self.descriptor["deadline"]:
+        # An unlimited experiment does not imply an unlimited ACK wait. The
+        # independent owner/worker monitors still contain an unavailable owner.
+        ack_deadline = deadline if deadline is not None else time.monotonic() + 15
+        while time.monotonic() < ack_deadline:
             ack = read_frame(self.directory / "checkpoint-ack.json", 16384)
             if ack is not None:
                 require_live(self.descriptor["deadline"])
                 if (type(ack) is not dict or set(ack) != {"schema_version", "request_id", "artifact_id"}
-                        or ack["schema_version"] != SCHEMA or ack["request_id"] != self.request["request_id"]
+                        or ack["schema_version"] != self.descriptor["schema_version"] or ack["request_id"] != self.request["request_id"]
                         or type(ack["artifact_id"]) is not str or re.fullmatch(r"[0-9a-f]{64}", ack["artifact_id"]) is None):
                     raise ControlError("checkpoint acknowledgement identity differs")
                 return ack["artifact_id"]

@@ -12,7 +12,7 @@ import time
 
 def main():
     heartbeat, deadline, *command = sys.argv[1:]
-    deadline = float(deadline)
+    deadline = None if deadline == "none" else float(deadline)
     # Parent assigns the Windows Job Object before releasing this barrier.
     if sys.stdin.readline().strip() != "GO":
         return 125
@@ -31,9 +31,11 @@ def main():
 
     # Independent of heartbeat writes, child polling and the owner's threads.
     # All startup stays inside the original absolute deadline.
-    watchdog = threading.Timer(max(0, deadline - time.monotonic()), stop)
-    watchdog.daemon = True
-    watchdog.start()
+    watchdog = None
+    if deadline is not None:
+        watchdog = threading.Timer(max(0, deadline - time.monotonic()), stop)
+        watchdog.daemon = True
+        watchdog.start()
     child = subprocess.Popen(command, stdin=subprocess.DEVNULL)
 
     def parent_watch():
@@ -42,7 +44,7 @@ def main():
 
     threading.Thread(target=parent_watch, daemon=True).start()
     while child.poll() is None:
-        if time.monotonic() >= deadline:
+        if deadline is not None and time.monotonic() >= deadline:
             stop()
             return 124
         Path(heartbeat).write_text(json.dumps({"monotonic": time.monotonic(), "pid": child.pid}))
@@ -51,10 +53,11 @@ def main():
         # Keep the same heartbeat cadence and absolute, independently fused
         # deadline; a timeout merely means the next heartbeat is due.
         try:
-            child.wait(timeout=min(0.1, max(0, deadline - time.monotonic())))
+            child.wait(timeout=0.1 if deadline is None else min(0.1, max(0, deadline - time.monotonic())))
         except subprocess.TimeoutExpired:
             pass
-    watchdog.cancel()
+    if watchdog is not None:
+        watchdog.cancel()
     # Do not explicitly close the self-containing job before returning: that
     # would terminate this wrapper without preserving the child's exit code.
     # Process exit closes its last handle and kills leftover descendants.
