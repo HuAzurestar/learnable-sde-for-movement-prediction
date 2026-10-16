@@ -418,6 +418,10 @@ class ResearchStore:
             boundary = (parent.opened_member(path) if parent is not None
                         else opened_regular_file(path.parent, path))
             with boundary as (stream, size, verify):
+                if path.parent.name == 'manifests' and path.name.startswith((
+                        'pirc28-study-definition-', 'pirc28-source-epoch-bridge-')):
+                    from .research_source_json import read_source_json
+                    return read_source_json(stream, size, verify_identity=verify)
                 return read_json(stream, size, verify_identity=verify)
         except (OSError, ValueError) as exc:
             raise ResearchError("CORRUPT_ARTIFACT", "invalid authoritative object") from exc

@@ -12,6 +12,7 @@ from application.research_execution import execution_plan
 from application.research_preregistration import hash_reference
 from experiments.pirc25.affine import code_hash
 from infrastructure.research_store import ResearchError, digest, encode
+from infrastructure.research_source_json import source_json_scope
 from .approximation import RECIPE_SCHEMA
 from .evidence import _preregistration, _run_id, study_definition_binding
 from .qualification import IdentifiabilitySpec
@@ -58,6 +59,7 @@ def _current_authority(store, study, cell, attempt, admissions, reserve, prefix)
             'BUDGET_EXHAUSTED', 'original scientific arm is closed')
 
 
+@source_json_scope()
 def validate_scientific_source(store, study, cell, attempt, *, check_budget):
     """Revalidate canonical original metadata before any generated/fitted data."""
     _require(callable(check_budget), 'CONTRACT_MISMATCH', 'explicit pre-fit deadline poll required')
