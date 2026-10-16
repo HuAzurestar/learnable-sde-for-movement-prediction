@@ -532,6 +532,11 @@ class ResearchSupervisor:
                     outcome, artifact_id, error_code = "INTERRUPTED", None, "CHECKPOINT_SIGNAL_UNCONFIRMED"
             if tree is not None:
                 tree.close()
+            # Preserve mandatory native stop proof before optional control-pipe
+            # diagnostics. A corrupt diagnostic append must still propagate,
+            # but cannot hide the already observed stop or release its costs.
+            if stop_confirmed and tree is not None:
+                record_tree_stopped()
             if process is not None:
                 try:
                     process.stdin.close()
@@ -552,12 +557,6 @@ class ResearchSupervisor:
                         pass
                     else:
                         control_close_recorded = True
-            # Control release or owner I/O can leave the body before its normal
-            # stop journal. Native cleanup still proves the launched tree is
-            # stopped; preserve that evidence before authoritative settlement,
-            # including when settlement subsequently fails and retains cost.
-            if stop_confirmed and tree is not None:
-                record_tree_stopped()
             # Unknown stop retains the reservation and current diagnostic wall
             # time. Confirmed computation is never billed for subsequent owner
             # work; result validation still has its original deadline vetoes.

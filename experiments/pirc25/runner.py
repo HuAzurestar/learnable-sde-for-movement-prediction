@@ -25,7 +25,9 @@ class SharedRunner:
         self.recovery_registry = recovery_registry
 
     def run_cell(self, study_id, cell_hash, *, budget=BudgetSpec(60, category="smoke"), parent_attempt_id=None,
-                 reason=None, restart_adjudication=None):
+                 reason=None, restart_adjudication=None, source_transition_ref=None):
+        if restart_adjudication is not None and source_transition_ref is not None:
+            raise ResearchError("CONTRACT_MISMATCH", "restart adjudication and source transition are mutually exclusive")
         if type(budget) is ResourceBudgetSpec:
             from application.research_restart_adjudication import prime_policy_definitions
             prime_policy_definitions(self.store, budget.execution_policy, budget.source_code_hash)
@@ -50,7 +52,8 @@ class SharedRunner:
                 from application.research_reuse import verified_reuse
                 return verified_reuse(self.store, attempt, spec, cell, plugin)
         if restart_adjudication is None:
-            attempt = self.store.new_attempt(run_id, parent_attempt_id=parent_attempt_id, reason=reason)
+            attempt = self.store.new_attempt(run_id, parent_attempt_id=parent_attempt_id, reason=reason,
+                                             source_transition_ref=source_transition_ref)
         else:
             from application.research_restart_adjudication import resolve_retry_adjudication
             if type(budget) is not ResourceBudgetSpec or parent_attempt_id is not None or reason is not None:

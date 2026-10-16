@@ -1,10 +1,11 @@
 """The actual 80% control signal must not wait for blocking owner authority I/O.
 
-This separate 600-step/6s engineering control does not replace or relax the
+This separate 1200-step/12s engineering control does not replace or relax the
 original 300-step/3s interruption and 6s reopened continuation acceptance.
 Signalling is not an authorization: fresh closure/hold checks still veto ACK.
 """
 import time
+import threading
 
 import pytest
 
@@ -20,18 +21,30 @@ from tests.test_research_checkpoint_phase_work import longer_command, longer_res
 from tests.test_research_store import spec
 
 
+def signal_command(output, value, cell):
+    result = longer_command(output, value, cell)
+    result[2] = result[2].replace("600", "1200")
+    return result
+
+
+def signal_resume_command(output, value, cell, state):
+    result = longer_resume_command(output, value, cell, state)
+    result[2] = result[2].replace("600", "1200")
+    return result
+
+
 def owner(tmp_path, level):
     store = ResearchStore(tmp_path, 'soft-signal', initialize=True)
     value = spec()
     value['cells'][0].update(plugin_id='soft-signal', capability='generic-rollout',
                              visibility='synthetic', fixture_resume_level=level)
     plugin = synthetic_plugin('soft-signal', frozenset({'generic-rollout'}),
-        ('x', 'y', 'vx', 'vy'), ('m', 'm', 'm/s', 'm/s'), level, longer_command)
-    plugin.registry_entry.resource_contract['counts']['steps'] = {'constant': 600}
+        ('x', 'y', 'vx', 'vy'), ('m', 'm', 'm/s', 'm/s'), level, signal_command)
+    plugin.registry_entry.resource_contract['counts']['steps'] = {'constant': 1200}
     registry, recovery = CapabilityRegistry(), RecoveryRegistry()
     registry.register(plugin)
-    recovery.register(RecoveryPlugin(plugin.plugin_id, level, longer_resume_command, '1.0.0'))
-    admit_fixture(store, value, plugin, tmp_path, recovery_command_builder=longer_resume_command)
+    recovery.register(RecoveryPlugin(plugin.plugin_id, level, signal_resume_command, '1.0.0'))
+    admit_fixture(store, value, plugin, tmp_path, recovery_command_builder=signal_resume_command)
     store.register(value, digest(value))
     return store, value, SharedRunner(store, registry, recovery_registry=recovery)
 
@@ -40,7 +53,10 @@ def owner(tmp_path, level):
 @pytest.mark.parametrize('change', ['none', 'closed-arm', 'recovery-hold'])
 def test_actual_soft_signal_reaches_worker_while_owner_budget_read_is_blocked(
         tmp_path, monkeypatch, level, change):
+    job_seconds = 12
+    soft_window = job_seconds * .2
     store, value, runner = owner(tmp_path, level)
+    published = threading.Event()
     channels, requests, blocked, acknowledgements = [], [], [], []
     original_init = CheckpointExchange.__init__
     original_request = CheckpointExchange.request
@@ -53,9 +69,10 @@ def test_actual_soft_signal_reaches_worker_while_owner_budget_read_is_blocked(
 
     def request(channel):
         started = time.monotonic()
-        assert started >= channel.deadline - 1.2, 'signal moved before the original80% threshold'
+        assert started >= channel.deadline - soft_window, 'signal moved before the original80% threshold'
         result = original_request(channel)
         requests.append((started, result))
+        published.set()  # Only after the real request file was durably published.
         return result
 
     def balance(ledger, arm):
@@ -65,7 +82,11 @@ def test_actual_soft_signal_reaches_worker_while_owner_budget_read_is_blocked(
             channel = channels[0]
             # Actually block the owner, not its clock or the native worker. The
             # original ledger read is still forwarded after the real signal.
-            time.sleep(max(0, channel.deadline - 1.2 - time.monotonic()) + 0.15)
+            # Wait on actual publication, not a150ms storage/scheduler guess.
+            # The owner stays blocked until the independent signal completes;
+            # the same hard deadline bounds this wait and native containment.
+            assert published.wait(max(0, channel.deadline - time.monotonic())), (
+                'actual80% signal waited for blocking owner budget I/O')
             frame = read_frame(channel.directory / 'checkpoint-request.json', 16384)
             assert frame is not None, 'actual80% signal waited for blocking owner budget I/O'
             assert frame['request_id'] == channel.request_id
@@ -84,14 +105,14 @@ def test_actual_soft_signal_reaches_worker_while_owner_budget_read_is_blocked(
     monkeypatch.setattr(CheckpointExchange, 'request', request)
     monkeypatch.setattr(CheckpointExchange, 'acknowledge', acknowledge)
     monkeypatch.setattr(BudgetLedger, 'balance', balance)
-    result = runner.run_cell('synthetic', digest(value['cells'][0]), budget=BudgetSpec(6))
+    result = runner.run_cell('synthetic', digest(value['cells'][0]), budget=BudgetSpec(job_seconds))
     assert blocked == [True] and len(requests) == 1
     events = store.events()
     assert len([e for e in events if e['event_kind'] == 'CHECKPOINT_REQUESTED']) == 1
     if change == 'none':
         assert result['state'] == 'FAILED' and 'checkpoint' in result, result
         assert acknowledgements == [result['checkpoint']['artifact_id']]
-        assert result['elapsed_ms'] < 6000
+        assert result['elapsed_ms'] < job_seconds * 1000
     else:
         assert result['state'] == 'BUDGET_EXHAUSTED' and 'checkpoint' not in result, result
         assert not acknowledgements

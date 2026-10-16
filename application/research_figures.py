@@ -68,6 +68,8 @@ def validate_figure_svg(content, *, expected_kind=None):
 
 def validate_figure_package(aggregate, index, figures):
     try:
+        from application.propagation_resource_summary import validate_resource_summaries
+        validate_resource_summaries(aggregate)
         if (not isinstance(index, dict) or not isinstance(figures, dict) or
                 index.get("schema_version") != "pirc25-figure-index-v1" or
                 index.get("aggregate_hash") != aggregate["aggregate_hash"] or
@@ -101,7 +103,9 @@ def validate_figure_package(aggregate, index, figures):
                     "adjudication": aggregate["adjudication"], "computation_ref": aggregate["computation_ref"],
                     "cost_source": "resolve-computation-ref-after-settlement",
                     "strata": [{"stratum_id": arm["stratum_id"], "dimensions": arm["comparison_dimensions"],
-                                "units": arm["metric_units"], "cost": arm["cost"]} for arm in selected]}:
+                                "units": arm["metric_units"], "cost": arm["cost"],
+                                **({"resource_usage_summary": arm["resource_usage_summary"]}
+                                   if "resource_usage_summary" in arm else {})} for arm in selected]}:
                 raise ValueError("figure provenance differs from frozen decision")
         if set(figures) != names or selections != {None, *horizons}:
             raise ValueError("missing or extra frozen figures")

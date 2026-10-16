@@ -8,6 +8,7 @@ statistical adjudication and actual research remain separate, still required.
 from copy import deepcopy
 from dataclasses import asdict, replace
 import json
+import sys
 
 import pytest
 
@@ -99,12 +100,22 @@ def test_actual_formal_mlmc_save_ack_reopened_resume_retains_stream_receipt_and_
     # Fixed engineering-only pilot policy before any reservation. The actual
     # pilot's measured allocation, not an inflated or hand-written allocation,
     # supplies the independently registered production workload.
-    # Predeclare at most four linked continuations: a correctly budget-stopped
+    # Predeclare at most two linked continuations: a correctly budget-stopped
     # resume may itself save at80%, never requiring a longer live deadline.
-    maximum_resumes = 4
+    maximum_resumes = 2
     startup_seconds = _worker_startup_seconds()
+    # This is the save/ACK success control, not the separate hard-fuse control.
+    # Freeze a stricter/larger engineering workload before its pilot so the
+    # 80% signal has work left, and reserve >=1.6s for real fsync/ACK/native exit.
+    # The former 3s floor left only0.6s and occasionally hit the actual hard fuse
+    # on Linux. No live deadline, work quota or scientific research cap changes.
+    # Windows native publication/qualification has a larger fixed cost; keep
+    # its original precision/workload. Faster POSIX runs use stricter precision
+    # so the real worker still has work at the80% boundary. Both are declared
+    # before pilot registration and obey the same two-retry/60s limits.
+    sampling_tolerance = .001 if sys.platform == "win32" else .0005
     store, spec, registry, recovery, grant, _, _ = prepared_source(tmp_path,
-        sampling_tolerance=.001, counts=(1024, 1024, 1024), request_changes={"chunk_size": 1})
+        sampling_tolerance=sampling_tolerance, counts=(1024, 1024, 1024), request_changes={"chunk_size": 1})
     cell = spec["cells"][0]
     model, request, config, _ = validate_propagation_cell(spec, cell)
     counts = tuple(cell["mlmc_production_policy"]["level_samples"])
@@ -113,8 +124,9 @@ def test_actual_formal_mlmc_save_ack_reopened_resume_retains_stream_receipt_and_
     # neither its frozen60s cap nor a running deadline can change afterward.
     started = time.monotonic()
     expected = mlmc_estimate(model, request, level_samples=counts)
-    job_seconds = _checkpoint_job_seconds(time.monotonic()-started, startup_seconds)
-    assert expected.standard_error <= .001
+    job_seconds = max(8., _checkpoint_job_seconds(time.monotonic()-started, startup_seconds))
+    assert job_seconds <= 20.
+    assert expected.standard_error <= sampling_tolerance
     arm = cell["arm_id"]
     pilot_cost = BudgetLedger(store).balance(arm)["committed_ms"]
     interrupted = SharedRunner(store, registry, recovery_registry=recovery).run_cell(

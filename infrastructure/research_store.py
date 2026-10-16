@@ -657,16 +657,25 @@ class ResearchStore:
             self._append("MANIFEST", {"object_id": object_id, "sha256": sha}, "manifest-" + digest([object_id, sha]))
             return run_id
 
-    def new_attempt(self, run_id: str, *, parent_attempt_id=None, reason=None) -> str:
-        with self.lock():
-            self._manifest("run-" + identifier(run_id))
+    def new_attempt(self, run_id: str, *, parent_attempt_id=None, reason=None,
+                    source_transition_ref=None) -> str:
+        with self._read_transaction():
+            run = self._manifest("run-" + identifier(run_id))
             states = self._attempts()
             related = [attempt for attempt in states.values() if attempt["run_id"] == run_id]
             if any(a["state"] == "SUCCEEDED" for a in related):
                 raise ResearchError("IDENTITY_CONFLICT", "successful cell is immutable and reusable")
             if any(a["state"] not in self.TERMINAL for a in related):
                 raise ResearchError("IDENTITY_CONFLICT", "cell already has a live attempt")
-            if related:
+            inherited = next((a.get("source_transition_ref") for a in related
+                              if a.get("source_transition_ref")), None)
+            source_transition_ref = source_transition_ref or inherited
+            if source_transition_ref is not None:
+                from application.pirc27_source_transition import validate_restart
+                if not reason or not parent_attempt_id:
+                    raise ResearchError("CONTRACT_MISMATCH", "source restart needs failed parent and reason")
+                validate_restart(self, run, parent_attempt_id, source_transition_ref)
+            elif related:
                 if len(related) >= 3:
                     raise ResearchError("RETRY_EXHAUSTED", "at most two explicit retries are supported")
                 parent = states.get(parent_attempt_id)
@@ -678,7 +687,8 @@ class ResearchStore:
             self._append("ATTEMPT", {"attempt_id": attempt_id, "run_id": run_id,
                          "parent_attempt_id": parent_attempt_id, "reason": reason, "state": "REGISTERED",
                          "started_at": None, "ended_at": None, "error_code": None,
-                         "artifact_manifest_hash": None})
+                         "artifact_manifest_hash": None,
+                         **({"source_transition_ref": source_transition_ref} if source_transition_ref else {})})
             return attempt_id
 
     def _attempts(self) -> dict:

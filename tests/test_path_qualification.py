@@ -230,7 +230,7 @@ def test_missing_or_tampered_final_statistics_refused(monkeypatch, mutation):
         qualify_affine_paths(package, request, policy)
 
 
-def prepared(root, *, method="euler", changes=None, formal=False, request_changes=None):
+def prepared(root, *, method="euler", changes=None, formal=False, request_changes=None, resource_observation=False):
     package, request, policy = policies(method, changes=changes, request_changes=request_changes)
     plugin = path_qualification_plugin()
     config, parameters = path_qualification_config(request, policy), execution_inputs(request)
@@ -250,6 +250,9 @@ def prepared(root, *, method="euler", changes=None, formal=False, request_change
         "arms": [{"arm_id": request.arm_id, "model_family_id": "affine-stable-v1",
             "method_family_id": method, "objective_id": request.functional, "budget_seconds": 86400}],
         "cells": [cell], "runtime_binding": {"root": str(root.resolve()), "store_id": store.store_id}}
+    if resource_observation:
+        from application.propagation_resources import resource_policy
+        cell["resource_observation_policy"] = resource_policy()
     admit_fixture(store, spec, plugin, root, formal=formal, execution_config=config,
         execution_inputs=parameters, legacy_upstream=False, fixture_prefix="path-qualification-")
     spec["admission"]["mode"] = "formal" if formal else "pilot"
