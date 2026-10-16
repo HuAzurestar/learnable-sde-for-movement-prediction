@@ -13,15 +13,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"scripts"))
 op = importlib.import_module("pirc27_remaining_path_after_closed_arm")
 from infrastructure.research_store import ResearchError, digest
 
+CANONICAL_REVIEWED = deepcopy(op.REVIEWED)
 
-@pytest.fixture
-def fixture(monkeypatch, tmp_path):
+
+@pytest.fixture(scope="module")
+def compiled():
     arms = {m: {"arm_id": "pirc27-affine-"+m+"-mean-x", "model_family_id": op.original.original.FAMILY,
         "method_family_id": m, "objective_id": "endpoint-x", "budget_seconds": 86400}
         for m in op.original.METHODS}
     cells = op.original.frozen(arms)[1]
-    spec = {"arms": list(arms.values()), "cells": cells, "code_hash": op.original.code_hash(),
-        "orchestrator_source_sha256": op.original.source_binding(),
+    return arms, cells, op.original.code_hash(), op.original.source_binding()
+
+
+@pytest.fixture
+def fixture(monkeypatch, tmp_path, compiled):
+    arms, cells, source, binding = deepcopy(compiled)
+    # The synthetic fixture owns its locally constructed cell. Execution
+    # bindings include callable bytecode, which legitimately differs by Python
+    # version. Never pretend this fixture is the real Windows/3.10 receipt.
+    monkeypatch.setattr(op, "REVIEWED", {**CANONICAL_REVIEWED, "cell_hash": digest(cells[4])})
+    spec = {"arms": list(arms.values()), "cells": cells, "code_hash": source,
+        "orchestrator_source_sha256": binding,
         "user_authority_hash": digest(op.original.DECISION)}
     attempts, runs = {}, {}
     for index in range(5):
@@ -75,6 +87,12 @@ def fixture(monkeypatch, tmp_path):
     monkeypatch.setattr(op, "verify_log", lambda s, aid: calls.append(("log", aid)))
     return SimpleNamespace(store=store, arms=arms, cells=cells, spec=spec, attempts=attempts,
         runs=runs, balances=balances, stop=stop, settled=settled, resource=resource, calls=calls)
+
+
+def test_production_review_receipt_keeps_exact_canonical_cell():
+    assert op.REVIEWED == CANONICAL_REVIEWED
+    assert op.REVIEWED["cell_hash"] == "98dc0413b42fab65683e26f249e93a1053d2425fee8918610997e187e761ef8f"
+    assert op.REVIEWED["attempt_id"] == "f6b05e77497e48a6bad2c5f04455c0f7"
 
 
 def test_unchanged_original_binding_and_exact_closed_inventory(fixture):
