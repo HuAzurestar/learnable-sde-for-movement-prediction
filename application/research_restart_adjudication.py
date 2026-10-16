@@ -21,6 +21,7 @@ SUPERSESSION_SCHEMA = "pirc28-restart-adjudication-v3"
 BRIDGE_SCHEMA = "pirc28-source-epoch-bridge-v1"
 CONTINUATION_SCHEMA = "pirc28-resource-arm-continuation-v1"
 RESOURCE_RETRY_SCHEMA = "pirc28-resource-retry-adjudication-v1"
+PREFLIGHT_RECOVERY_SCHEMA = "pirc28-preflight-recovery-adjudication-v1"
 REASON = "PIRC-28 approved source-epoch infrastructure restart"
 BRIDGE_FIELDS = {"schema_version", "execution_policy", "historical_definition_hash",
     "current_definition_hash", "historical_code_hash", "current_code_hash",
@@ -102,6 +103,9 @@ def _prime_restart(store, reference):
         prime_source_definitions(store, receipt["source_bridge"])
     elif receipt.get("schema_version") == RESOURCE_RETRY_SCHEMA:
         prime_policy_definitions(store, receipt["execution_policy"], receipt["current_code_hash"])
+    elif receipt.get("schema_version") == PREFLIGHT_RECOVERY_SCHEMA:
+        from .research_preflight_recovery import prime_recovery
+        prime_recovery(store, receipt)
 
 
 def prime_policy_definitions(store, execution_policy, source_code_hash):
@@ -109,6 +113,7 @@ def prime_policy_definitions(store, execution_policy, source_code_hash):
     if store._read_snapshot() is not None:
         return
     references = []
+    preflight_recoveries = []
     with store._read_transaction():
         for event in store._manifest_events("pirc28-source-epoch-bridge-"):
             payload = event["payload"]
@@ -116,9 +121,19 @@ def prime_policy_definitions(store, execution_policy, source_code_hash):
             if (bridge.get("execution_policy") == execution_policy
                     and bridge.get("current_code_hash") == source_code_hash):
                 references.append({"manifest_id": payload["object_id"], "sha256": payload["sha256"]})
+        for event in store._events():
+            if event['event_kind'] == 'PREFLIGHT_RECOVERY_ADJUDICATED':
+                receipt = store._manifest(event['payload']['manifest_id'])
+                if receipt.get('execution_policy') == execution_policy and receipt.get('current_code_hash') == source_code_hash:
+                    preflight_recoveries.append(event['payload'])
     _require(len(references) <= 1, "source policy has ambiguous epoch bridges", "IDENTITY_CONFLICT")
     for reference in references:
         prime_source_definitions(store, reference)
+    # Fresh workers also need the original source definitions underlying the
+    # exception. Never cold-validate those only after taking the budget writer.
+    _require(len(preflight_recoveries) <= 1, 'one-time policy has multiple recoveries', 'IDENTITY_CONFLICT')
+    for reference in preflight_recoveries:
+        _prime_restart(store, reference)
 
 
 def resolve_source_bridge(store, reference, *, execution_policy, source_code_hash):
@@ -513,6 +528,8 @@ def _resource_retry_evidence(store, parent_attempt_id, *, execution_policy, sour
                              allow_child=False):
     """Verify one current-epoch, known-cost, stopped infrastructure failure."""
     from application.research_execution_policy import resolve_policy
+    from .research_preflight_recovery import forbid_extra_attempt
+    forbid_extra_attempt(store, parent_attempt_id=parent_attempt_id)
 
     attempts = store._attempts()
     parent = attempts.get(parent_attempt_id)
@@ -701,6 +718,9 @@ def resolve_retry_adjudication(store, reference, *, execution_policy, source_cod
             receipt = _resolve_receipt(store, reference)
         elif value.get("schema_version") == RESOURCE_RETRY_SCHEMA:
             receipt = _resolve_resource_retry(store, reference)
+        elif value.get("schema_version") == PREFLIGHT_RECOVERY_SCHEMA:
+            from .research_preflight_recovery import resolve_preflight_recovery
+            receipt = resolve_preflight_recovery(store, reference)
         else:
             raise ResearchError("CONTRACT_MISMATCH", "unknown retry adjudication schema")
         _require(receipt["execution_policy"] == execution_policy
@@ -717,6 +737,8 @@ def adjudicate_resource_retry(store, parent_attempt_id, *, execution_policy, sou
     event_id = "pirc28-resource-retry-" + digest(
         [store.store_id, parent_attempt_id, execution_policy, source_code_hash])
     with store._read_transaction():
+        from .research_preflight_recovery import forbid_extra_attempt
+        forbid_extra_attempt(store, parent_attempt_id=parent_attempt_id)
         existing = [event for event in store._events() if event["event_id"] == event_id]
         if existing:
             _require(len(existing) == 1 and existing[0]["event_kind"] == "RESOURCE_RETRY_ADJUDICATED",
@@ -763,7 +785,8 @@ def adjudication_for_attempt(store, attempt_id, *, execution_policy, source_code
     with store._read_transaction():
         references = []
         for event in store._events():
-            if event["event_kind"] not in {"RESTART_ADJUDICATED", "RESOURCE_RETRY_ADJUDICATED"}:
+            if event["event_kind"] not in {"RESTART_ADJUDICATED", "RESOURCE_RETRY_ADJUDICATED",
+                                           "PREFLIGHT_RECOVERY_ADJUDICATED"}:
                 continue
             receipt = store._manifest(event["payload"]["manifest_id"])
             if receipt.get("retry_attempt_id") == attempt_id:
@@ -774,6 +797,9 @@ def adjudication_for_attempt(store, attempt_id, *, execution_policy, source_code
         _require(receipt["execution_policy"] == execution_policy
                  and receipt["current_code_hash"] == source_code_hash,
                  "restart adjudication policy/source differs", "UNAUTHORIZED_DATA")
+        if receipt.get("schema_version") == PREFLIGHT_RECOVERY_SCHEMA:
+            _require(store._attempts()[attempt_id]['state'] in {'REGISTERED', 'RUNNING'},
+                     'one-time terminal attempt is not new execution authority', 'BUDGET_EXHAUSTED')
         return {"reference": deepcopy(references[0]), "receipt": receipt}
 
 
@@ -805,6 +831,9 @@ def _resolve_arm_continuation(store, reference, *, allow_later_closure=False):
     scientific_terminal = (attempt is not None and attempt["state"] in {"SUCCEEDED", "FAILED"}
         and attempt.get("artifact_id") and attempt.get("error_code") not in
         {"SUPERVISOR_ERROR", "RESOURCE_LIMIT", "HEARTBEAT_LOST"})
+    if adjudication.get('schema_version') == PREFLIGHT_RECOVERY_SCHEMA:
+        _require(attempt is not None and attempt['state'] == 'SUCCEEDED',
+                 'one-time recovery failure cannot promote its arm', 'UNQUALIFIED')
     expected_verification = "REUSE_VERIFIED" if attempt and attempt["state"] == "SUCCEEDED" else "FAILURE_VERIFIED"
     _require(scientific_terminal and len(verified) >= 1 and len(settlements) == 1
              and settlements[0]["payload"].get("outcome") == attempt["state"]
@@ -870,6 +899,9 @@ def promote_resource_arm(store, restart_adjudication):
         source = raw.get("current_code_hash")
         adjudication = resolve_retry_adjudication(store, restart_adjudication,
             execution_policy=policy, source_code_hash=source)
+        if adjudication.get('schema_version') == PREFLIGHT_RECOVERY_SCHEMA:
+            _require(store._attempts()[adjudication['retry_attempt_id']]['state'] == 'SUCCEEDED',
+                     'one-time recovery failure cannot promote its arm', 'UNQUALIFIED')
         run_id = adjudication.get("current_run_id", adjudication.get("run_id"))
         run = store._manifest("run-" + run_id)
         parent_cost = adjudication.get("retained_cost_ms", adjudication.get("parent_cost_ms"))

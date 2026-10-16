@@ -284,7 +284,8 @@ class BudgetLedger:
             if attempt["state"] != "REGISTERED":
                 raise ResearchError("CONTRACT_MISMATCH", "reservation requires registered attempt")
             adjudication = None
-            if self._balance(run["arm_id"], resource_guarded=True,
+            from .research_preflight_recovery import is_recovery_attempt
+            if is_recovery_attempt(self.store, attempt_id) or self._balance(run["arm_id"], resource_guarded=True,
                     execution_policy=budget.execution_policy,
                     source_code_hash=budget.source_code_hash)["closed"]:
                 from .research_restart_adjudication import adjudication_for_attempt

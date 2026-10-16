@@ -661,6 +661,9 @@ class ResearchStore:
                     source_transition_ref=None) -> str:
         with self._read_transaction():
             run = self._manifest("run-" + identifier(run_id))
+            if any(e['event_kind'] == 'PREFLIGHT_RECOVERY_ADJUDICATED' for e in self._events()):
+                from application.research_preflight_recovery import forbid_extra_attempt
+                forbid_extra_attempt(self, run_id=run_id, parent_attempt_id=parent_attempt_id)
             states = self._attempts()
             related = [attempt for attempt in states.values() if attempt["run_id"] == run_id]
             if any(a["state"] == "SUCCEEDED" for a in related):

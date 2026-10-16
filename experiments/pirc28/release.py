@@ -14,7 +14,7 @@ from application.research_budget import ResourceBudgetSpec
 from application.research_execution_policy import SCHEMA, resolve_policy
 from application.research_restart_adjudication import (adjudicate_resource_retry,
     adjudicate_restart, promote_resource_arm, resolve_restart_adjudication,
-    resource_arm_was_promoted)
+    resource_arm_was_promoted, resolve_retry_adjudication)
 from experiments.pirc25.affine import code_hash
 from experiments.pirc25.runner import SharedRunner
 from infrastructure.research_store import ResearchError, digest
@@ -82,7 +82,7 @@ def execute_first_restart(store, *, restart_adjudication):
     policy = reference["execution_policy"]
     source = reference["current_code_hash"]
     _require(source == code_hash(), "restart release source changed", "IDENTITY_CONFLICT")
-    receipt = resolve_restart_adjudication(store, restart_adjudication,
+    receipt = resolve_retry_adjudication(store, restart_adjudication,
                                            execution_policy=policy, source_code_hash=source)
     run = store.manifest("run-" + receipt["current_run_id"])
     registry, recovery = registries()
@@ -105,6 +105,38 @@ def execute_first_restart(store, *, restart_adjudication):
     return {"result": result, "verified": verified, "resource_arm_continuation": continuation,
             "historical_cost_retained_ms": receipt["retained_cost_ms"],
             "real_data_authorized": False}
+
+
+def prepare_preflight_recovery_release(store, *, historical_definition_hash, parent_attempt_id,
+        task_id, session_id, instructions, solution_commit, plan_path=None,
+        synthetic_grant_expires_at=None):
+    """Explicit reviewed operator entry for the single SOL-007 exception.
+
+    The caller must bind the human-approved parent and decision commit. This is
+    metadata registration only, not a substitute for source tests or review.
+    The original release/adjudication API still enforces its two-retry limit.
+    """
+    from application.research_preflight_recovery import (approve_preflight_recovery,
+                                                         adjudicate_preflight_recovery)
+    path = Path(plan_path or Path(__file__).parent / "plans" / "identifiability-v1.json")
+    definition = prepare_definition(load_plan(path))
+    policy = publish_resource_policy(store, task_id=task_id, session_id=session_id, instructions=instructions)
+    options = ({} if synthetic_grant_expires_at is None
+               else {'synthetic_grant_expires_at': synthetic_grant_expires_at})
+    source = register_source_epoch(store, historical_definition_hash, definition,
+                                  execution_policy=policy, **options)
+    decision = approve_preflight_recovery(store, parent_attempt_id=parent_attempt_id,
+        source_bridge=source['source_bridge'], execution_policy=policy,
+        source_code_hash=definition.to_dict()['runtime_code_hash'], decision_basis={
+            'authority': 'local-human-decision-record', 'solution_point': 'SOL-007',
+            'result': 'CONFIRMED', 'solution_commit': solution_commit,
+            'task_id': task_id, 'session_id': session_id})
+    restart = adjudicate_preflight_recovery(store, decision)
+    receipt = resolve_retry_adjudication(store, restart, execution_policy=policy,
+                                         source_code_hash=definition.to_dict()['runtime_code_hash'])
+    return {**source, 'execution_policy': policy, 'decision': decision,
+            'restart_adjudication': restart, 'retry_attempt_id': receipt['retry_attempt_id'],
+            'execution_started': False, 'real_data_authorized': False}
 
 
 def execute_next_source_cell(store, *, study_definition_hash, execution_policy):
