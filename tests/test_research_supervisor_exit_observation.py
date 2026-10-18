@@ -14,7 +14,7 @@ import pytest
 
 from application.research_budget import BudgetSpec, ResourceBudgetSpec
 from application.research_supervisor import ResearchSupervisor
-from infrastructure.research_store import ResearchStore, atomic_write, digest, encode
+from infrastructure.research_store import ResearchError, ResearchStore, atomic_write, digest, encode
 from tests.test_research_execution_policy import policy
 from tests.test_research_store import spec
 
@@ -135,16 +135,31 @@ def test_confirmed_exit_does_not_skip_fresh_authority_or_deadline(tmp_path, monk
 
     monkeypatch.setattr(module.subprocess, 'Popen', popen)
     monkeypatch.setattr(supervisor.budget, 'balance', balance)
-    result = supervisor.run(attempt_id,
-        lambda _: [sys.executable, '-B', '-c', 'raise SystemExit(7)'], budget)
-    expected = 'BUDGET_EXHAUSTED' if veto == 'closed' else 'TIMEOUT'
+    command = lambda _: [sys.executable, '-B', '-c', 'raise SystemExit(7)']
+    result = None
+    if resource:
+        # Existing resource authority refuses a closed arm by raising, not by
+        # returning a finite-budget-style terminal result. Preserve that API
+        # and require its actual stop/settlement cleanup, never swallow denial.
+        with pytest.raises(ResearchError, match='exact restart adjudication missing') as denied:
+            supervisor.run(attempt_id, command, budget)
+        assert denied.value.code == 'BUDGET_EXHAUSTED'
+        expected, expected_code = 'INTERRUPTED', 'SUPERVISOR_ERROR'
+    else:
+        result = supervisor.run(attempt_id, command, budget)
+        expected = expected_code = 'BUDGET_EXHAUSTED' if veto == 'closed' else 'TIMEOUT'
     assert observed == [True]
-    assert result['state'] == expected and result['artifact_id'] is None
-    assert store.attempts()[attempt_id]['error_code'] == expected
+    terminal = store.attempts()[attempt_id]
+    assert terminal['state'] == expected and terminal['artifact_id'] is None
+    assert terminal['error_code'] == expected_code
+    if result is not None:
+        assert result['state'] == expected and result['artifact_id'] is None
     events = store.events()
     stops = [e for e in events if e['event_kind'] == 'WORKER_TREE_STOPPED']
     settlements = [e for e in events if e['event_kind'] == 'SETTLE']
     assert len(stops) == len(settlements) == 1
     assert stops[0]['sequence'] < settlements[0]['sequence']
     assert settlements[0]['payload']['outcome'] == expected
-    assert settlements[0]['payload']['charged_ms'] == result['elapsed_ms'] > 0
+    assert settlements[0]['payload']['charged_ms'] == stops[0]['payload']['observed_elapsed_ms'] > 0
+    if result is not None:
+        assert settlements[0]['payload']['charged_ms'] == result['elapsed_ms']
