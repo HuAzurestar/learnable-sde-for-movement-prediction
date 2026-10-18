@@ -11,8 +11,8 @@ from infrastructure.research_store import ResearchError, atomic_write, digest, e
 from .pipeline import recipe_resources
 
 PLUGIN_ID = 'pirc28-switching'
-# The retained 1.1.0 catalog belongs to an earlier immutable module identity.
-VERSION = '1.1.1'
+# Retain both older immutable catalogs; source-bound launch is a new identity.
+VERSION = '1.1.2'
 
 
 def command(output, spec, cell):
@@ -21,7 +21,7 @@ def command(output, spec, cell):
             or type(binding['root']) is not str or not Path(binding['root']).is_absolute()
             or type(binding['store_id']) is not str or not binding['store_id']):
         raise ResearchError('MISSING_INPUT', 'explicit shared runtime root and store identity are required')
-    return [sys.executable, '-m', 'experiments.pirc28.worker', binding['root'], binding['store_id'],
+    return [sys.executable, str(Path(__file__).resolve().with_name('bootstrap.py')), binding['root'], binding['store_id'],
             spec['study_id'], digest(cell), str(output)]
 
 

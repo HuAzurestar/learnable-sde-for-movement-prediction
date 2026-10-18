@@ -56,7 +56,7 @@ def test_full_master_registered_pool_covers_additive_fit_forecast_source_and_ref
                                            'result_bytes': 64*1024*1024}
             maximum = max(maximum, registered['tensor_elements'])
     assert maximum == 19_719_396 < GLOBAL_LIMITS['tensor_elements']
-    assert plugin.registry_entry.version == '1.1.1'
+    assert plugin.registry_entry.version == '1.1.2'
 
 
 @pytest.mark.parametrize('k', [1, 2])
@@ -134,5 +134,5 @@ def test_plugin_resource_revision_keeps_original_method_budget_identities(master
     assert all(proposal['arms'] == list(value['arms'].values()) for proposal in proposals)
     assert value['arms']['2']['arm_id'] == 'pirc28-k2'
     assert value['arms']['2']['budget_seconds'] == 86400
-    assert all(cell['execution']['component_version'] == '1.1.1' for proposal in proposals for cell in proposal['cells'])
+    assert all(cell['execution']['component_version'] == '1.1.2' for proposal in proposals for cell in proposal['cells'])
     assert not list(tmp_path.iterdir())

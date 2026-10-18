@@ -31,17 +31,18 @@ def assert_no_execution(store):
                    for event in store.events())
 
 
-def test_new_adapter_version_admits_without_overwriting_retained_legacy_mapping(tmp_path):
+@pytest.mark.parametrize('legacy_version', ['1.1.0', '1.1.1'])
+def test_new_adapter_version_admits_without_overwriting_retained_legacy_mapping(tmp_path, legacy_version):
     store, spec, _, _, _ = prepare(tmp_path / 'legacy-catalog')
     plugin = switching_plugin()
-    old_ref, old_mapping, old_entry = retain_previous_mapping(store, plugin, '1.1.0')
+    old_ref, old_mapping, old_entry = retain_previous_mapping(store, plugin, legacy_version)
     cell = spec['cells'][0]
     attempt = store.new_attempt(store.register_run(spec['study_id'], cell))
     prefix = store.events()
 
     receipt = AdmissionGate(store).prepare(spec, cell, plugin, attempt)
 
-    assert plugin.registry_entry.version != '1.1.0'
+    assert plugin.registry_entry.version != legacy_version
     assert receipt['registry_entry'] == plugin.registry_entry.manifest()
     current_ref = 'registry-version-' + digest({'id': plugin.plugin_id,
                                                'version': plugin.registry_entry.version})
