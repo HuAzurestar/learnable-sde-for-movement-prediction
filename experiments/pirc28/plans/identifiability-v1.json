@@ -1,0 +1,150 @@
+{
+  "schema_version": "pirc28-scientific-plan-v2",
+  "plan_id": "pirc28-six-axis-identifiability-v1",
+  "truth_parameters": {
+    "Q": [[-1.0, 1.0], [1.0, -1.0]],
+    "A": [[[-0.04, 0.0], [0.0, -0.04]], [[-0.04, 0.0], [0.0, -0.04]]],
+    "B": [[[-0.2, 0.0], [0.0, -0.2]], [[-0.2, 0.0], [0.0, -0.2]]],
+    "a": [[-0.8, 0.4], [0.8, -0.4]],
+    "L": [[[0.2, 0.0], [0.0, 0.2]], [[0.2, 0.0], [0.0, 0.2]]],
+    "rate_bounds": [0.0, 5.0]
+  },
+  "axes": {
+    "mode_separation": [0.0, 2.0],
+    "dwell_time_s": [0.5, 2.0],
+    "observation_interval_s": [0.25, 0.5],
+    "observation_noise_m": [0.1, 0.5],
+    "trajectory_length_s": [8.0, 16.0],
+    "mode_occupancy": [0.2, 0.5]
+  },
+  "initial_state": {
+    "mean": [0.0, 0.0, 0.0, 0.0],
+    "covariance": [[0.25, 0.0, 0.0, 0.0], [0.0, 0.25, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+  },
+  "initializations": {
+    "1": [{
+      "Q": [[0.0]],
+      "A": [[[-0.02, 0.0], [0.0, -0.02]]],
+      "B": [[[-0.1, 0.0], [0.0, -0.1]]],
+      "a": [[0.0, 0.0]],
+      "L": [[[0.3, 0.0], [0.0, 0.3]]],
+      "rate_bounds": [0.0, 5.0]
+    }],
+    "2": [{
+      "Q": [[-1.0, 1.0], [1.0, -1.0]],
+      "A": [[[-0.02, 0.0], [0.0, -0.02]], [[-0.02, 0.0], [0.0, -0.02]]],
+      "B": [[[-0.1, 0.0], [0.0, -0.1]], [[-0.1, 0.0], [0.0, -0.1]]],
+      "a": [[-0.4, 0.2], [0.4, -0.2]],
+      "L": [[[0.3, 0.0], [0.0, 0.3]], [[0.3, 0.0], [0.0, 0.3]]],
+      "rate_bounds": [0.0, 5.0]
+    }, {
+      "Q": [[-0.5, 0.5], [0.5, -0.5]],
+      "A": [[[-0.02, 0.0], [0.0, -0.02]], [[-0.02, 0.0], [0.0, -0.02]]],
+      "B": [[[-0.1, 0.0], [0.0, -0.1]], [[-0.1, 0.0], [0.0, -0.1]]],
+      "a": [[-0.2, -0.4], [0.2, 0.4]],
+      "L": [[[0.3, 0.0], [0.0, 0.3]], [[0.3, 0.0], [0.0, 0.3]]],
+      "rate_bounds": [0.0, 5.0]
+    }]
+  },
+  "inference": {
+    "max_step_seconds": 0.125,
+    "max_rate_step": 0.05,
+    "max_substeps": 1600,
+    "max_iterations": 12,
+    "max_initializations": 2,
+    "objective_tolerance": 0.00001,
+    "min_occupancy": 0.05,
+    "identical_mode_tolerance": 0.0000000001,
+    "min_diffusion_variance": 0.00001,
+    "ridge": 0.00001,
+    "rate_prior_count": 0.1,
+    "rate_prior_dwell": 1.0,
+    "line_search_steps": 4
+  },
+  "sampling": {
+    "replicate_count": 16,
+    "train_paths": 3,
+    "selection_paths": 2,
+    "test_paths": 8,
+    "forecast_paths": 64,
+    "max_jumps": 256
+  },
+  "forecast_origin_s": 2.0,
+  "forecast_horizons_s": [0.5, 1.0],
+  "approximation_spec": {
+    "schema_version": "pirc28-approximation-spec-v1",
+    "sampling_unit": "independent-synthetic-replicate",
+    "scope": "all-registered-K2-cells; selected-fit; every-heldout-prefix-path",
+    "observation_role": "test-prefix-through-frozen-forecast-origin; no-future-no-truth",
+    "budget_rule": "original-K2-arm; shared-supervisor; no-extra-budget",
+    "failure_state": "INFERENCE_INAPPLICABLE",
+    "aggregation_rule": "all-required-checks; no-failure-dropping; no-optional-stopping",
+    "step_halving": {
+      "factor": 2,
+      "maximum_substeps": 400,
+      "thresholds": {
+        "mode_total_variation": 0.02,
+        "position_mean_max_abs_m": 0.02,
+        "velocity_mean_max_abs_m_s": 0.05,
+        "log_likelihood_per_observation_abs": 0.01
+      }
+    },
+    "event_driven_reference": {
+      "algorithm": "event-driven-bootstrap-particle-filter-v1",
+      "particles": 2048,
+      "independent_batches": 8,
+      "maximum_jumps_per_particle_interval": 32,
+      "minimum_ess_fraction": 0.1,
+      "confidence": 0.95,
+      "maximum_mc_half_width_fraction": 0.25,
+      "thresholds": {
+        "mode_total_variation": 0.1,
+        "position_mean_max_abs_m": 0.1,
+        "velocity_mean_max_abs_m_s": 0.2,
+        "log_likelihood_per_observation_abs": 0.05
+      }
+    },
+    "known_mode_boundary": {
+      "algorithm": "conditional-affine-K1-Kalman-v1",
+      "absolute_tolerance": 0.00000001,
+      "relative_tolerance": 0.00000001
+    }
+  },
+  "qualification": {
+    "thresholds": {
+      "rate_rmse_s_inv": 0.25,
+      "position_drift_rmse_s_inv2": 0.01,
+      "velocity_drift_rmse_s_inv": 0.05,
+      "acceleration_rmse_m_s2": 0.3,
+      "diffusion_covariance_rmse_m2_s3": 0.01,
+      "mode_brier": 0.3,
+      "mode_ece": 0.1,
+      "occupancy_error": 0.1,
+      "position_marginal_coverage_error": 0.1,
+      "any_jump_brier": 0.3,
+      "different_endpoint_mode_brier": 0.3
+    },
+    "parameter_scales": {"Q": 1.0, "A": 0.04, "B": 0.2, "a": 1.0, "diffusion_covariance": 0.04},
+    "minimum_occupancy": 0.05,
+    "maximum_collapse_fraction": 0.125,
+    "minimum_recovery_fraction": 0.7,
+    "minimum_effective_replicates": 14,
+    "confidence": 0.95,
+    "bootstrap_seed": 2026100701,
+    "bootstrap_draws": 2000,
+    "calibration_bins": 10,
+    "coverage_nominal": 0.9,
+    "initialization_selection": "selection-observation-objective-only",
+    "collapse_criterion": "inference-frozen-low-occupancy-or-identical-dynamics",
+    "stop_rule": "shared-arm-closure-stops-all-cells; no-budget-reset"
+  },
+  "scope": {
+    "negative_control_separation": 0.0,
+    "required_qualified_points": [
+      {"mode_separation": 2.0, "dwell_time_s": 0.5, "observation_interval_s": 0.25, "observation_noise_m": 0.1, "trajectory_length_s": 16.0, "mode_occupancy": 0.5},
+      {"mode_separation": 2.0, "dwell_time_s": 2.0, "observation_interval_s": 0.25, "observation_noise_m": 0.1, "trajectory_length_s": 16.0, "mode_occupancy": 0.5}
+    ],
+    "other_points": "phase-diagram-only"
+  },
+  "arm_ids": {"1": "pirc28-k1", "2": "pirc28-k2"}
+}

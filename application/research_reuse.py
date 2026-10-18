@@ -115,25 +115,136 @@ def _success_metadata(store, attempt, spec, cell, *, plugin=None, historical_adm
 
 
 def verified_reuse(store, attempt, spec, cell, plugin):
-    # Hooks may need fresh authority under this same owned scope. Preserve the
-    # final uncached journal and permission guards; do not reacquire its OS lock.
+    return _verified_terminal(store, attempt, spec, cell, plugin, failed=False)
+
+
+def verified_failure(store, attempt, spec, cell, plugin):
+    """Validate failed artifact provenance without granting successful reuse."""
+    return _verified_terminal(store, attempt, spec, cell, plugin, failed=True)
+
+
+def _verified_terminal(store, attempt, spec, cell, plugin, *, failed):
+    state, role = ('FAILED', 'failure') if failed else ('SUCCEEDED', 'result')
+    prefix = 'FAILURE' if failed else 'REUSE'
+    # Calibrated targets may validate a settled source in this same owned
+    # scope. Retain PID/thread ownership and final physical verification for
+    # both reuse and typed failures rather than acquiring a nested OS lock.
     with store._read_transaction():
         request = {"attempt_id": attempt["attempt_id"], "run_id": attempt["run_id"],
                    "artifact_id": attempt.get("artifact_id")}
-        store._append("REUSE_CHECK_STARTED", request)
+        store._append(prefix+"_CHECK_STARTED", request)
         try:
-            proof = verified_success_metadata(store, attempt, spec, cell, plugin)
-            content = store._verified_artifact_content(proof["result_artifact"])
+            execution_plan(spec, cell, plugin)
+            current = store._attempts().get(attempt["attempt_id"])
+            run = store._manifest("run-" + attempt["run_id"])
+            if (current != attempt or attempt["state"] != state
+                    or run["spec_hash"] != digest(spec) or run["cell_hash"] != digest(cell)
+                    or run["study_id"] != spec["study_id"] or run["cell"] != cell):
+                raise ResearchError("CONTRACT_MISMATCH", "reused attempt/run identity differs")
+            metadata = store._manifest("artifact-" + attempt["artifact_id"])
+            if (metadata["role"] != role or metadata["media_type"] != "application/json"
+                    or metadata["study_id"] != spec["study_id"]
+                    or metadata["block_ids"] != [cell["block_id"]]
+                    or digest(metadata) != attempt.get("artifact_manifest_hash")):
+                raise ResearchError("CONTRACT_MISMATCH", "reused result metadata differs from completion")
+            content = store._verified_artifact_content(metadata)
             result = json.loads(content)
             if not isinstance(result, dict) or content != encode(result):
                 raise ResearchError("CORRUPT_ARTIFACT", "reused result must be a canonical object")
-            receipt = proof["receipt"]
-            if result.get("admission_hash") != receipt["admission_hash"]:
+            reference = result.get("admission_hash")
+            if not isinstance(reference, str):
                 raise ResearchError("UNQUALIFIED", "reused result lacks admission evidence")
-            AdmissionGate(store).result_validator(receipt, spec, cell, plugin)(result)
+            receipt = store._manifest("admission-" + reference)
+            if (receipt.get("schema_version") != "pirc25-admission-v1"
+                    or receipt.get("admission_hash") != reference
+                    or digest({key: value for key, value in receipt.items() if key != "admission_hash"}) != reference
+                    or receipt.get("attempt_id") != attempt["attempt_id"] or receipt.get("run_id") != run["run_id"]
+                    or receipt.get("spec") != spec or receipt.get("cell") != cell
+                    or receipt.get("spec_hash") != digest(spec) or receipt.get("cell_hash") != digest(cell)
+                    or receipt.get("plugin_hash") != plugin_binding(plugin)):
+                raise ResearchError("UNQUALIFIED", "reused admission bindings differ")
+            execution_kind = receipt.get("execution_kind")
+            if execution_kind == "run":
+                expected_command = command_binding(plugin.command_builder)
+            elif execution_kind == "resume":
+                expected_command = receipt.get("documents", {}).get("package", {}).get("recovery_command_hash")
+            else:
+                expected_command = None
+            if not expected_command or expected_command != receipt.get("command_hash"):
+                raise ResearchError("UNQUALIFIED", "reused command binding differs")
+            gate = AdmissionGate(store)
+            (gate.failure_validator if failed else gate.result_validator)(receipt, spec, cell, plugin)(result)
+            if failed and result['error_code'] != attempt['error_code']:
+                raise ResearchError('CONTRACT_MISMATCH', 'failed attempt and artifact error code differ')
+            events = store._events()
+            admission_events = [event for event in events if event["event_kind"] == "ADMISSION"
+                and event["payload"] == {"attempt_id": attempt["attempt_id"], "run_id": run["run_id"],
+                                         "admission_hash": reference}]
+            reservations = [event for event in events if event["event_kind"] == "RESERVE"
+                and event["payload"].get("attempt_id") == attempt["attempt_id"]]
+            settlements = [event for event in events if event["event_kind"] == "SETTLE"
+                and event["payload"].get("attempt_id") == attempt["attempt_id"]]
+            workers = [event for event in events if event["event_kind"] == "WORKER_STARTED"
+                and event["payload"].get("attempt_id") == attempt["attempt_id"]]
+            completions = [event for event in events if event["event_kind"] == "ATTEMPT" and event["payload"] == attempt]
+            if not admission_events or len(reservations) != 1 or len(settlements) != 1 or len(workers) != 1 or not completions:
+                raise ResearchError("UNQUALIFIED", "reused success has no complete execution/cost provenance")
+            reservation, settlement, worker = reservations[0], settlements[0], workers[0]
+            cost = settlement["payload"]
+            expected_id = digest([store.store_id, attempt["attempt_id"]])
+            elapsed, reserved = cost.get("monotonic_elapsed_ms"), cost.get("reserved_ms")
+            resource_funding = False
+            if reserved is None:
+                policy_reference = reservation["payload"].get("execution_policy")
+                source_hash = reservation["payload"].get("source_code_hash")
+                resource_funding = (reservation["payload"].get("budget_mode") == "resource-guarded-no-time-cap"
+                    and type(policy_reference) is dict and set(policy_reference) == {"manifest_id", "sha256"}
+                    and source_hash == spec["code_hash"]
+                    and all(cost.get(key) == reservation["payload"].get(key) for key in
+                        ("budget_mode", "execution_policy", "source_code_hash")))
+                if resource_funding:
+                    from application.research_execution_policy import validate_policy, check_resource_observation
+                    policy = store._manifest(policy_reference["manifest_id"])
+                    resource_funding = (digest(policy) == policy_reference["sha256"]
+                        and any(event["event_kind"] == "MANIFEST"
+                            and event["payload"] == {"object_id": policy_reference["manifest_id"],
+                                                     "sha256": policy_reference["sha256"]}
+                            for event in events))
+                    if resource_funding:
+                        validate_policy(policy, store_id=store.store_id, arm_id=cell["arm_id"],
+                            source_code_hash=source_hash)
+                        check_resource_observation(policy, worker["payload"].get("resource_observation"))
+                        resource_funding = worker["payload"].get("deadline_monotonic") is None
+                    restart_reference = reservation["payload"].get("restart_adjudication")
+                    if resource_funding and restart_reference is not None:
+                        from application.research_restart_adjudication import resolve_retry_adjudication
+                        restart = resolve_retry_adjudication(store, restart_reference,
+                            execution_policy=policy_reference, source_code_hash=source_hash)
+                        resource_funding = restart["retry_attempt_id"] == attempt["attempt_id"]
+            if (any(event["payload"].get("reservation_id") != expected_id for event in (reservation, settlement, worker))
+                    or any(cost.get(key) != value for key, value in {
+                        "attempt_id": attempt["attempt_id"], "run_id": run["run_id"], "study_id": spec["study_id"],
+                        "arm_id": cell["arm_id"], "settled": True, "outcome": state}.items())
+                    or any(reservation["payload"].get(key) != cost.get(key) for key in
+                        ("attempt_id", "run_id", "study_id", "arm_id", "reserved_ms", "worker_slot"))
+                    or isinstance(elapsed, bool) or not isinstance(elapsed, int) or elapsed < 0
+                    or cost.get("charged_ms") != elapsed
+                    or not (resource_funding or (not isinstance(reserved, bool)
+                        and isinstance(reserved, int) and 0 < reserved <= 7200000))
+                    or not reservation["sequence"] < worker["sequence"] < settlement["sequence"] < completions[0]["sequence"]
+                    or not any(event["sequence"] < worker["sequence"] for event in admission_events)):
+                raise ResearchError("UNQUALIFIED", "reused execution/cost bindings differ")
+            if failed:
+                stops = [event for event in events if event['event_kind'] == 'WORKER_TREE_STOPPED'
+                    and event['payload'].get('attempt_id') == attempt['attempt_id']]
+                if (len(stops) != 1 or stops[0]['payload'].get('reservation_id') != expected_id
+                        or stops[0]['payload'].get('observed_elapsed_ms') != elapsed
+                        or stops[0]['payload'].get('confirmation') != 'native-job-or-process-group-no-running-descendants'
+                        or not worker['sequence'] < stops[0]['sequence'] < settlement['sequence']):
+                    raise ResearchError('UNQUALIFIED', 'failed evidence lacks actual containment/settlement provenance')
         except (ResearchError, KeyError, TypeError, ValueError, OSError) as exc:
             error = exc if isinstance(exc, ResearchError) else ResearchError("CORRUPT_ARTIFACT", "reused evidence is malformed")
-            store._append("REUSE_CHECK_FAILED", {**request, "error_code": error.code})
+            store._append(prefix+"_CHECK_FAILED", {**request, "error_code": error.code})
             raise error from (None if error is exc else exc)
-        store._append("REUSE_VERIFIED", request)
-        return {**attempt, "reused": True, "exit_code": 0}
+        store._append(prefix+"_VERIFIED", request)
+        return {**attempt, "reused": not failed, "exit_code": 1 if failed else 0}

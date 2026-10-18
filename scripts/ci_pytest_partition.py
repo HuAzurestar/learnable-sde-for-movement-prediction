@@ -93,13 +93,18 @@ class Collection:
         self.reports.setdefault(report.nodeid, []).append((report.when, report.outcome))
 
 
-def pytest_session(collection, *, collect_only=False):
+def pytest_session(collection, *, collect_only=False, junitxml=None):
     import pytest
     require(not os.environ.get("PYTEST_ADDOPTS", "").strip(), "unregistered pytest options refused")
     # Capture after other collection hooks; refuse externally deselected items.
     Collection.pytest_collection_modifyitems = pytest.hookimpl(trylast=True)(
         Collection.pytest_collection_modifyitems)
-    return int(pytest.main(["-qq", "--collect-only"] if collect_only else ["-q"], plugins=[collection]))
+    args = ["-qq", "--collect-only"] if collect_only else ["-q"]
+    if junitxml is not None:
+        require(not collect_only and not junitxml.exists(), "fresh execution XML required")
+        junitxml.parent.mkdir(parents=True, exist_ok=True)
+        args.append("--junitxml=" + str(junitxml))
+    return int(pytest.main(args, plugins=[collection]))
 
 
 def source_sha():
@@ -174,6 +179,7 @@ def main():
     run.add_argument("--index", type=int, required=True)
     run.add_argument("--count", type=int, required=True)
     run.add_argument("--report", type=Path, required=True)
+    run.add_argument("--junitxml", type=Path)
     check = sub.add_parser("verify")
     check.add_argument("--count", type=int, required=True)
     check.add_argument("--directory", type=Path, required=True)
@@ -185,7 +191,7 @@ def main():
                 and 0 <= args.index < args.count, "invalid partition arguments")
         require(not args.report.exists(), "coverage receipt already exists; no silent overwrite")
         collection = Collection(args.index, args.count)
-        code = pytest_session(collection)
+        code = pytest_session(collection, junitxml=args.junitxml)
         value = receipt(collection, sha, version, code)
         args.report.parent.mkdir(parents=True, exist_ok=True)
         with args.report.open("x", encoding="utf-8") as stream:

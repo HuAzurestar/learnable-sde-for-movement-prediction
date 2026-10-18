@@ -15,6 +15,31 @@ def descriptor(tmp_path):
     return json.loads(exchange.environment()[control.ENVIRONMENT])
 
 
+def resource_descriptor(tmp_path):
+    exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", None, 4096)
+    return json.loads(exchange.environment()[control.ENVIRONMENT])
+
+
+def test_resource_guarded_descriptor_has_explicit_nullable_deadline(tmp_path):
+    exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", None, 4096)
+    value = json.loads(exchange.environment()[control.ENVIRONMENT])
+    assert value["schema_version"] == control.RESOURCE_SCHEMA and value["deadline"] is None
+    exchange.request()
+    request = control.WorkerControl(value).poll()
+    assert request["deadline"] is None and request["schema_version"] == control.RESOURCE_SCHEMA
+
+
+@pytest.mark.parametrize("schema,deadline", [
+    (control.SCHEMA, None), (control.RESOURCE_SCHEMA, 1.0),
+    ("unknown", None), ("unknown", 1.0),
+])
+def test_deadline_shape_is_bound_to_control_protocol_version(tmp_path, schema, deadline):
+    value = descriptor(tmp_path)
+    value.update(schema_version=schema, deadline=deadline)
+    with pytest.raises(control.ControlError):
+        control.WorkerControl(value)
+
+
 def test_total_frame_byte_quota_precedes_json_serialization(monkeypatch):
     monkeypatch.setattr(control.json, "dumps", lambda *a, **k: pytest.fail("over-byte-quota frame reached encoding allocation"))
     with pytest.raises(control.ControlError):
@@ -86,6 +111,39 @@ def test_owner_cannot_acknowledge_without_request(tmp_path):
     with pytest.raises(control.ControlError):
         exchange.acknowledge("a" * 64)
     assert not exchange.accepted and not (tmp_path / "checkpoint-ack.json").exists()
+
+
+def test_absent_response_is_uncached_and_never_owner_acceptance(tmp_path):
+    exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", time.monotonic() + 3, 4096)
+    exchange.request()
+    path = tmp_path / "checkpoint-response.json"
+    assert exchange.response() is None
+    frame = {"schema_version": control.SCHEMA, "attempt_id": exchange.attempt_id, "token": exchange.token,
+        "request_id": exchange.request_id, "state": {}, "progress": {}}
+    control.write_frame(path, frame, 4096)
+    assert exchange.response() == frame
+    assert exchange.accepted is False and not (tmp_path / "checkpoint-ack.json").exists()
+    path.unlink()
+    assert exchange.response() is None
+
+
+@pytest.mark.parametrize("entry", ["invalid-json", "directory"])
+def test_bounded_response_reader_still_rejects_invalid_entries(tmp_path, entry):
+    exchange = control.CheckpointExchange(tmp_path, "attempt-fixture", time.monotonic() + 3, 4096)
+    exchange.request()
+    path = tmp_path / "checkpoint-response.json"
+    if entry == "directory":
+        path.mkdir()
+    else:
+        path.write_bytes(b"{not-json")
+    # Preserve native directory access refusal; it is not a sharing-busy frame
+    # and must not be silently deferred or converted into message acceptance.
+    expected = OSError if entry == "directory" else control.ControlError
+    with pytest.raises(expected) as rejected:
+        exchange.response()
+    if entry == "directory" and control.os.name == "nt":
+        assert rejected.value.winerror == 5
+    assert exchange.accepted is False and not (tmp_path / "checkpoint-ack.json").exists()
 
 
 def test_failed_ack_publication_is_not_accepted(tmp_path, monkeypatch):

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from application.research_budget import BudgetSpec
+from application.research_budget import BudgetSpec, ResourceBudgetSpec
 from application.research_contracts import CapabilityRegistry
 from application.research_admission import AdmissionGate
 from application.research_execution import resolve_execution
@@ -24,8 +24,13 @@ class SharedRunner:
         self.registry = registry if registry is not None else affine_registry(store)
         self.recovery_registry = recovery_registry
 
-    def run_cell(self, study_id, cell_hash, *, budget=BudgetSpec(60, category="smoke"), parent_attempt_id=None, reason=None,
-                 source_transition_ref=None):
+    def run_cell(self, study_id, cell_hash, *, budget=BudgetSpec(60, category="smoke"), parent_attempt_id=None,
+                 reason=None, restart_adjudication=None, source_transition_ref=None):
+        if restart_adjudication is not None and source_transition_ref is not None:
+            raise ResearchError("CONTRACT_MISMATCH", "restart adjudication and source transition are mutually exclusive")
+        if type(budget) is ResourceBudgetSpec:
+            from application.research_restart_adjudication import prime_policy_definitions
+            prime_policy_definitions(self.store, budget.execution_policy, budget.source_code_hash)
         spec = self.store.manifest("study-" + study_id)["spec"]
         cells = [cell for cell in spec["cells"] if digest(cell) == cell_hash]
         if len(cells) != 1:
@@ -46,8 +51,23 @@ class SharedRunner:
             if attempt["run_id"] == run_id and attempt["state"] == "SUCCEEDED":
                 from application.research_reuse import verified_reuse
                 return verified_reuse(self.store, attempt, spec, cell, plugin)
-        attempt = self.store.new_attempt(run_id, parent_attempt_id=parent_attempt_id, reason=reason,
-                                         source_transition_ref=source_transition_ref)
+        if restart_adjudication is None:
+            attempt = self.store.new_attempt(run_id, parent_attempt_id=parent_attempt_id, reason=reason,
+                                             source_transition_ref=source_transition_ref)
+        else:
+            from application.research_restart_adjudication import resolve_retry_adjudication
+            if type(budget) is not ResourceBudgetSpec or parent_attempt_id is not None or reason is not None:
+                raise ResearchError("CONTRACT_MISMATCH", "adjudicated restart owns its parent and funding")
+            receipt = resolve_retry_adjudication(self.store, restart_adjudication,
+                execution_policy=budget.execution_policy, source_code_hash=budget.source_code_hash)
+            attempt = receipt["retry_attempt_id"]
+            registered = self.store.attempts().get(attempt)
+            receipt_run = receipt.get("current_run_id", receipt.get("run_id"))
+            receipt_cell = receipt.get("current_cell_hash", receipt.get("cell_hash"))
+            if (receipt_run != run_id or receipt_cell != cell_hash
+                    or registered is None or registered["run_id"] != run_id
+                    or registered["state"] != "REGISTERED"):
+                raise ResearchError("IDENTITY_CONFLICT", "adjudicated restart target differs")
         if self.recovery_registry is not None and plugin.resume_level != "restart-only":
             checkpoint_handler = recovery.checkpoint_handler(attempt)
         context = {"root": str(self.store.path.parent), "store_id": self.store.store_id}

@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 from types import SimpleNamespace
+import xml.etree.ElementTree as ET
 
 import pytest
 import yaml
@@ -177,11 +178,16 @@ def test_actual_partition_processes_and_independent_recollection(tmp_path):
     values = []
     for index in range(4):
         path = directory / f"coverage-{index}.json"
+        xml = directory / f"junit-{index}.xml"
         completed = subprocess.run([sys.executable, "scripts/ci_pytest_partition.py", "run",
-            "--count", "4", "--index", str(index), "--report", str(path)], cwd=root,
+            "--count", "4", "--index", str(index), "--report", str(path),
+            "--junitxml", str(xml)], cwd=root,
             capture_output=True, text=True, timeout=60)
         assert completed.returncode == 0, completed.stdout + completed.stderr
         values.append(json.loads(path.read_text(encoding="utf-8")))
+        cases = list(ET.parse(xml).iter("testcase"))
+        assert len(cases) == len(values[-1]["outcomes"])
+        assert not list(ET.parse(xml).iter("failure")) and not list(ET.parse(xml).iter("error"))
     verified = subprocess.run([sys.executable, "scripts/ci_pytest_partition.py", "verify",
         "--count", "4", "--directory", str(directory)], cwd=root,
         capture_output=True, text=True, timeout=60)
