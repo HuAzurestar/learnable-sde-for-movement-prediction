@@ -369,6 +369,8 @@ class ResearchSupervisor:
                         # Observe its real exit before further budget I/O; retain
                         # the reservation, independent fuse and heartbeat veto.
                         # Fresh terminal budget authority is checked after stop.
+                        if process.poll() is not None:
+                            break
                         if now - start >= 15 and (not heartbeat.exists() or time.time() - heartbeat.stat().st_mtime > 15):
                             outcome, error_code = "INTERRUPTED", "HEARTBEAT_LOST"
                             break
@@ -397,6 +399,13 @@ class ResearchSupervisor:
                     now = self.monotonic()
                     if expired.is_set() or (deadline is not None and now >= deadline):
                         outcome, error_code = "TIMEOUT", "TIMEOUT"
+                        break
+                    # Budget/authority I/O can outlive a failed worker. Refresh
+                    # its native exit before judging a now-stale heartbeat, but
+                    # only after the fresh budget and independent deadline veto.
+                    # Exit is not success: final whole-tree stop, resource and
+                    # result/settlement checks still run below.
+                    if process.poll() is not None:
                         break
                     if now - start >= 15 and (not heartbeat.exists() or time.time() - heartbeat.stat().st_mtime > 15):
                         outcome, error_code = "INTERRUPTED", "HEARTBEAT_LOST"
