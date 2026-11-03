@@ -16,13 +16,14 @@ from application.walking_pilot_budget import policy
 from infrastructure.research_store import ResearchError,encode
 from tests.test_walking_pilot_budget import fixture
 from tests.test_walking_pilot_sources import setup
+from tests.walking_harness import HelperProtocol, historical_source
 
 
 @pytest.mark.parametrize("fixed",[False,True])
 def test_cross_process_writer_at_old_list_new_head_boundary(tmp_path,monkeypatch,fixed):
+    # Validate pinned raw bytes before fixture setup, compilation or child spawn.
+    source=historical_source()
     store,_,_=fixture(tmp_path)
-    # Load the exact baseline public policy for the negative control.
-    source=subprocess.check_output(["git","show","2f3b15c:application/walking_pilot_budget.py"],text=True)
     baseline={}; exec(compile(source,"baseline-walking-budget","exec"),baseline)
     code=("from pathlib import Path; import sys; "
           "from infrastructure.research_store import ResearchStore; "
@@ -30,35 +31,32 @@ def test_cross_process_writer_at_old_list_new_head_boundary(tmp_path,monkeypatch
           "print('READY',flush=True); sys.stdin.readline(); print('TRYING',flush=True); "
           "s.append('HEARTBEAT',{'attempt_id':'artificial-only','monotonic_elapsed_ms':1}); "
           "print('DONE',flush=True)")
-    child=subprocess.Popen([sys.executable,"-c",code,str(tmp_path)],stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name=="nt" else 0)
+    harness=HelperProtocol([sys.executable,"-c",code,str(tmp_path)],time.monotonic()+10)
+    child=harness.child
     original=store._json; fired=[]
     try:
-        assert child.stdout.readline().strip()=="READY"
+        harness.expect("READY")
         def at_head(path):
             if Path(path)==store.path/"head.json" and not fired:
-                fired.append(True); child.stdin.write("GO\n"); child.stdin.flush()
-                assert child.stdout.readline().strip()=="TRYING"
+                fired.append(True); harness.go()
+                harness.expect("TRYING")
                 if fixed:
-                    time.sleep(.08)
+                    time.sleep(min(.08,harness.remaining()))
+                    harness.remaining()
                     assert child.poll() is None
                 else:
-                    out,err=child.communicate(timeout=10)
-                    assert child.returncode==0 and "DONE" in out,err
+                    harness.finish()
             return original(path)
         monkeypatch.setattr(store,"_json",at_head)
         if fixed:
             assert policy(BudgetLedger(store),"synthetic-pilot")["pilot_id"]=="synthetic-pilot"
-            out,err=child.communicate(timeout=10)
-            assert child.returncode==0 and "DONE" in out,err
+            harness.finish()
         else:
             with pytest.raises(ResearchError,match="authoritative tail lost or changed"):
                 baseline["policy"](BudgetLedger(store),"synthetic-pilot")
         assert fired and store.events()[-1]["event_kind"]=="HEARTBEAT"
     finally:
-        if child.poll() is None:
-            child.kill(); child.communicate(timeout=5)
+        harness.close()
 
 
 @pytest.mark.parametrize("damage",["head","gap","manifest"])

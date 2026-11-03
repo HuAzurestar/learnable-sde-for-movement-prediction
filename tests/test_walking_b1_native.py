@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 
 import pytest
 
@@ -14,6 +15,7 @@ from application.research_supervisor import ResearchSupervisor
 from application.walking_pilot_budget import usage
 from infrastructure.research_store import file_lock
 from tests.test_walking_pilot_budget import fixture, budget
+from tests.walking_harness import ExactWindowsProcess, creation_receipt
 
 
 @pytest.mark.parametrize("mutation",["hold","append","writer","stall","deadline","grandchild","fatal-timeout",
@@ -22,12 +24,24 @@ def test_native_b1_stops_before_authority_review_and_settles(tmp_path,monkeypatc
     store,arms,attempts=fixture(tmp_path)
     arm=arms["A-S"]; attempt=attempts[arm][2]
     paths={}; observed=[]; timings={}; changed=threading.Event(); cancel=threading.Event()
+    owned=[]; identity_errors=[]; before_stop=[]
+    nonce=uuid.uuid4().hex
     real_popen=subprocess.Popen
     def substitute(args,*a,**kw):
         if len(args)>6 and args[5:7]==["-m","application.walking_compute"]:
             code="import pathlib,sys,time; p=pathlib.Path(sys.argv[1]); p.with_name('active').write_text('ready'); "
             if mutation=="grandchild":
-                code+="import subprocess,os; c=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); p.with_name('grandchild.pid').write_text(str(c.pid)); "
+                # Publish a stable identity and wait for the parent to hold its
+                # exact live handle before publishing active. No deadline reset.
+                code = "import pathlib,sys,time; p=pathlib.Path(sys.argv[1]);\n"
+                code += "import subprocess,json; from tests.walking_harness import ExactWindowsProcess, creation_receipt\n"
+                code += "c=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])\n"
+                code += "identity=ExactWindowsProcess(c.pid)\n"
+                code += "p.with_name('grandchild.pending').write_text(json.dumps({'pid':c.pid,'birth':identity.birth,'nonce':"+repr(nonce)+"})); p.with_name('grandchild.pending').replace(p.with_name('grandchild.ready'))\n"
+                code += "deadline="+repr(paths['deadline'])+"\n"
+                code += "while not p.with_name('grandchild.ack').exists():\n    if time.monotonic()>=deadline: raise RuntimeError('creation acknowledgement deadline')\n    time.sleep(.005)\n"
+                code += "identity.close(); p.with_name('active').write_text('ready'); "
+
             if mutation in {"fatal-timeout","fatal-closed"}:
                 code+="import json; p.with_name('worker-error.json').write_text(json.dumps("+repr({"schema":"walking-worker-error-v1","attempt_id":attempt,"stage":"predict","code":"CORRUPT_ARTIFACT"})+")); "
             if mutation=="duplicate-result": code+="p.write_text('{\"ok\":1,\"ok\":2}')"
@@ -39,6 +53,7 @@ def test_native_b1_stops_before_authority_review_and_settles(tmp_path,monkeypatc
     monkeypatch.setattr(subprocess,"Popen",substitute)
     def prepare(output,deadline):
         paths["output"]=output
+        paths["deadline"]=deadline
         # Parent read cost must be part of this funded stage, exactly once.
         time.sleep(.075)
         def verify(result=None,terminal=False):
@@ -48,6 +63,18 @@ def test_native_b1_stops_before_authority_review_and_settles(tmp_path,monkeypatc
             store.events()
         return output.with_name("unused-input.json"),verify
     from infrastructure.process_tree import ProcessTree
+    original_terminate=ProcessTree.terminate
+    def terminate(self):
+        if mutation=="grandchild":
+            # Snapshot only, never hold up the original product stop deadline.
+            try:
+                before_stop.append(bool(owned) and owned[0].state()==258
+                                   and paths["output"].with_name("active").exists())
+            except BaseException as exc:
+                identity_errors.append(type(exc).__name__)
+                before_stop.append(False)
+        return original_terminate(self)
+    monkeypatch.setattr(ProcessTree,"terminate",terminate)
     original_wait=ProcessTree.wait_stopped
     def stopped(self,*a,**kw):
         value=original_wait(self,*a,**kw)
@@ -66,7 +93,23 @@ def test_native_b1_stops_before_authority_review_and_settles(tmp_path,monkeypatc
         monkeypatch.setattr(WalkingWatch,"check",stall)
     def external():
         while not cancel.wait(.005):
+            if mutation=="grandchild" and paths.get("output") and not owned:
+                receipt=paths["output"].with_name("grandchild.ready")
+                if receipt.exists():
+                    try:
+                        assert time.monotonic()<paths["deadline"], "late creation receipt"
+                        with receipt.open('rb') as stream: raw=stream.read(513)
+                        row=creation_receipt(raw,nonce)
+                        identity=ExactWindowsProcess(row["pid"],row["birth"])
+                        owned.append(identity)
+                        paths["output"].with_name("grandchild.ack").write_text(nonce)
+                        timings["creation_ready"]=time.monotonic()
+                    except BaseException as exc:
+                        identity_errors.append(str(exc)); return
             if paths.get("output") and paths["output"].with_name("active").exists(): break
+            if paths.get("deadline") and time.monotonic()>=paths["deadline"]:
+                if mutation=="grandchild": identity_errors.append("missing bounded creation-ready receipt")
+                return
         if cancel.is_set(): return
         timings["external_observed_ready"]=time.monotonic()
         if mutation=="hold": (store.path/"recovery-hold.json").write_bytes(b'{}')
@@ -89,6 +132,17 @@ def test_native_b1_stops_before_authority_review_and_settles(tmp_path,monkeypatc
             resource_plan={"maximum_result_bytes":4*1024**2,"tree_memory_bytes":2*1024**3},walking_prepare=prepare)
     finally:
         cancel.set(); thread.join(timeout=2)
+        if mutation=="grandchild":
+            try:
+                # The kernel handle still identifies the originally observed
+                # descendant even if a numeric PID has since been reused.
+                assert not thread.is_alive(), "creation observer still active"
+                assert not identity_errors, identity_errors
+                assert owned and before_stop and before_stop[0], "creation not proven before stop"
+                assert observed, "whole-job stop unconfirmed"
+                assert owned[0].state()==0, "exact descendant exit unconfirmed"
+            finally:
+                for identity in owned: identity.cleanup()
     assert not thread.is_alive() and observed
     assert paths["output"].with_name("active").exists()
     if mutation in {"hold","append","writer"}: assert changed.is_set()
@@ -109,8 +163,3 @@ def test_native_b1_stops_before_authority_review_and_settles(tmp_path,monkeypatc
     if mutation=="fatal-timeout": assert result["error_code"]=="CORRUPT_ARTIFACT"
     if mutation in {"closed","fatal-closed"}: assert result["state"]=="BUDGET_EXHAUSTED",result
     if mutation=="fatal-closed": assert result["error_code"]=="CORRUPT_ARTIFACT",result
-    if mutation=="grandchild":
-        pidfile=paths["output"].with_name("grandchild.pid")
-        if pidfile.exists():
-            from infrastructure.process_tree import process_may_be_alive
-            assert not process_may_be_alive(int(pidfile.read_text()))

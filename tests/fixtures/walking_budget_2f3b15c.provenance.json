@@ -1,0 +1,10 @@
+{
+  "commit": "2f3b15c8e96ef459f353688c9c19ef7b38d0bf42",
+  "path": "application/walking_pilot_budget.py",
+  "blob": "aa60aca999e5c18421f4b36c41762b55edc7d65c",
+  "size_bytes": 7797,
+  "sha256": "bb1b9fe99f89f841090d632f884a62ee830378a539a936c2884ca2e0c7c74df2",
+  "recovery_bundle": "PIRC-26/tasks/DEV56-terminal-v2/DEV56-recovery.bundle",
+  "bundle_sha256": "951f2d60d7ccec174cc73ae4fdb06991d04057976248d600933bd43a2b6ae635",
+  "scope": "test-only exact historical negative control; not candidate ancestry"
+}

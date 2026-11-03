@@ -123,9 +123,29 @@ needs at least three distinct observation times and five seconds of available
 history. Centered linear regression gives an approximate joint position/velocity
 distribution, represented by eight symmetric particles. Rp is the train residual
 observation covariance. Non-overlapping train prefixes provide velocity increments;
-their propagated observation covariance is subtracted. QV and physical diffusion
-trace matching weight original sources equally, rather than the 60 pooled segments.
-Missing calibration/native targets are explicit failures, not interpolated truth.
+their propagated observation covariance is subtracted. The current calibration
+has an aggregate guard: preparation refuses an empty set of training examples or
+an empty set of calibration increments across all available sources. This is
+not a requirement that each source contribute an increment. A source with no
+increments has a visible zero `calibration_increments` row and does not enter
+the QV mean. Zero increments differ from an observed QV estimate of zero.
+
+QV averages the increment means of contributing sources equally. For B/C arms, the physical
+diffusion trace denominator instead uses each source with calibration velocities,
+with equal total weight per such source (M/A use the constant denominator two). Training examples and Rp/normalization
+use sources with a legal native 1/3-second target origin. These populations can
+differ: a short source may supply an example and velocities while supplying no
+increment, if another source satisfies the aggregate calibration guard. Segments
+remain separate; they cannot be joined to manufacture an increment. Original
+four-train and seven-development coverage denominators remain unchanged, including
+unavailable-source rows. Preparation success alone does not establish that all
+original sources contributed to calibration. Missing native targets are reported
+without interpolation or source replacement.
+
+This distinction is source-backed diagnostic evidence, not a reproduction on real
+frozen data. Real-source applicability and scientific/native acceptance remain
+UNKNOWN until separately authorized validation. No stricter per-source rejection,
+exclusion, weighting rule or report schema is introduced by this clarification.
 
 All model noise/rates and normalization are fixed before development scoring.
 Zero estimated QV is allowed and reported; a zero-speed C calibration with no
