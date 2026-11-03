@@ -16,6 +16,7 @@ from application.walking_pilot_budget import usage
 from infrastructure.research_store import file_lock
 from tests.test_walking_pilot_budget import fixture, budget
 from tests.walking_harness import ExactWindowsProcess, creation_receipt
+from tests.walking_creation_proof import CreationProof
 
 
 @pytest.mark.parametrize("mutation",["hold","append","writer","stall","deadline","grandchild","fatal-timeout",
@@ -24,7 +25,7 @@ def test_native_b1_stops_before_authority_review_and_settles(tmp_path,monkeypatc
     store,arms,attempts=fixture(tmp_path)
     arm=arms["A-S"]; attempt=attempts[arm][2]
     paths={}; observed=[]; timings={}; changed=threading.Event(); cancel=threading.Event()
-    owned=[]; identity_errors=[]; before_stop=[]
+    owned=[]; identity_errors=[]; creation=CreationProof()
     nonce=uuid.uuid4().hex
     real_popen=subprocess.Popen
     def substitute(args,*a,**kw):
@@ -66,13 +67,11 @@ def test_native_b1_stops_before_authority_review_and_settles(tmp_path,monkeypatc
     original_terminate=ProcessTree.terminate
     def terminate(self):
         if mutation=="grandchild":
-            # Snapshot only, never hold up the original product stop deadline.
-            try:
-                before_stop.append(bool(owned) and owned[0].state()==258
-                                   and paths["output"].with_name("active").exists())
-            except BaseException as exc:
-                identity_errors.append(type(exc).__name__)
-                before_stop.append(False)
+            # Parent timer, ordinary stop and exception/finally routes all
+            # enter here. The separate wrapper timer/poll/EOF/kill-on-close
+            # cannot be monkeypatched here and may already have stopped it.
+            # Never sample liveness here or wait before the actual stop.
+            creation.parent_stopping()
         return original_terminate(self)
     monkeypatch.setattr(ProcessTree,"terminate",terminate)
     original_wait=ProcessTree.wait_stopped
@@ -102,7 +101,10 @@ def test_native_b1_stops_before_authority_review_and_settles(tmp_path,monkeypatc
                         row=creation_receipt(raw,nonce)
                         identity=ExactWindowsProcess(row["pid"],row["birth"])
                         owned.append(identity)
-                        paths["output"].with_name("grandchild.ack").write_text(nonce)
+                        # Freeze verified live READY/handle/birth/nonce/ACK
+                        # before the original deadline or any parent stop.
+                        creation.confirm(identity,row,nonce,paths["deadline"],
+                            lambda: paths["output"].with_name("grandchild.ack").write_text(nonce))
                         timings["creation_ready"]=time.monotonic()
                     except BaseException as exc:
                         identity_errors.append(str(exc)); return
@@ -138,9 +140,10 @@ def test_native_b1_stops_before_authority_review_and_settles(tmp_path,monkeypatc
                 # descendant even if a numeric PID has since been reused.
                 assert not thread.is_alive(), "creation observer still active"
                 assert not identity_errors, identity_errors
-                assert owned and before_stop and before_stop[0], "creation not proven before stop"
-                assert observed, "whole-job stop unconfirmed"
-                assert owned[0].state()==0, "exact descendant exit unconfirmed"
+                assert owned, "creation not proven before stop"
+                # Both parent-first and wrapper-first stops consume the same
+                # earlier live creation proof and mandatory pre-cleanup exit.
+                creation.assert_exited(owned[0],bool(observed))
             finally:
                 for identity in owned: identity.cleanup()
     assert not thread.is_alive() and observed
