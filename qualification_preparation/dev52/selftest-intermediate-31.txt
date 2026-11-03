@@ -1,0 +1,37 @@
+﻿test_baseline_bytes_and_source_default_contract (__main__.SyntheticDEV) ... ok
+test_body_error_terminal_and_owner_cleanup (__main__.SyntheticDEV) ... ok
+test_body_primary_survives_terminal_and_unlock_errors (__main__.SyntheticDEV) ... ok
+test_cli_remains_disabled (__main__.SyntheticDEV) ... DEV52 LIVE_EXECUTION_DISABLED: original qualification/resource/authority/OS bindings are not frozen
+ok
+test_graph_mutation_before_call (__main__.SyntheticDEV) ... ok
+test_malformed_immutable_reference (__main__.SyntheticDEV) ... ok
+test_malformed_predecessor (__main__.SyntheticDEV) ... ok
+test_metadata_mismatch_stops_binding (__main__.SyntheticDEV) ... ok
+test_missing_api (__main__.SyntheticDEV) ... ok
+test_missing_external (__main__.SyntheticDEV) ... ok
+test_missing_static_expression_field (__main__.SyntheticDEV) ... ok
+test_missing_static_expression_item (__main__.SyntheticDEV) ... ok
+test_no_product_imports (__main__.SyntheticDEV) ... ok
+test_occupied_owner_thread (__main__.SyntheticDEV) ... ok
+test_order_real_results_and_callbacks (__main__.SyntheticDEV) ... ok
+test_owner_exit_failure_not_success (__main__.SyntheticDEV) ... ok
+test_owner_local_provenance (__main__.SyntheticDEV) ... ok
+test_placeholder_external (__main__.SyntheticDEV) ... ok
+test_retained_prefix_not_caller_fabrication (__main__.SyntheticDEV) ... ok
+test_serialized_deferred_external (__main__.SyntheticDEV) ... ok
+test_serialized_grid (__main__.SyntheticDEV) ... ok
+test_serialized_owner (__main__.SyntheticDEV) ... ok
+test_terminal_error_propagates (__main__.SyntheticDEV) ... ok
+test_typed_refs_and_errors (__main__.SyntheticDEV) ... ok
+test_unknown_external (__main__.SyntheticDEV) ... ok
+test_wrong_allocation (__main__.SyntheticDEV) ... ok
+test_wrong_deadline (__main__.SyntheticDEV) ... ok
+test_wrong_method_receiver_binding (__main__.SyntheticDEV) ... ok
+test_wrong_pid (__main__.SyntheticDEV) ... ok
+test_wrong_signature (__main__.SyntheticDEV) ... ok
+test_wrong_thread (__main__.SyntheticDEV) ... ok
+
+----------------------------------------------------------------------
+Ran 31 tests in 20.331s
+
+OK

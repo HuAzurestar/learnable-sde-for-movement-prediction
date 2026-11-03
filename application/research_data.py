@@ -78,9 +78,11 @@ class EvaluationExposureLedger:
             raise ResearchError("UNAUTHORIZED_DATA", "data purpose, protocol or grant mismatch")
 
     def read(self, protocol_id: str, block_id: str, *, purpose: str,
-             authorization_id: str, data_root: Path, consumer=None, authorization_version=None) -> bytes:
+             authorization_id: str, data_root: Path, consumer=None, authorization_version=None,
+             maximum_bytes=None) -> bytes:
         return self._read(protocol_id, block_id, purpose=purpose, authorization_id=authorization_id,
-                          data_root=data_root, consumer=consumer, materialize=True, authorization_version=authorization_version)
+                          data_root=data_root, consumer=consumer, materialize=True, authorization_version=authorization_version,
+                          maximum_bytes=maximum_bytes)
 
     def verify(self, protocol_id: str, block_id: str, *, purpose: str,
                authorization_id: str, data_root: Path, consumer=None, authorization_version=None) -> dict:
@@ -88,7 +90,8 @@ class EvaluationExposureLedger:
         return self._read(protocol_id, block_id, purpose=purpose, authorization_id=authorization_id,
                           data_root=data_root, consumer=consumer, materialize=False, authorization_version=authorization_version)
 
-    def _read(self, protocol_id, block_id, *, purpose, authorization_id, data_root, consumer, materialize, authorization_version):
+    def _read(self, protocol_id, block_id, *, purpose, authorization_id, data_root, consumer, materialize, authorization_version,
+              maximum_bytes=None):
         with self.store._read_transaction():
             protocol = self.store._manifest("protocol-" + identifier(protocol_id))
             selected = [b for b in protocol["blocks"] if b["block_id"] == block_id]
@@ -125,6 +128,8 @@ class EvaluationExposureLedger:
             self._require_read_authority(protocol, block, purpose, authorization_id, grant, request)
             try:
                 with opened_regular_file(root, path) as (stream, size, verify_identity):
+                    if maximum_bytes is not None and (type(maximum_bytes) is not int or not 0 < maximum_bytes <= 16*1024**2 or size > maximum_bytes):
+                        raise ResearchError("RESOURCE_PLAN_REJECTED", "source exceeds consumer byte quota")
                     # Legacy protocols freeze a digest, not necessarily a size.
                     # Verify with bounded memory before materializing any input;
                     # legitimate large byte-return reads remain supported.

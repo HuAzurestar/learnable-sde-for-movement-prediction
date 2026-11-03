@@ -15,6 +15,8 @@ class BudgetSpec:
     arm_seconds: int = 86400
     category: str = "job"
     allocation_only: bool = False
+    pilot_id: str | None = None
+    pilot_phase: str | None = None
 
     def validate(self):
         cap = {"smoke": 900, "pilot": 1800, "job": 7200}.get(self.category)
@@ -22,6 +24,10 @@ class BudgetSpec:
                 or not 0 < self.job_seconds <= (86400 if self.allocation_only else cap)
                 or self.arm_seconds != 86400):
             raise ResearchError("CONTRACT_MISMATCH", "job/category or cumulative arm budget invalid")
+        if ((self.pilot_id is None) != (self.pilot_phase is None)
+                or (self.pilot_id is not None and (self.category != "pilot" or self.allocation_only
+                    or self.pilot_phase not in {"prepare", "train", "predict", "h2"}))):
+            raise ResearchError("CONTRACT_MISMATCH", "invalid pilot budget phase")
 
 
 class BudgetLedger:
@@ -38,7 +44,7 @@ class BudgetLedger:
                 if event["event_kind"] == "SETTLE" and (
                         data["monotonic_elapsed_ms"] is None
                         or data["outcome"] == "BUDGET_EXHAUSTED"
-                        or (data["arm_id"] not in soft_arms
+                        or (not data.get("pilot_id") and data["arm_id"] not in soft_arms
                             and data["outcome"] in {"TIMEOUT", "INTERRUPTED"})):
                     closed.add(data["arm_id"])
             elif event["event_kind"] == "ARM_CLOSED":
@@ -69,14 +75,38 @@ class BudgetLedger:
                     raise ResearchError("CONTRACT_MISMATCH", "continuation cost/closure/approval differs")
                 closed.discard(arm)
                 soft_arms.add(arm)
+        from .walking_pilot_budget import _grid_state_in_scope
+        if any(e["payload"].get("billing") or e["event_kind"]=="WALKING_EXECUTION_ACTIVATED" for e in events):
+            _grid_state_in_scope(self,None)
         return reservations, closed
 
     def _balance(self, arm_id):
         reservations, closed = self._state()
         used = sum(r["charged_ms"] if r["settled"] else r["reserved_ms"]
                    for r in reservations.values() if r["arm_id"] == arm_id)
-        return {"arm_id": arm_id, "remaining_ms": max(0, 86400000 - used),
+        result={"arm_id": arm_id, "remaining_ms": max(0, 86400000 - used),
                 "committed_ms": used, "closed": arm_id in closed or (self.store.path / "recovery-hold.json").exists()}
+        rows=[r for r in reservations.values() if r["arm_id"]==arm_id]
+        if any(r.get("billing") for r in rows):
+            exact=0; committed_exact=0; unknown=False
+            for r in rows:
+                if not r["settled"]:
+                    exact+=r["reserved_ms"]*1000000
+                    continue
+                if r.get("monotonic_elapsed_ms") is None:
+                    unknown=True; continue
+                if r.get("billing"):
+                    amount=r["billing"]["duration_ns"] or 0
+                elif type(r.get("monotonic_elapsed_ms")) is not int or r["charged_ms"]!=r["monotonic_elapsed_ms"]:
+                    unknown=True; continue
+                else:
+                    amount=r["charged_ms"]*1000000
+                exact+=amount; committed_exact+=amount
+            from .walking_pilot_budget import _integer
+            _integer(exact); _integer(committed_exact)
+            result["billing_limit_remaining_ns"]=0 if unknown else max(0,86400000000000-exact)
+            result["closed"] |= unknown or committed_exact>=86400000000000
+        return result
 
     def balance(self, arm_id):
         # Continuation proof has several manifest references. Reuse one verified
@@ -153,7 +183,7 @@ class BudgetLedger:
             self.store._append("ARM_CONTINUATION", reference, event_id)
             return reference
 
-    def reserve(self, attempt_id: str, budget: BudgetSpec, *, worker_slot=0):
+    def reserve(self, attempt_id: str, budget: BudgetSpec, *, worker_slot=0, walking_clock=None, walking_allocation_ms=None):
         budget.validate()
         # Reuse only a verified prefix under the same short writer lock. The
         # final uncached physical pass precedes returning a funded reservation.
@@ -165,6 +195,9 @@ class BudgetLedger:
                 raise ResearchError("MISSING_INPUT", "attempt not registered")
             attempt = attempts[attempt_id]
             run = self.store._manifest("run-" + attempt["run_id"])
+            if run["cell"].get("pilot_id"):
+                from .walking_pilot_budget import check_owner_admission
+                check_owner_admission(self.store,run["cell"]["pilot_id"])
             from .research_disposition import declared_execution_disposition
             declaration = declared_execution_disposition(run["cell"])
             if declaration is not None:
@@ -172,20 +205,41 @@ class BudgetLedger:
                     self.store._transition(attempt_id, "PREFLIGHT_FAILED", error_code=declaration["status"])
                 raise ResearchError(declaration["status"], "registered cell is declared non-executable")
             reservation_id = digest([self.store.store_id, attempt_id])
-            requested = math.ceil(budget.job_seconds * 1000)
+            if walking_clock is not None:
+                from .walking_pilot_budget import _integer
+                requested=_integer(walking_allocation_ms)
+                if requested<=0: raise ResearchError("BUDGET_EXHAUSTED","submillisecond allocation")
+            else:
+                if walking_allocation_ms is not None: raise ResearchError("CONTRACT_MISMATCH","allocation needs grid")
+                requested = math.ceil(budget.job_seconds * 1000)
             reservations, _ = self._state()
             if reservation_id in reservations:
                 existing = reservations[reservation_id]
-                if existing["reserved_ms"] != requested or existing["worker_slot"] != worker_slot:
+                if bool(existing.get("billing"))!=(walking_clock is not None):
+                    raise ResearchError("CONTRACT_MISMATCH","reservation billing replay differs")
+                if walking_clock:
+                    walking_clock.check(self,existing["pilot_id"])
+                    if existing["billing"]["invocation_id"]!=walking_clock.invocation_id:
+                        raise ResearchError("IDENTITY_CONFLICT","reservation belongs to another invocation")
+                if (existing["reserved_ms"] != requested or existing["worker_slot"] != worker_slot
+                        or existing.get("pilot_id") != budget.pilot_id or existing.get("pilot_phase") != budget.pilot_phase):
                     raise ResearchError("IDENTITY_CONFLICT", "reservation replay changed budget")
                 return existing
+            from .walking_pilot_budget import check_reservation
+            pilot_fields = check_reservation(self, {**run,"_grid_attempt_id":attempt_id}, budget, requested, reservations,
+                walking_clock=walking_clock,walking_allocation_ms=walking_allocation_ms)
             if attempt["state"] != "REGISTERED":
                 raise ResearchError("CONTRACT_MISMATCH", "reservation requires registered attempt")
             balance = self._balance(run["arm_id"])
             continuation_policy = self._continuation_policy(run["arm_id"])
+            if (continuation_policy is not None and "pilot_study_id" in continuation_policy
+                    and ((run["study_id"] != continuation_policy["pilot_study_id"]
+                         and pilot_fields.get("original_study_id") != continuation_policy["pilot_study_id"]) or not pilot_fields)):
+                raise ResearchError("UNAUTHORIZED_DATA", "continuation restricted to its registered pilot study")
             if budget.allocation_only and continuation_policy is None:
                 raise ResearchError("UNAUTHORIZED_DATA", "soft allocation requires an approved continuation")
-            if balance["closed"] or requested > balance["remaining_ms"]:
+            if (balance["closed"] or requested > balance["remaining_ms"]
+                    or requested*1000000>balance.get("billing_limit_remaining_ns",86400000000000)):
                 # Classify and persist rejection while still holding the same
                 # authority lock as the capacity check. No reservation exists
                 # for this attempt, so never settle another caller's work.
@@ -201,40 +255,58 @@ class BudgetLedger:
                     "attempt_id": attempt_id, "run_id": run["run_id"], "study_id": run["study_id"],
                     "reserved_ms": requested, "charged_ms": 0, "monotonic_elapsed_ms": None,
                     "worker_slot": worker_slot, "settled": False}
+            data.update(pilot_fields)
             if continuation_policy is not None:
                 data["work_deadline"] = continuation_policy["work_deadline"]
                 # Explicit report-only opt-in never edits older approvals or
                 # reservations. Data permission expiry remains an execution cap.
                 if continuation_policy.get("work_deadline_policy") == "report-only":
                     data["work_deadline_policy"] = "report-only"
-                    data["execution_deadline"] = continuation_policy["authorization_expires_at"]
+                    from datetime import datetime
+                    candidates=[continuation_policy["authorization_expires_at"]]
+                    if data.get("execution_deadline"):
+                        candidates.append(data["execution_deadline"])
+                    data["execution_deadline"] = min(candidates,key=datetime.fromisoformat)
             self.store._append("RESERVE", data, "reserve-" + reservation_id)
             return data
 
-    def settle(self, reservation_id: str, elapsed_ms: int | None, *, outcome: str):
+    def settle(self, reservation_id: str, elapsed_ms: int | None, *, outcome: str,walking_interval=None):
         with self.store._read_transaction():
-            return self._settle(reservation_id, elapsed_ms, outcome=outcome)
+            return self._settle(reservation_id, elapsed_ms, outcome=outcome,walking_interval=walking_interval)
 
-    def _settle(self, reservation_id: str, elapsed_ms: int | None, *, outcome: str):
+    def _settle(self, reservation_id: str, elapsed_ms: int | None, *, outcome: str,walking_interval=None):
         if elapsed_ms is not None and (not isinstance(elapsed_ms, int) or elapsed_ms < 0):
             raise ResearchError("CONTRACT_MISMATCH", "invalid elapsed cost")
         reservations, _ = self._state()
         if reservation_id not in reservations:
             raise ResearchError("MISSING_INPUT", "reservation missing")
         reservation = reservations[reservation_id]
+        if reservation.get("billing"):
+            from .walking_pilot_budget import _owner,_require
+            grid=getattr(_owner,"grid",None)
+            if grid is None: raise ResearchError("RECOVERY_REQUIRED","grid settlement requires live owner")
+            grid.check(self,reservation["pilot_id"])
+            _require(isinstance(walking_interval,dict),"grid interval required")
+            expected=(grid.no_stage(self,reservation,walking_interval.get("no_interval_reason")) if walking_interval.get("interval_kind")=="no-stage" else grid.interval(self,reservation))
+            _require(expected==walking_interval and walking_interval["allocated_ms"]==elapsed_ms,"grid settlement proof differs")
+        elif walking_interval is not None:
+            raise ResearchError("CONTRACT_MISMATCH","legacy settlement cannot carry grid interval")
         if reservation["settled"]:
+            if reservation.get("billing") and reservation["billing"]!=walking_interval:
+                raise ResearchError("IDENTITY_CONFLICT","grid settlement replay differs")
             if reservation["monotonic_elapsed_ms"] != elapsed_ms or reservation["outcome"] != outcome:
                 raise ResearchError("IDENTITY_CONFLICT", "settlement replay changed cost/outcome")
             return reservation
         charged = reservation["reserved_ms"] if elapsed_ms is None else elapsed_ms
         data = {**reservation, "settled": True, "charged_ms": charged,
                 "monotonic_elapsed_ms": elapsed_ms, "outcome": outcome}
+        if walking_interval is not None: data["billing"]=walking_interval
         self.store._append("SETTLE", data, "settle-" + reservation_id)
         continued = any(e["event_kind"] == "ARM_CONTINUATION"
                         and self.store._manifest(e["payload"]["manifest_id"])["arm_id"] == reservation["arm_id"]
                         for e in self.store._events())
         if (elapsed_ms is None or outcome == "BUDGET_EXHAUSTED"
-                or (not continued and outcome in {"TIMEOUT", "INTERRUPTED"})
+                or (not reservation.get("pilot_id") and not continued and outcome in {"TIMEOUT", "INTERRUPTED"})
                 or self._balance(reservation["arm_id"])["remaining_ms"] == 0):
             self.store._append("ARM_CLOSED", {"arm_id": reservation["arm_id"], "reason": outcome},
                                "close-" + reservation_id)
