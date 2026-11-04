@@ -68,3 +68,16 @@ def public_artifacts(tmp_path, monkeypatch):
     monkeypatch.setattr(backend_module, "_ctx", backend_module._Context())
 
     return {"data_root": data_root, "checkpoint_root": checkpoint_root}
+
+
+@pytest.fixture(autouse=True)
+def walking_synthetic_wall_clock(request):
+    """Keep fixed historical synthetic grants independent of today's date."""
+    from tests.walking_fixture_clock import FIXTURE_MODULES, synthetic_clock
+    if request.module.__name__.rsplit('.', 1)[-1] in FIXTURE_MODULES:
+        # No dependency on the monkeypatch fixture: its per-test overrides must
+        # be undone before this outer clock restores the real module bindings.
+        with synthetic_clock():
+            yield
+    else:
+        yield
