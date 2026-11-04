@@ -7,6 +7,8 @@ outside Git, and reopening requires the original store identity.
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 import hashlib
@@ -803,7 +805,7 @@ class ResearchStore:
             raise ResearchError("CORRUPT_ARTIFACT", "artifact hash mismatch")
         return content
 
-    def _artifact_read_allowed(self, metadata, purpose, authorization):
+    def _artifact_read_allowed(self, metadata, purpose, authorization, consumer=None):
         """Fresh authority, not an authorization cached by the read scope."""
         if not isinstance(authorization, dict):
             return False
@@ -816,6 +818,11 @@ class ResearchStore:
                        and purpose in grant["purposes"]
                        and metadata["visibility"] in grant["visibilities"]
                        and set(metadata["block_ids"]) <= set(grant["block_ids"]))
+            if "artifact_ids" in grant:
+                allowed = allowed and isinstance(grant["artifact_ids"], list) and metadata["artifact_id"] in grant["artifact_ids"]
+            if allowed and any(k in grant for k in ("pilot_study_id", "consumer_scope", "consumer_arm_ids")):
+                from application.walking_pilot_sources import validate_consumer
+                validate_consumer(self, grant, consumer, metadata)
         except (ResearchError, KeyError, TypeError, ValueError):
             return False
         if allowed and metadata["role"] != "qualification":
@@ -838,7 +845,7 @@ class ResearchStore:
             return False
 
     def _require_artifact_read(self, metadata, purpose, authorization, request):
-        if not self._artifact_read_allowed(metadata, purpose, authorization):
+        if not self._artifact_read_allowed(metadata, purpose, authorization, request.get("consumer")):
             self._append("EXPOSURE_DENIED", {**request, "allowed": False})
             raise ResearchError("UNAUTHORIZED_DATA", "artifact disclosure not authorized")
 
@@ -853,12 +860,14 @@ class ResearchStore:
             self.append("EXPOSURE_DENIED", {**request, "allowed": False})
             raise ResearchError("UNAUTHORIZED_DATA", "artifact disclosure not authorized")
 
-    def verify_artifact_read(self, artifact_id: str, *, purpose: str, authorization: dict):
+    def verify_artifact_read(self, artifact_id: str, *, purpose: str, authorization: dict, consumer=None):
         """Recheck a consumer's final disclosure after its extra source I/O."""
         if not isinstance(artifact_id, str) or not re.fullmatch(r"[0-9a-f]{64}", artifact_id):
             raise ResearchError("UNAUTHORIZED_DATA", "invalid artifact ID")
         request = {"artifact_id": artifact_id, "purpose": purpose,
                    "authorization_hash": digest(authorization), "allowed": True}
+        if consumer is not None:
+            request["consumer"] = deepcopy(consumer)
         with self._read_transaction():
             metadata = self._manifest("artifact-" + artifact_id)
             self._require_artifact_read(metadata, purpose, authorization, request)
@@ -867,14 +876,17 @@ class ResearchStore:
                 lambda: self._require_artifact_expiry(authorization, request))
         self._require_artifact_expiry(authorization, request)
 
-    def read_artifact(self, artifact_id: str, *, purpose: str, authorization: dict) -> bytes:
+    def read_artifact(self, artifact_id: str, *, purpose: str, authorization: dict, consumer=None) -> bytes:
         if not isinstance(artifact_id, str) or not re.fullmatch(r"[0-9a-f]{64}", artifact_id):
             raise ResearchError("UNAUTHORIZED_DATA", "invalid artifact ID")
         with self._read_transaction():
             metadata = self._manifest("artifact-" + artifact_id)
-            allowed = self._artifact_read_allowed(metadata, purpose, authorization)
+            consumer = deepcopy(consumer)
+            allowed = self._artifact_read_allowed(metadata, purpose, authorization, consumer)
             request = {"artifact_id": artifact_id, "purpose": purpose,
                        "authorization_hash": digest(authorization), "allowed": allowed}
+            if consumer is not None:
+                request["consumer"] = consumer
             self._append("EXPOSURE_ALLOWED" if allowed else "EXPOSURE_DENIED", request)
             if not allowed:
                 raise ResearchError("UNAUTHORIZED_DATA", "artifact disclosure not authorized")

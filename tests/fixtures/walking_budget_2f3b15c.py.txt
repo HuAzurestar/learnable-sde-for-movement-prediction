@@ -1,0 +1,130 @@
+"""Pilot sublimits in the existing BudgetLedger's authoritative event chain.
+
+No second store or replenishable private balance. Reservations still debit the
+original arm account. Every new-arm reservation requires the bound pilot.
+"""
+from datetime import datetime, timezone
+import math
+
+from infrastructure.research_store import ResearchError, digest, identifier
+
+
+def policy(ledger, pilot_id, *, live=True):
+    p=ledger.store._manifest("walking-pilot-"+identifier(pilot_id))
+    if (p.get("schema_version")!="pirc26-walking-budget-v1" or p.get("pilot_id")!=pilot_id
+            or p.get("global_ms")!=1800000 or p.get("training_ms")!=120000
+            or p.get("final_test") is not False or p.get("motion")!="walking"
+            or len(p.get("arms",{}))!=10 or len(set(p["arms"].values()))!=10
+            or p["arms"].get("M0-UO2")!="pirc26-m0-o1" or p["arms"].get("M2-UO2")!="pirc26-m2-o1"
+            or set(p["arms"])!={"M0-UO2","M2-UO2","A-S","A-N","B-S","B-N","C-T-S","C-T-N","C-R-S","C-R-N"}
+            or type(p.get("speed_limit")) not in (int,float) or not math.isfinite(p["speed_limit"]) or p["speed_limit"]<=0):
+        raise ResearchError("CONTRACT_MISMATCH","invalid frozen walking policy")
+    approval=ledger.store._manifest(p["approval"]["manifest_id"])
+    current_receipt=(approval.get("schema_version")=="pirc26-user-scoped-pilot-permission-v1"
+        and approval.get("user")=="azurestarhu" and approval.get("decision_record")=="PIRC-26/DECISION-01@v1"
+        and approval.get("pilot_study_id")==p["study_id"] and approval.get("final_test_authorization") is False
+        and approval.get("public_export") is False and approval.get("movement_scope")=="walking"
+        and approval.get("walking_speed_assumption",{}).get("U_m_s")==p["speed_limit"]
+        and approval.get("walking_speed_assumption",{}).get("V_m_s")==p["speed_limit"]
+        and approval.get("budget")=={"deadline_reset":False,"global_scientific_seconds":1800,"per_arm_training_seconds":120,"timeout_policy":"partial-results"})
+    synthetic_receipt=(approval.get("decider")=="azurestarhu" and approval.get("decision")=="DECISION-01@v1"
+        and approval.get("feature")=="PIRC-26"
+        and approval.get("source_wording_sha256")=="ed9e71a39ca450e244851f1ab20ac24e6c1207132d8ee1b93ee9daedcc9ff00e"
+        and approval.get("allowed_pilot")==pilot_id and p["study_id"]=="synthetic")
+    if digest(approval)!=p["approval"]["sha256"] or not (current_receipt or synthetic_receipt):
+        raise ResearchError("UNAUTHORIZED_DATA","pilot approval receipt differs")
+    expiry=datetime.fromisoformat(p["expires_at"])
+    ceiling=datetime.fromisoformat("2026-11-03T23:59:00+08:00")
+    if expiry.tzinfo is None or expiry>ceiling or (live and expiry<=datetime.now(timezone.utc)):
+        raise ResearchError("UNAUTHORIZED_DATA","pilot authorization expired or extended")
+    return p
+
+
+def usage(ledger,pilot_id,reservations=None):
+    reservations=ledger._state()[0] if reservations is None else reservations
+    rows=[r for r in reservations.values() if r.get("pilot_id")==pilot_id]
+    owner=sum(e["payload"]["elapsed_ms"] for e in ledger.store._events()
+              if e["event_kind"]=="PILOT_OWNER_COST" and e["payload"]["pilot_id"]==pilot_id)
+    def cost(r):
+        return r["charged_ms"] if r["settled"] else r["reserved_ms"]
+    return {"global_ms":owner+sum(cost(r) for r in rows),
+            "training_ms":{arm:sum(cost(r) for r in rows if r["arm_id"]==arm and r["pilot_phase"]=="train")
+                           for arm in {r["arm_id"] for r in rows}},
+            "pending":any(not r["settled"] for r in rows),"owner_ms":owner}
+
+
+def registered_binding(ledger,run):
+    """Resolve authority from the registered run, never a caller's phase label."""
+    cell=run["cell"]
+    if any(k in cell for k in ("pilot_id","pilot_arm","pilot_stage")) and not cell.get("pilot_id"):
+        raise ResearchError("UNAUTHORIZED_DATA","registered pilot markers require a pilot identity")
+    study=ledger.store._manifest("study-"+run["study_id"])
+    if (cell not in study["spec"]["cells"] or run["cell_hash"]!=digest(cell)
+            or run["spec_hash"]!=study["spec_hash"] or run["arm_id"]!=cell["arm_id"]):
+        raise ResearchError("UNAUTHORIZED_DATA","registered run/cell binding differs")
+    bound=[]
+    for event in ledger.store._events():
+        if event["event_kind"]=="MANIFEST" and event["payload"]["object_id"].startswith("walking-pilot-"):
+            p=ledger.store._manifest(event["payload"]["object_id"])
+            new={v for k,v in p.get("arms",{}).items() if k not in {"M0-UO2","M2-UO2"}}
+            if run["study_id"]==p.get("study_id") or run["arm_id"] in new:
+                bound.append(p["pilot_id"])
+    if cell.get("pilot_id") is not None:
+        bound.append(cell["pilot_id"])
+    if not bound:
+        return None
+    if len(set(bound))!=1:
+        raise ResearchError("UNAUTHORIZED_DATA","registered pilot binding is ambiguous")
+    p=policy(ledger,bound[0])
+    if (cell.get("pilot_id")!=p["pilot_id"] or run["study_id"]!=p["study_id"]
+            or cell.get("pilot_arm") not in p["arms"]
+            or p["arms"][cell["pilot_arm"]]!=run["arm_id"]
+            or cell.get("pilot_stage") not in {"source","prepare","train","predict","h2"}):
+        raise ResearchError("UNAUTHORIZED_DATA","registered pilot study/arm/stage is restricted")
+    return p
+
+
+def check_reservation(ledger,run,budget,requested,reservations):
+    p=registered_binding(ledger,run)
+    if p is None:
+        if budget.pilot_id is not None:
+            raise ResearchError("UNAUTHORIZED_DATA","nonpilot cell cannot claim a pilot")
+        return {}
+    phase="prepare" if run["cell"]["pilot_stage"]=="source" else run["cell"]["pilot_stage"]
+    if budget.pilot_id!=p["pilot_id"] or budget.pilot_phase!=phase or budget.category!="pilot" or budget.allocation_only:
+        raise ResearchError("UNAUTHORIZED_DATA","budget differs from registered restricted pilot phase")
+    u=usage(ledger,p["pilot_id"],reservations)
+    if u["pending"]:
+        raise ResearchError("BUDGET_BUSY","pilot is serial; unresolved costs remain")
+    if requested>p["global_ms"]-u["global_ms"]:
+        raise ResearchError("BUDGET_EXHAUSTED","pilot global limit")
+    if phase=="train" and requested>p["training_ms"]-u["training_ms"].get(run["arm_id"],0):
+        raise ResearchError("BUDGET_EXHAUSTED","pilot cumulative training limit")
+    return {"pilot_id":p["pilot_id"],"pilot_phase":phase,"execution_deadline":p["expires_at"]}
+
+
+def remaining(ledger,pilot_id,arm_id,phase):
+    with ledger.store._read_transaction():
+        p=policy(ledger,pilot_id); u=usage(ledger,pilot_id)
+        if (ledger.store.path/"recovery-hold.json").exists() or u["pending"]:
+            raise ResearchError("RECOVERY_REQUIRED","pilot has unknown/held costs")
+        available=p["global_ms"]-u["global_ms"]
+        if phase=="train":
+            available=min(available,p["training_ms"]-u["training_ms"].get(arm_id,0))
+        available=min(available,ledger._balance(arm_id)["remaining_ms"])
+        if ledger._balance(arm_id)["closed"]:
+            available=0
+        return max(0,available)/1000
+
+
+def charge_owner(ledger,pilot_id,elapsed_ms,event_id):
+    """Charge preparation/control/report work excluding already billed workers.
+
+    Overruns are retained, never truncated to the remaining allowance. Once a
+    metadata operation consumes the remainder, no later worker can be funded.
+    """
+    if type(elapsed_ms) is not int or elapsed_ms<0:
+        raise ResearchError("CONTRACT_MISMATCH","invalid measured owner cost")
+    with ledger.store._read_transaction():
+        policy(ledger,pilot_id,live=False)
+        return ledger.store._append("PILOT_OWNER_COST",{"pilot_id":pilot_id,"elapsed_ms":elapsed_ms},event_id)

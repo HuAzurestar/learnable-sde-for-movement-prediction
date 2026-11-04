@@ -1,0 +1,2 @@
+﻿DEV52 LIVE_EXECUTION_DISABLED: original qualification/resource/authority/OS bindings are not frozen
+expected_exit=2 observed_exit=2

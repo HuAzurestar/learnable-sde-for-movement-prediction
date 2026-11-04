@@ -1,0 +1,9 @@
+{
+  "revision": "DEV52-baseline-v1",
+  "physical_and_manifest_git_blob_digests": 686,
+  "baseline": "556676102f0c2b1797291b2a8e66d0a4facb1402",
+  "parent": "fe5cc04efc75dc41674f5cde5af47d9078ffc0c5",
+  "manifest_sha256": "2f1aeae05c769c6c00bb090999200857ab828946e730324252b0541abacf8bc6",
+  "product_imports_or_execution": false,
+  "scope": "mechanical immutable bytes, sizes, SHA256 and Git blob SHA1 only"
+}

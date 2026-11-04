@@ -110,7 +110,7 @@ def pid_reuse_observation(pid, recorded_started_at):
     that a currently existing Windows PID is a different, later-born process.
     https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes
     """
-    if os.name != "nt" or type(pid) is not int or pid <= 1:
+    if os.name != "nt" or type(pid) is not int or not 1 < pid < 2**32:
         return None
     import ctypes
     from ctypes import wintypes
@@ -131,12 +131,13 @@ def pid_reuse_observation(pid, recorded_started_at):
             # that error: require two complete native snapshots, including our
             # own process, and the caller's pre-existing whole-tree-stop proof.
             error = ctypes.get_last_error()
-            return pid_absence_observation(pid, recorded_started_at, open_error=error)
+            absent = pid_absence_observation(pid, recorded_started_at, open_error=error)
+            return absent or (cim_pid_reuse_observation(pid, recorded_started_at) if error == 5 else None)
         try:
             creation, exit_time, kernel_time, user_time = [wintypes.FILETIME() for _ in range(4)]
             if not kernel.GetProcessTimes(handle, ctypes.byref(creation), ctypes.byref(exit_time),
                                           ctypes.byref(kernel_time), ctypes.byref(user_time)):
-                return None
+                return cim_pid_reuse_observation(pid, recorded_started_at) if ctypes.get_last_error() == 5 else None
             ticks = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
             birth = datetime.fromtimestamp((ticks - 116444736000000000) / 10000000, timezone.utc)
             # Whole-tree launch always precedes WORKER_STARTED journal time.
@@ -149,6 +150,98 @@ def pid_reuse_observation(pid, recorded_started_at):
         finally:
             kernel.CloseHandle(handle)
     except (ValueError, TypeError, OSError, OverflowError):
+        return None
+
+
+_CIM_BIRTH_QUERY = r"""
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+try {
+  $queryPid = [uint32]$env:PSDE_QUERY_PROCESS_ID
+  $rows = @(Get-CimInstance -ClassName Win32_Process -Filter ('ProcessId = ' + $queryPid) -ErrorAction Stop)
+  if ($rows.Count -ne 1 -or $rows[0].ProcessId -ne $queryPid -or $null -eq $rows[0].CreationDate) { exit 3 }
+  @{ ProcessId = [uint32]$rows[0].ProcessId; Name = [string]$rows[0].Name;
+     CreationDateUtc = $rows[0].CreationDate.ToUniversalTime().ToString('o') } | ConvertTo-Json -Compress
+} catch { exit 4 }
+"""
+
+
+def _cim_process_birth(pid):
+    """Fixed read-only query, numeric input outside script, 5s/2048-byte caps.
+
+    stdout is not consumed into an unbounded communicate buffer. If output fills
+    the pipe, the wait times out; only our owned query helper is stopped/reaped.
+    No target process method (Create/Terminate/etc.) is called.
+    """
+    if os.name != "nt" or type(pid) is not int or not 1 < pid < 2**32:
+        return None
+    import json
+    import subprocess
+    from pathlib import Path
+    executable=Path(os.environ.get("SystemRoot",r"C:\Windows"))/"System32/WindowsPowerShell/v1.0/powershell.exe"
+    environment=dict(os.environ,PSDE_QUERY_PROCESS_ID=str(pid))
+    process=None
+    try:
+        process=subprocess.Popen([str(executable),"-NoProfile","-NonInteractive","-Command",_CIM_BIRTH_QUERY],
+            stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW,env=environment)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill(); process.wait(timeout=2)
+            return None
+        content=process.stdout.read(2049)
+        if process.returncode or len(content)>2048:
+            return None
+        value=json.loads(content.decode("utf-8-sig"))
+        if (type(value) is not dict or set(value)!={"ProcessId","Name","CreationDateUtc"}
+                or type(value["ProcessId"]) is not int or value["ProcessId"]!=pid
+                or type(value["Name"]) is not str or not 1<=len(value["Name"])<=260
+                or type(value["CreationDateUtc"]) is not str or len(value["CreationDateUtc"])>64):
+            return None
+        # PowerShell round-trip dates have seven fractional digits. Python
+        # 3.10 accepts at most six; discard only sub-microsecond precision,
+        # far below the conservative two-second reuse margin.
+        import re
+        stamp=re.fullmatch(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,7}))?(?:Z|\+00:00)",value["CreationDateUtc"])
+        if stamp is None:
+            return None
+        birth=datetime.fromisoformat(stamp[1]+"."+(stamp[2] or "0")[:6].ljust(6,"0")+"+00:00")
+        if birth.tzinfo is None or birth.utcoffset().total_seconds()!=0 or birth>datetime.now(timezone.utc):
+            return None
+        return {"pid":pid,"name":value["Name"],"created_at_utc":birth.isoformat()}
+    except (OSError,ValueError,TypeError,OverflowError,subprocess.TimeoutExpired):
+        return None
+    finally:
+        if process is not None:
+            if process.poll() is None:
+                process.kill(); process.wait(timeout=2)
+            process.stdout.close()
+
+
+def cim_pid_reuse_observation(pid,recorded_started_at):
+    """Two fresh matching UTC births can prove identity reuse, never tree stop.
+
+    Win32_Process.CreationDate is read-only process start time:
+    https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-process
+    continue_arm's prior settled/terminal/whole-tree-stop checks still apply.
+    """
+    if os.name != "nt" or type(pid) is not int or not 1<pid<2**32:
+        return None
+    try:
+        recorded=datetime.fromisoformat(recorded_started_at)
+        if recorded.tzinfo is None:
+            return None
+        first,second=_cim_process_birth(pid),_cim_process_birth(pid)
+        if not first or first!=second or first.get("pid")!=pid:
+            return None
+        birth=datetime.fromisoformat(first["created_at_utc"])
+        if (birth.tzinfo is None or birth.utcoffset().total_seconds()!=0
+                or (birth-recorded).total_seconds()<=2 or birth>datetime.now(timezone.utc)):
+            return None
+        return {"pid":pid,"recorded_started_at":recorded_started_at,"current_process_created_at":birth.isoformat(),
+                "cim_observations":[first,second],"source":"CIM-Win32_Process-two-fresh-matching-births-query-only"}
+    except (ValueError,TypeError,KeyError,OSError,OverflowError):
         return None
 
 

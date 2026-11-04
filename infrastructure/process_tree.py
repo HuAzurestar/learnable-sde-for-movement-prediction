@@ -130,7 +130,7 @@ class ProcessTree:
             raise OSError("current-process job containment requires Windows")
         return cls(None)
 
-    def __init__(self, process):
+    def __init__(self, process, *, memory_bytes=None):
         if process is None and os.name != "nt":
             raise OSError("current-process job containment requires Windows")
         self.process = process
@@ -169,6 +169,11 @@ class ProcessTree:
             self.job = self.kernel.CreateJobObjectW(None, None)
             limits = Extended()
             limits.BasicLimitInformation.LimitFlags = 0x2000
+            if memory_bytes is not None:
+                if type(memory_bytes) is not int or not 0 < memory_bytes <= 2 * 1024**3:
+                    raise ValueError("invalid tree memory quota")
+                limits.BasicLimitInformation.LimitFlags |= 0x200
+                limits.JobMemoryLimit = memory_bytes
             if (not self.job or not self.kernel.SetInformationJobObject(self.job, 9, ctypes.byref(limits), ctypes.sizeof(limits))
                     or not self.kernel.AssignProcessToJobObject(self.job,
                         wintypes.HANDLE(int(process._handle) if process is not None else -1))):

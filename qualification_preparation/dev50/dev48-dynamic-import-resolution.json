@@ -1,0 +1,3959 @@
+{
+  "actual_sites": [
+    {
+      "path": "application/__init__.py",
+      "line": 21,
+      "callee": "import_module",
+      "argument": "'.' + _EXPORTS[name]",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "FINITE_EXPORT_MAP",
+      "callers": [
+        {
+          "path": "application/__init__.py",
+          "line": 21,
+          "end_line": 21,
+          "scope": "__getattr__",
+          "call": "import_module",
+          "resolved_spelling": "importlib.import_module",
+          "source": "    value = getattr(import_module(\".\" + _EXPORTS[name], __name__), name)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "__getattr__",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "application/walking_pilot_budget.py",
+      "line": 207,
+      "callee": "__import__",
+      "argument": "'application.research_budget'",
+      "literal_target": "application.research_budget",
+      "target_path": "application/research_budget.py",
+      "classification": "LOCAL",
+      "callers": [
+        {
+          "path": "application/walking_pilot_budget.py",
+          "line": 207,
+          "end_line": 207,
+          "scope": "owner_opens",
+          "call": "__import__",
+          "resolved_spelling": "__import__",
+          "source": "    _grid_state_in_scope(__import__(\"application.research_budget\",fromlist=[\"BudgetLedger\"]).BudgetLedger(store),pilot_id)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "owner_opens",
+      "incoming_call_candidates": [
+        {
+          "path": "application/walking_execution.py",
+          "line": 145,
+          "scope": "activate_execution",
+          "call": "owner_opens",
+          "resolved_spelling": "application.walking_pilot_budget.owner_opens"
+        },
+        {
+          "path": "application/walking_pilot_budget.py",
+          "line": 221,
+          "scope": "check_owner_admission",
+          "call": "owner_opens",
+          "resolved_spelling": "owner_opens"
+        },
+        {
+          "path": "application/walking_pilot_budget.py",
+          "line": 244,
+          "scope": "_owner_session_unlocked",
+          "call": "owner_opens",
+          "resolved_spelling": "owner_opens"
+        },
+        {
+          "path": "application/walking_pilot_budget.py",
+          "line": 74,
+          "scope": "_usage_in_scope",
+          "call": "owner_opens",
+          "resolved_spelling": "owner_opens"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "application/walking_pilot_budget.py",
+      "line": 325,
+      "callee": "__import__",
+      "argument": "'json'",
+      "literal_target": "json",
+      "target_path": null,
+      "classification": "STDLIB",
+      "callers": [
+        {
+          "path": "application/walking_pilot_budget.py",
+          "line": 325,
+          "end_line": 325,
+          "scope": "OwnerMeter.terminal",
+          "call": "__import__",
+          "resolved_spelling": "__import__",
+          "source": "            report[\"cli_output\"]=__import__(\"json\").dumps({\"status\":report[\"status\"],\"report\":report[\"report_path\"],",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "OwnerMeter.terminal",
+      "incoming_call_candidates": [
+        {
+          "path": "application/walking_pilot.py",
+          "line": 420,
+          "scope": "run_pilot",
+          "call": "meter.terminal",
+          "resolved_spelling": "meter.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 38,
+          "scope": "test_clock_covers_checkpoints_usage_report_and_discloses_tail",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 62,
+          "scope": "test_checkpoint_uncertain_append_adopts_exact_id_once",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 112,
+          "scope": "test_stage_deduction_once_and_unknown_never_zero",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 96,
+          "scope": "test_append_then_exit_failure_reopens_and_adopts_terminal_without_recharge",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 149,
+          "scope": "test_unknown_settle_cannot_close_owner",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "application/walking_pilot_budget.py",
+      "line": 731,
+      "callee": "__import__",
+      "argument": "'json'",
+      "literal_target": "json",
+      "target_path": null,
+      "classification": "STDLIB",
+      "callers": [
+        {
+          "path": "application/walking_pilot_budget.py",
+          "line": 731,
+          "end_line": 731,
+          "scope": "GridOwnerMeter.terminal",
+          "call": "__import__",
+          "resolved_spelling": "__import__",
+          "source": "                report['cli_output']=__import__('json').dumps({'status':report['status'],'report':report['report_path'],'terminal_receipt_id':terminal_id,'arms':len(report['rows'])})",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "GridOwnerMeter.terminal",
+      "incoming_call_candidates": [
+        {
+          "path": "application/walking_pilot.py",
+          "line": 420,
+          "scope": "run_pilot",
+          "call": "meter.terminal",
+          "resolved_spelling": "meter.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 38,
+          "scope": "test_clock_covers_checkpoints_usage_report_and_discloses_tail",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 62,
+          "scope": "test_checkpoint_uncertain_append_adopts_exact_id_once",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 112,
+          "scope": "test_stage_deduction_once_and_unknown_never_zero",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 96,
+          "scope": "test_append_then_exit_failure_reopens_and_adopts_terminal_without_recharge",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 149,
+          "scope": "test_unknown_settle_cannot_close_owner",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "application/walking_pilot_budget.py",
+      "line": 328,
+      "callee": "__import__",
+      "argument": "'hashlib'",
+      "literal_target": "hashlib",
+      "target_path": null,
+      "classification": "STDLIB",
+      "callers": [
+        {
+          "path": "application/walking_pilot_budget.py",
+          "line": 328,
+          "end_line": 328,
+          "scope": "OwnerMeter.terminal",
+          "call": "__import__",
+          "resolved_spelling": "__import__",
+          "source": "            report_hash=__import__(\"hashlib\").sha256(raw).hexdigest()",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "OwnerMeter.terminal",
+      "incoming_call_candidates": [
+        {
+          "path": "application/walking_pilot.py",
+          "line": 420,
+          "scope": "run_pilot",
+          "call": "meter.terminal",
+          "resolved_spelling": "meter.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 38,
+          "scope": "test_clock_covers_checkpoints_usage_report_and_discloses_tail",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 62,
+          "scope": "test_checkpoint_uncertain_append_adopts_exact_id_once",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 112,
+          "scope": "test_stage_deduction_once_and_unknown_never_zero",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 96,
+          "scope": "test_append_then_exit_failure_reopens_and_adopts_terminal_without_recharge",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 149,
+          "scope": "test_unknown_settle_cannot_close_owner",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "application/walking_pilot_budget.py",
+      "line": 732,
+      "callee": "__import__",
+      "argument": "'hashlib'",
+      "literal_target": "hashlib",
+      "target_path": null,
+      "classification": "STDLIB",
+      "callers": [
+        {
+          "path": "application/walking_pilot_budget.py",
+          "line": 732,
+          "end_line": 732,
+          "scope": "GridOwnerMeter.terminal",
+          "call": "__import__",
+          "resolved_spelling": "__import__",
+          "source": "                raw=save(); report_hash=__import__('hashlib').sha256(raw).hexdigest()",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "GridOwnerMeter.terminal",
+      "incoming_call_candidates": [
+        {
+          "path": "application/walking_pilot.py",
+          "line": 420,
+          "scope": "run_pilot",
+          "call": "meter.terminal",
+          "resolved_spelling": "meter.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 38,
+          "scope": "test_clock_covers_checkpoints_usage_report_and_discloses_tail",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 62,
+          "scope": "test_checkpoint_uncertain_append_adopts_exact_id_once",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 112,
+          "scope": "test_stage_deduction_once_and_unknown_never_zero",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 96,
+          "scope": "test_append_then_exit_failure_reopens_and_adopts_terminal_without_recharge",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 149,
+          "scope": "test_unknown_settle_cannot_close_owner",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "application/walking_pilot_budget.py",
+      "line": 738,
+      "callee": "__import__",
+      "argument": "'pathlib'",
+      "literal_target": "pathlib",
+      "target_path": null,
+      "classification": "STDLIB",
+      "callers": [
+        {
+          "path": "application/walking_pilot_budget.py",
+          "line": 738,
+          "end_line": 738,
+          "scope": "GridOwnerMeter.terminal",
+          "call": "__import__",
+          "resolved_spelling": "__import__",
+          "source": "            if not created and __import__('pathlib').Path(report['report_path']).read_bytes()!=raw:",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "GridOwnerMeter.terminal",
+      "incoming_call_candidates": [
+        {
+          "path": "application/walking_pilot.py",
+          "line": 420,
+          "scope": "run_pilot",
+          "call": "meter.terminal",
+          "resolved_spelling": "meter.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 38,
+          "scope": "test_clock_covers_checkpoints_usage_report_and_discloses_tail",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 62,
+          "scope": "test_checkpoint_uncertain_append_adopts_exact_id_once",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 112,
+          "scope": "test_stage_deduction_once_and_unknown_never_zero",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 96,
+          "scope": "test_append_then_exit_failure_reopens_and_adopts_terminal_without_recharge",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 149,
+          "scope": "test_unknown_settle_cannot_close_owner",
+          "call": "m.terminal",
+          "resolved_spelling": "m.terminal"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "infrastructure/__init__.py",
+      "line": 21,
+      "callee": "import_module",
+      "argument": "'.' + _EXPORTS[name]",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "FINITE_EXPORT_MAP",
+      "callers": [
+        {
+          "path": "infrastructure/__init__.py",
+          "line": 21,
+          "end_line": 21,
+          "scope": "__getattr__",
+          "call": "import_module",
+          "resolved_spelling": "importlib.import_module",
+          "source": "    value = getattr(import_module(\".\" + _EXPORTS[name], __name__), name)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "__getattr__",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "scripts/check_evidence_package_reads.py",
+      "line": 26,
+      "callee": "importlib.import_module",
+      "argument": "'application.research_evidence'",
+      "literal_target": "application.research_evidence",
+      "target_path": "application/research_evidence.py",
+      "classification": "LOCAL",
+      "callers": [
+        {
+          "path": "scripts/check_evidence_package_reads.py",
+          "line": 26,
+          "end_line": 26,
+          "scope": "<module>",
+          "call": "importlib.import_module",
+          "resolved_spelling": "importlib.import_module",
+          "source": "EVIDENCE = importlib.import_module(\"application.research_evidence\")",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "<module>",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "scripts/check_research_source_reads.py",
+      "line": 28,
+      "callee": "importlib.import_module",
+      "argument": "'infrastructure.research_store'",
+      "literal_target": "infrastructure.research_store",
+      "target_path": "infrastructure/research_store.py",
+      "classification": "LOCAL",
+      "callers": [
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 28,
+          "end_line": 28,
+          "scope": "<module>",
+          "call": "importlib.import_module",
+          "resolved_spelling": "importlib.import_module",
+          "source": "STORE = importlib.import_module(\"infrastructure.research_store\")",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "<module>",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "scripts/check_research_source_reads.py",
+      "line": 29,
+      "callee": "importlib.import_module",
+      "argument": "'application.research_data'",
+      "literal_target": "application.research_data",
+      "target_path": "application/research_data.py",
+      "classification": "LOCAL",
+      "callers": [
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 29,
+          "end_line": 29,
+          "scope": "<module>",
+          "call": "importlib.import_module",
+          "resolved_spelling": "importlib.import_module",
+          "source": "DATA = importlib.import_module(\"application.research_data\")",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "<module>",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "scripts/check_research_source_reads.py",
+      "line": 377,
+      "callee": "importlib.import_module",
+      "argument": "'infrastructure.research_files'",
+      "literal_target": "infrastructure.research_files",
+      "target_path": "infrastructure/research_files.py",
+      "classification": "LOCAL",
+      "callers": [
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 377,
+          "end_line": 377,
+          "scope": "<module>",
+          "call": "importlib.import_module",
+          "resolved_spelling": "importlib.import_module",
+          "source": "    sources = (STORE, DATA, importlib.import_module(\"infrastructure.research_files\"),",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "<module>",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "scripts/check_research_source_reads.py",
+      "line": 378,
+      "callee": "importlib.import_module",
+      "argument": "'application.research_computation'",
+      "literal_target": "application.research_computation",
+      "target_path": "application/research_computation.py",
+      "classification": "LOCAL",
+      "callers": [
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 378,
+          "end_line": 378,
+          "scope": "<module>",
+          "call": "importlib.import_module",
+          "resolved_spelling": "importlib.import_module",
+          "source": "        importlib.import_module(\"application.research_computation\"),",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "<module>",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "scripts/check_research_source_reads.py",
+      "line": 379,
+      "callee": "importlib.import_module",
+      "argument": "'experiments.pirc25.affine'",
+      "literal_target": "experiments.pirc25.affine",
+      "target_path": "experiments/pirc25/affine.py",
+      "classification": "LOCAL",
+      "callers": [
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 379,
+          "end_line": 379,
+          "scope": "<module>",
+          "call": "importlib.import_module",
+          "resolved_spelling": "importlib.import_module",
+          "source": "        importlib.import_module(\"experiments.pirc25.affine\"))",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "<module>",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "scripts/check_research_source_reads.py",
+      "line": 347,
+      "callee": "importlib.import_module",
+      "argument": "'experiments.pirc25.affine'",
+      "literal_target": "experiments.pirc25.affine",
+      "target_path": "experiments/pirc25/affine.py",
+      "classification": "LOCAL",
+      "callers": [
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 347,
+          "end_line": 347,
+          "scope": "NativeSourceEnumeration.exercise",
+          "call": "importlib.import_module",
+          "resolved_spelling": "importlib.import_module",
+          "source": "            affine = importlib.import_module(\"experiments.pirc25.affine\")",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "NativeSourceEnumeration.exercise",
+      "incoming_call_candidates": [
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 189,
+          "scope": "check",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 369,
+          "scope": "NativeSourceEnumeration.test_normal_nested_sources_retain_legacy_hashes",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 373,
+          "scope": "NativeSourceEnumeration.test_importable_directory_alias_cannot_be_omitted_from_code_identity",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 139,
+          "scope": "check",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 245,
+          "scope": "check",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 320,
+          "scope": "check",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "scripts/check_research_source_reads.py",
+      "line": 258,
+      "callee": "importlib.import_module",
+      "argument": "'experiments.pirc25.affine'",
+      "literal_target": "experiments.pirc25.affine",
+      "target_path": "experiments/pirc25/affine.py",
+      "classification": "LOCAL",
+      "callers": [
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 258,
+          "end_line": 258,
+          "scope": "NativeCodeSourceReads.exercise",
+          "call": "importlib.import_module",
+          "resolved_spelling": "importlib.import_module",
+          "source": "                module = importlib.import_module(\"experiments.pirc25.affine\")",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "NativeCodeSourceReads.exercise",
+      "incoming_call_candidates": [
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 189,
+          "scope": "check",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 369,
+          "scope": "NativeSourceEnumeration.test_normal_nested_sources_retain_legacy_hashes",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 373,
+          "scope": "NativeSourceEnumeration.test_importable_directory_alias_cannot_be_omitted_from_code_identity",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 139,
+          "scope": "check",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 245,
+          "scope": "check",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 320,
+          "scope": "check",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "scripts/check_research_source_reads.py",
+      "line": 264,
+      "callee": "importlib.import_module",
+      "argument": "'application.research_computation'",
+      "literal_target": "application.research_computation",
+      "target_path": "application/research_computation.py",
+      "classification": "LOCAL",
+      "callers": [
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 264,
+          "end_line": 264,
+          "scope": "NativeCodeSourceReads.exercise",
+          "call": "importlib.import_module",
+          "resolved_spelling": "importlib.import_module",
+          "source": "                module = importlib.import_module(\"application.research_computation\")",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "NativeCodeSourceReads.exercise",
+      "incoming_call_candidates": [
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 189,
+          "scope": "check",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 369,
+          "scope": "NativeSourceEnumeration.test_normal_nested_sources_retain_legacy_hashes",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 373,
+          "scope": "NativeSourceEnumeration.test_importable_directory_alias_cannot_be_omitted_from_code_identity",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 139,
+          "scope": "check",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 245,
+          "scope": "check",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 320,
+          "scope": "check",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "scripts/check_research_source_reads.py",
+      "line": 172,
+      "callee": "importlib.import_module",
+      "argument": "'infrastructure.research_files'",
+      "literal_target": "infrastructure.research_files",
+      "target_path": "infrastructure/research_files.py",
+      "classification": "LOCAL",
+      "callers": [
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 172,
+          "end_line": 172,
+          "scope": "NativeRootParents.exercise",
+          "call": "importlib.import_module",
+          "resolved_spelling": "importlib.import_module",
+          "source": "                    files = importlib.import_module(\"infrastructure.research_files\")",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "NativeRootParents.exercise",
+      "incoming_call_candidates": [
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 189,
+          "scope": "check",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 369,
+          "scope": "NativeSourceEnumeration.test_normal_nested_sources_retain_legacy_hashes",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 373,
+          "scope": "NativeSourceEnumeration.test_importable_directory_alias_cannot_be_omitted_from_code_identity",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 139,
+          "scope": "check",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 245,
+          "scope": "check",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 320,
+          "scope": "check",
+          "call": "self.exercise",
+          "resolved_spelling": "self.exercise"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "tests/native_research_tree.py",
+      "line": 118,
+      "callee": "importlib.util.spec_from_file_location",
+      "argument": "'pirc25_native_containment'",
+      "literal_target": "pirc25_native_containment",
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/native_research_tree.py",
+          "line": 118,
+          "end_line": 118,
+          "scope": "main",
+          "call": "importlib.util.spec_from_file_location",
+          "resolved_spelling": "importlib.util.spec_from_file_location",
+          "source": "    spec = importlib.util.spec_from_file_location(\"pirc25_native_containment\", ROOT / \"infrastructure/process_tree.py\")",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "main",
+      "incoming_call_candidates": [
+        {
+          "path": "cli/__main__.py",
+          "line": 18,
+          "scope": "main",
+          "call": "command",
+          "resolved_spelling": "cli.ablate.main"
+        },
+        {
+          "path": "cli/ablate.py",
+          "line": 9,
+          "scope": "main",
+          "call": "run_ablation",
+          "resolved_spelling": "experiments.ablate.main"
+        },
+        {
+          "path": "experiments/run.py",
+          "line": 7,
+          "scope": "<module>",
+          "call": "main",
+          "resolved_spelling": "cli.train.main"
+        },
+        {
+          "path": "scripts/check_evidence_package_reads.py",
+          "line": 146,
+          "scope": "<module>",
+          "call": "unittest.main",
+          "resolved_spelling": "unittest.main"
+        },
+        {
+          "path": "scripts/check_evidence_publication.py",
+          "line": 154,
+          "scope": "<module>",
+          "call": "unittest.main",
+          "resolved_spelling": "unittest.main"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 382,
+          "scope": "<module>",
+          "call": "unittest.main",
+          "resolved_spelling": "unittest.main"
+        },
+        {
+          "path": "scripts/ci_pytest_partition.py",
+          "line": 102,
+          "scope": "pytest_session",
+          "call": "pytest.main",
+          "resolved_spelling": "pytest.main"
+        },
+        {
+          "path": "tests/mixture_checkpoint_worker.py",
+          "line": 22,
+          "scope": "main",
+          "call": "worker",
+          "resolved_spelling": "experiments.pirc27.worker.main"
+        },
+        {
+          "path": "tests/native_research_tree.py",
+          "line": 137,
+          "scope": "<module>",
+          "call": "main",
+          "resolved_spelling": "main"
+        },
+        {
+          "path": "tests/test_application.py",
+          "line": 271,
+          "scope": "test_legacy_predict_cli_uses_new_application_entrypoint",
+          "call": "predict_cli.main",
+          "resolved_spelling": "cli.predict.main"
+        },
+        {
+          "path": "tests/test_calibration_export.py",
+          "line": 271,
+          "scope": "test_actual_cli_source_permission_change_after_target_fsync_blocks_rename",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_nex326.py",
+          "line": 917,
+          "scope": "test_cli_requires_an_explicit_scientific_cohort_or_fixture",
+          "call": "main",
+          "resolved_spelling": "experiments.nex326_process.main"
+        },
+        {
+          "path": "tests/test_nex326.py",
+          "line": 920,
+          "scope": "test_cli_requires_an_explicit_scientific_cohort_or_fixture",
+          "call": "main",
+          "resolved_spelling": "experiments.nex326_process.main"
+        },
+        {
+          "path": "tests/test_propagation_preparation.py",
+          "line": 183,
+          "scope": "test_cli_only_emits_preparation_and_safe_failure_envelopes",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc27.__main__.main"
+        },
+        {
+          "path": "tests/test_propagation_preparation.py",
+          "line": 188,
+          "scope": "test_cli_only_emits_preparation_and_safe_failure_envelopes",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc27.__main__.main"
+        },
+        {
+          "path": "tests/test_research_cases.py",
+          "line": 224,
+          "scope": "test_case_worker_actual_reads_use_its_smaller_source_cap",
+          "call": "case_worker.main",
+          "resolved_spelling": "experiments.pirc25.case_worker.main"
+        },
+        {
+          "path": "tests/test_research_comparison_input_bounds.py",
+          "line": 68,
+          "scope": "test_actual_worker_reads_input_with_explicit_byte_bound",
+          "call": "compare_worker.main",
+          "resolved_spelling": "experiments.pirc25.compare_worker.main"
+        },
+        {
+          "path": "tests/test_research_comparison_input_bounds.py",
+          "line": 107,
+          "scope": "test_growth_after_size_check_is_rejected_before_json_parse",
+          "call": "compare_worker.main",
+          "resolved_spelling": "experiments.pirc25.compare_worker.main"
+        },
+        {
+          "path": "tests/test_research_comparison_input_bounds.py",
+          "line": 118,
+          "scope": "test_exact_input_limit_is_accepted_without_truncation",
+          "call": "compare_worker.main",
+          "resolved_spelling": "experiments.pirc25.compare_worker.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 69,
+          "scope": "test_actual_cli_existing_target_comparison_uses_bounded_open_handle_reads",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 107,
+          "scope": "test_actual_cli_conflict_created_after_target_fsync_is_not_overwritten",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 188,
+          "scope": "test_actual_cli_new_and_repeated_export_remain_identical",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 190,
+          "scope": "test_actual_cli_new_and_repeated_export_remain_identical",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 218,
+          "scope": "test_actual_cli_identical_target_read_cannot_outlive_export_permission",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 268,
+          "scope": "test_actual_cli_publication_io_failure_preserves_complete_target_and_retry",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 277,
+          "scope": "test_actual_cli_publication_io_failure_preserves_complete_target_and_retry",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 287,
+          "scope": "test_identical_export_retry_does_not_replace_existing_inode",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 168,
+          "scope": "test_two_actual_cli_publishers_keep_the_completed_export_and_refuse_stale_writer",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 145,
+          "scope": "test_two_actual_cli_publishers_keep_the_completed_export_and_refuse_stale_writer.first",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_managed_authorization.py",
+          "line": 67,
+          "scope": "test_actual_managed_cli_denies_changed_permission_at_publication",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_managed_publication.py",
+          "line": 127,
+          "scope": "test_actual_managed_cli_refuses_conflict_without_extra_job_or_unbounded_read",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_package_source_identity.py",
+          "line": 114,
+          "scope": "test_actual_import_cli_cannot_promote_initial_redirected_package_root",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_publication_paths.py",
+          "line": 211,
+          "scope": "test_actual_managed_cli_artifact_root_redirect_cannot_write_external_package",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_publication_root_lifetime.py",
+          "line": 19,
+          "scope": "test_actual_export_cli_cannot_promote_initial_redirected_output_root",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_review_regressions.py",
+          "line": 35,
+          "scope": "test_r2_generic_cli_show_cannot_disclose_restricted_bundle",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_review_regressions.py",
+          "line": 48,
+          "scope": "test_r2_generic_show_fails_closed_for_non_metadata_kinds",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_review_regressions.py",
+          "line": 57,
+          "scope": "test_r2_show_still_supports_registration_metadata",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 5,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 6,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 7,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 8,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 9,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 10,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 134,
+          "scope": "test_controller_preflight_normal_fatal_natural_cli",
+          "call": "pilot.main",
+          "resolved_spelling": "application.walking_pilot.main"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/native_research_tree.py",
+      "line": 119,
+      "callee": "importlib.util.module_from_spec",
+      "argument": "spec",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/native_research_tree.py",
+          "line": 119,
+          "end_line": 119,
+          "scope": "main",
+          "call": "importlib.util.module_from_spec",
+          "resolved_spelling": "importlib.util.module_from_spec",
+          "source": "    containment = importlib.util.module_from_spec(spec)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "main",
+      "incoming_call_candidates": [
+        {
+          "path": "cli/__main__.py",
+          "line": 18,
+          "scope": "main",
+          "call": "command",
+          "resolved_spelling": "cli.ablate.main"
+        },
+        {
+          "path": "cli/ablate.py",
+          "line": 9,
+          "scope": "main",
+          "call": "run_ablation",
+          "resolved_spelling": "experiments.ablate.main"
+        },
+        {
+          "path": "experiments/run.py",
+          "line": 7,
+          "scope": "<module>",
+          "call": "main",
+          "resolved_spelling": "cli.train.main"
+        },
+        {
+          "path": "scripts/check_evidence_package_reads.py",
+          "line": 146,
+          "scope": "<module>",
+          "call": "unittest.main",
+          "resolved_spelling": "unittest.main"
+        },
+        {
+          "path": "scripts/check_evidence_publication.py",
+          "line": 154,
+          "scope": "<module>",
+          "call": "unittest.main",
+          "resolved_spelling": "unittest.main"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 382,
+          "scope": "<module>",
+          "call": "unittest.main",
+          "resolved_spelling": "unittest.main"
+        },
+        {
+          "path": "scripts/ci_pytest_partition.py",
+          "line": 102,
+          "scope": "pytest_session",
+          "call": "pytest.main",
+          "resolved_spelling": "pytest.main"
+        },
+        {
+          "path": "tests/mixture_checkpoint_worker.py",
+          "line": 22,
+          "scope": "main",
+          "call": "worker",
+          "resolved_spelling": "experiments.pirc27.worker.main"
+        },
+        {
+          "path": "tests/native_research_tree.py",
+          "line": 137,
+          "scope": "<module>",
+          "call": "main",
+          "resolved_spelling": "main"
+        },
+        {
+          "path": "tests/test_application.py",
+          "line": 271,
+          "scope": "test_legacy_predict_cli_uses_new_application_entrypoint",
+          "call": "predict_cli.main",
+          "resolved_spelling": "cli.predict.main"
+        },
+        {
+          "path": "tests/test_calibration_export.py",
+          "line": 271,
+          "scope": "test_actual_cli_source_permission_change_after_target_fsync_blocks_rename",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_nex326.py",
+          "line": 917,
+          "scope": "test_cli_requires_an_explicit_scientific_cohort_or_fixture",
+          "call": "main",
+          "resolved_spelling": "experiments.nex326_process.main"
+        },
+        {
+          "path": "tests/test_nex326.py",
+          "line": 920,
+          "scope": "test_cli_requires_an_explicit_scientific_cohort_or_fixture",
+          "call": "main",
+          "resolved_spelling": "experiments.nex326_process.main"
+        },
+        {
+          "path": "tests/test_propagation_preparation.py",
+          "line": 183,
+          "scope": "test_cli_only_emits_preparation_and_safe_failure_envelopes",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc27.__main__.main"
+        },
+        {
+          "path": "tests/test_propagation_preparation.py",
+          "line": 188,
+          "scope": "test_cli_only_emits_preparation_and_safe_failure_envelopes",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc27.__main__.main"
+        },
+        {
+          "path": "tests/test_research_cases.py",
+          "line": 224,
+          "scope": "test_case_worker_actual_reads_use_its_smaller_source_cap",
+          "call": "case_worker.main",
+          "resolved_spelling": "experiments.pirc25.case_worker.main"
+        },
+        {
+          "path": "tests/test_research_comparison_input_bounds.py",
+          "line": 68,
+          "scope": "test_actual_worker_reads_input_with_explicit_byte_bound",
+          "call": "compare_worker.main",
+          "resolved_spelling": "experiments.pirc25.compare_worker.main"
+        },
+        {
+          "path": "tests/test_research_comparison_input_bounds.py",
+          "line": 107,
+          "scope": "test_growth_after_size_check_is_rejected_before_json_parse",
+          "call": "compare_worker.main",
+          "resolved_spelling": "experiments.pirc25.compare_worker.main"
+        },
+        {
+          "path": "tests/test_research_comparison_input_bounds.py",
+          "line": 118,
+          "scope": "test_exact_input_limit_is_accepted_without_truncation",
+          "call": "compare_worker.main",
+          "resolved_spelling": "experiments.pirc25.compare_worker.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 69,
+          "scope": "test_actual_cli_existing_target_comparison_uses_bounded_open_handle_reads",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 107,
+          "scope": "test_actual_cli_conflict_created_after_target_fsync_is_not_overwritten",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 188,
+          "scope": "test_actual_cli_new_and_repeated_export_remain_identical",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 190,
+          "scope": "test_actual_cli_new_and_repeated_export_remain_identical",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 218,
+          "scope": "test_actual_cli_identical_target_read_cannot_outlive_export_permission",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 268,
+          "scope": "test_actual_cli_publication_io_failure_preserves_complete_target_and_retry",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 277,
+          "scope": "test_actual_cli_publication_io_failure_preserves_complete_target_and_retry",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 287,
+          "scope": "test_identical_export_retry_does_not_replace_existing_inode",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 168,
+          "scope": "test_two_actual_cli_publishers_keep_the_completed_export_and_refuse_stale_writer",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 145,
+          "scope": "test_two_actual_cli_publishers_keep_the_completed_export_and_refuse_stale_writer.first",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_managed_authorization.py",
+          "line": 67,
+          "scope": "test_actual_managed_cli_denies_changed_permission_at_publication",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_managed_publication.py",
+          "line": 127,
+          "scope": "test_actual_managed_cli_refuses_conflict_without_extra_job_or_unbounded_read",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_package_source_identity.py",
+          "line": 114,
+          "scope": "test_actual_import_cli_cannot_promote_initial_redirected_package_root",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_publication_paths.py",
+          "line": 211,
+          "scope": "test_actual_managed_cli_artifact_root_redirect_cannot_write_external_package",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_publication_root_lifetime.py",
+          "line": 19,
+          "scope": "test_actual_export_cli_cannot_promote_initial_redirected_output_root",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_review_regressions.py",
+          "line": 35,
+          "scope": "test_r2_generic_cli_show_cannot_disclose_restricted_bundle",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_review_regressions.py",
+          "line": 48,
+          "scope": "test_r2_generic_show_fails_closed_for_non_metadata_kinds",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_review_regressions.py",
+          "line": 57,
+          "scope": "test_r2_show_still_supports_registration_metadata",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 5,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 6,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 7,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 8,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 9,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 10,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 134,
+          "scope": "test_controller_preflight_normal_fatal_natural_cli",
+          "call": "pilot.main",
+          "resolved_spelling": "application.walking_pilot.main"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/native_research_tree.py",
+      "line": 120,
+      "callee": "spec.loader.exec_module",
+      "argument": "containment",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/native_research_tree.py",
+          "line": 120,
+          "end_line": 120,
+          "scope": "main",
+          "call": "spec.loader.exec_module",
+          "resolved_spelling": "spec.loader.exec_module",
+          "source": "    spec.loader.exec_module(containment)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "main",
+      "incoming_call_candidates": [
+        {
+          "path": "cli/__main__.py",
+          "line": 18,
+          "scope": "main",
+          "call": "command",
+          "resolved_spelling": "cli.ablate.main"
+        },
+        {
+          "path": "cli/ablate.py",
+          "line": 9,
+          "scope": "main",
+          "call": "run_ablation",
+          "resolved_spelling": "experiments.ablate.main"
+        },
+        {
+          "path": "experiments/run.py",
+          "line": 7,
+          "scope": "<module>",
+          "call": "main",
+          "resolved_spelling": "cli.train.main"
+        },
+        {
+          "path": "scripts/check_evidence_package_reads.py",
+          "line": 146,
+          "scope": "<module>",
+          "call": "unittest.main",
+          "resolved_spelling": "unittest.main"
+        },
+        {
+          "path": "scripts/check_evidence_publication.py",
+          "line": 154,
+          "scope": "<module>",
+          "call": "unittest.main",
+          "resolved_spelling": "unittest.main"
+        },
+        {
+          "path": "scripts/check_research_source_reads.py",
+          "line": 382,
+          "scope": "<module>",
+          "call": "unittest.main",
+          "resolved_spelling": "unittest.main"
+        },
+        {
+          "path": "scripts/ci_pytest_partition.py",
+          "line": 102,
+          "scope": "pytest_session",
+          "call": "pytest.main",
+          "resolved_spelling": "pytest.main"
+        },
+        {
+          "path": "tests/mixture_checkpoint_worker.py",
+          "line": 22,
+          "scope": "main",
+          "call": "worker",
+          "resolved_spelling": "experiments.pirc27.worker.main"
+        },
+        {
+          "path": "tests/native_research_tree.py",
+          "line": 137,
+          "scope": "<module>",
+          "call": "main",
+          "resolved_spelling": "main"
+        },
+        {
+          "path": "tests/test_application.py",
+          "line": 271,
+          "scope": "test_legacy_predict_cli_uses_new_application_entrypoint",
+          "call": "predict_cli.main",
+          "resolved_spelling": "cli.predict.main"
+        },
+        {
+          "path": "tests/test_calibration_export.py",
+          "line": 271,
+          "scope": "test_actual_cli_source_permission_change_after_target_fsync_blocks_rename",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_nex326.py",
+          "line": 917,
+          "scope": "test_cli_requires_an_explicit_scientific_cohort_or_fixture",
+          "call": "main",
+          "resolved_spelling": "experiments.nex326_process.main"
+        },
+        {
+          "path": "tests/test_nex326.py",
+          "line": 920,
+          "scope": "test_cli_requires_an_explicit_scientific_cohort_or_fixture",
+          "call": "main",
+          "resolved_spelling": "experiments.nex326_process.main"
+        },
+        {
+          "path": "tests/test_propagation_preparation.py",
+          "line": 183,
+          "scope": "test_cli_only_emits_preparation_and_safe_failure_envelopes",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc27.__main__.main"
+        },
+        {
+          "path": "tests/test_propagation_preparation.py",
+          "line": 188,
+          "scope": "test_cli_only_emits_preparation_and_safe_failure_envelopes",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc27.__main__.main"
+        },
+        {
+          "path": "tests/test_research_cases.py",
+          "line": 224,
+          "scope": "test_case_worker_actual_reads_use_its_smaller_source_cap",
+          "call": "case_worker.main",
+          "resolved_spelling": "experiments.pirc25.case_worker.main"
+        },
+        {
+          "path": "tests/test_research_comparison_input_bounds.py",
+          "line": 68,
+          "scope": "test_actual_worker_reads_input_with_explicit_byte_bound",
+          "call": "compare_worker.main",
+          "resolved_spelling": "experiments.pirc25.compare_worker.main"
+        },
+        {
+          "path": "tests/test_research_comparison_input_bounds.py",
+          "line": 107,
+          "scope": "test_growth_after_size_check_is_rejected_before_json_parse",
+          "call": "compare_worker.main",
+          "resolved_spelling": "experiments.pirc25.compare_worker.main"
+        },
+        {
+          "path": "tests/test_research_comparison_input_bounds.py",
+          "line": 118,
+          "scope": "test_exact_input_limit_is_accepted_without_truncation",
+          "call": "compare_worker.main",
+          "resolved_spelling": "experiments.pirc25.compare_worker.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 69,
+          "scope": "test_actual_cli_existing_target_comparison_uses_bounded_open_handle_reads",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 107,
+          "scope": "test_actual_cli_conflict_created_after_target_fsync_is_not_overwritten",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 188,
+          "scope": "test_actual_cli_new_and_repeated_export_remain_identical",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 190,
+          "scope": "test_actual_cli_new_and_repeated_export_remain_identical",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 218,
+          "scope": "test_actual_cli_identical_target_read_cannot_outlive_export_permission",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 268,
+          "scope": "test_actual_cli_publication_io_failure_preserves_complete_target_and_retry",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 277,
+          "scope": "test_actual_cli_publication_io_failure_preserves_complete_target_and_retry",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 287,
+          "scope": "test_identical_export_retry_does_not_replace_existing_inode",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 168,
+          "scope": "test_two_actual_cli_publishers_keep_the_completed_export_and_refuse_stale_writer",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_export_publication.py",
+          "line": 145,
+          "scope": "test_two_actual_cli_publishers_keep_the_completed_export_and_refuse_stale_writer.first",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_managed_authorization.py",
+          "line": 67,
+          "scope": "test_actual_managed_cli_denies_changed_permission_at_publication",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_managed_publication.py",
+          "line": 127,
+          "scope": "test_actual_managed_cli_refuses_conflict_without_extra_job_or_unbounded_read",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_package_source_identity.py",
+          "line": 114,
+          "scope": "test_actual_import_cli_cannot_promote_initial_redirected_package_root",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_publication_paths.py",
+          "line": 211,
+          "scope": "test_actual_managed_cli_artifact_root_redirect_cannot_write_external_package",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_publication_root_lifetime.py",
+          "line": 19,
+          "scope": "test_actual_export_cli_cannot_promote_initial_redirected_output_root",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_review_regressions.py",
+          "line": 35,
+          "scope": "test_r2_generic_cli_show_cannot_disclose_restricted_bundle",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_review_regressions.py",
+          "line": 48,
+          "scope": "test_r2_generic_show_fails_closed_for_non_metadata_kinds",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_research_review_regressions.py",
+          "line": 57,
+          "scope": "test_r2_show_still_supports_registration_metadata",
+          "call": "main",
+          "resolved_spelling": "experiments.pirc25.__main__.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 5,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 6,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 7,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 8,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 9,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_shared_pr_policy.py",
+          "line": 10,
+          "scope": "test_existing_pr_has_narrow_issue_binding",
+          "call": "main",
+          "resolved_spelling": "scripts.check_pr_title.main"
+        },
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 134,
+          "scope": "test_controller_preflight_normal_fatal_natural_cli",
+          "call": "pilot.main",
+          "resolved_spelling": "application.walking_pilot.main"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/path_paper_helpers.py",
+      "line": 24,
+      "callee": "importlib.util.spec_from_file_location",
+      "argument": "'independent_path_' + name",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/path_paper_helpers.py",
+          "line": 24,
+          "end_line": 24,
+          "scope": "_load_paper_module",
+          "call": "importlib.util.spec_from_file_location",
+          "resolved_spelling": "importlib.util.spec_from_file_location",
+          "source": "        entry = importlib.util.spec_from_file_location(\"independent_path_\"+name, path)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "_load_paper_module",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/path_paper_helpers.py",
+          "line": 13,
+          "scope": "independent_reader",
+          "call": "_load_paper_module",
+          "resolved_spelling": "_load_paper_module"
+        },
+        {
+          "path": "tests/path_paper_helpers.py",
+          "line": 17,
+          "scope": "independent_aggregate",
+          "call": "_load_paper_module",
+          "resolved_spelling": "_load_paper_module"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 80,
+          "scope": "test_owned_saved_bytes_and_independent_pass_fail_are_not_production_admission",
+          "call": "_load_paper_module",
+          "resolved_spelling": "tests.path_paper_helpers._load_paper_module"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 79,
+          "scope": "test_owned_saved_bytes_and_independent_pass_fail_are_not_production_admission",
+          "call": "_load_paper_module",
+          "resolved_spelling": "tests.path_paper_helpers._load_paper_module"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 129,
+          "scope": "test_resealed_pilot_meaning_or_native_source_substitution_is_refused",
+          "call": "_load_paper_module",
+          "resolved_spelling": "tests.path_paper_helpers._load_paper_module"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 148,
+          "scope": "test_actual_independent_cli_uses_trusted_hash_and_does_not_promote_pilots",
+          "call": "_load_paper_module",
+          "resolved_spelling": "tests.path_paper_helpers._load_paper_module"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 152,
+          "scope": "test_actual_independent_cli_uses_trusted_hash_and_does_not_promote_pilots",
+          "call": "_load_paper_module",
+          "resolved_spelling": "tests.path_paper_helpers._load_paper_module"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/path_paper_helpers.py",
+      "line": 25,
+      "callee": "importlib.util.module_from_spec",
+      "argument": "entry",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/path_paper_helpers.py",
+          "line": 25,
+          "end_line": 25,
+          "scope": "_load_paper_module",
+          "call": "importlib.util.module_from_spec",
+          "resolved_spelling": "importlib.util.module_from_spec",
+          "source": "        reader = importlib.util.module_from_spec(entry)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "_load_paper_module",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/path_paper_helpers.py",
+          "line": 13,
+          "scope": "independent_reader",
+          "call": "_load_paper_module",
+          "resolved_spelling": "_load_paper_module"
+        },
+        {
+          "path": "tests/path_paper_helpers.py",
+          "line": 17,
+          "scope": "independent_aggregate",
+          "call": "_load_paper_module",
+          "resolved_spelling": "_load_paper_module"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 80,
+          "scope": "test_owned_saved_bytes_and_independent_pass_fail_are_not_production_admission",
+          "call": "_load_paper_module",
+          "resolved_spelling": "tests.path_paper_helpers._load_paper_module"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 79,
+          "scope": "test_owned_saved_bytes_and_independent_pass_fail_are_not_production_admission",
+          "call": "_load_paper_module",
+          "resolved_spelling": "tests.path_paper_helpers._load_paper_module"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 129,
+          "scope": "test_resealed_pilot_meaning_or_native_source_substitution_is_refused",
+          "call": "_load_paper_module",
+          "resolved_spelling": "tests.path_paper_helpers._load_paper_module"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 148,
+          "scope": "test_actual_independent_cli_uses_trusted_hash_and_does_not_promote_pilots",
+          "call": "_load_paper_module",
+          "resolved_spelling": "tests.path_paper_helpers._load_paper_module"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 152,
+          "scope": "test_actual_independent_cli_uses_trusted_hash_and_does_not_promote_pilots",
+          "call": "_load_paper_module",
+          "resolved_spelling": "tests.path_paper_helpers._load_paper_module"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/path_paper_helpers.py",
+      "line": 26,
+      "callee": "entry.loader.exec_module",
+      "argument": "reader",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/path_paper_helpers.py",
+          "line": 26,
+          "end_line": 26,
+          "scope": "_load_paper_module",
+          "call": "entry.loader.exec_module",
+          "resolved_spelling": "entry.loader.exec_module",
+          "source": "        entry.loader.exec_module(reader)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "_load_paper_module",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/path_paper_helpers.py",
+          "line": 13,
+          "scope": "independent_reader",
+          "call": "_load_paper_module",
+          "resolved_spelling": "_load_paper_module"
+        },
+        {
+          "path": "tests/path_paper_helpers.py",
+          "line": 17,
+          "scope": "independent_aggregate",
+          "call": "_load_paper_module",
+          "resolved_spelling": "_load_paper_module"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 80,
+          "scope": "test_owned_saved_bytes_and_independent_pass_fail_are_not_production_admission",
+          "call": "_load_paper_module",
+          "resolved_spelling": "tests.path_paper_helpers._load_paper_module"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 79,
+          "scope": "test_owned_saved_bytes_and_independent_pass_fail_are_not_production_admission",
+          "call": "_load_paper_module",
+          "resolved_spelling": "tests.path_paper_helpers._load_paper_module"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 129,
+          "scope": "test_resealed_pilot_meaning_or_native_source_substitution_is_refused",
+          "call": "_load_paper_module",
+          "resolved_spelling": "tests.path_paper_helpers._load_paper_module"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 148,
+          "scope": "test_actual_independent_cli_uses_trusted_hash_and_does_not_promote_pilots",
+          "call": "_load_paper_module",
+          "resolved_spelling": "tests.path_paper_helpers._load_paper_module"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 152,
+          "scope": "test_actual_independent_cli_uses_trusted_hash_and_does_not_promote_pilots",
+          "call": "_load_paper_module",
+          "resolved_spelling": "tests.path_paper_helpers._load_paper_module"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_first_research_batch.py",
+      "line": 13,
+      "callee": "importlib.util.spec_from_file_location",
+      "argument": "'pirc27_first_batch_controls'",
+      "literal_target": "pirc27_first_batch_controls",
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 13,
+          "end_line": 13,
+          "scope": "batch",
+          "call": "importlib.util.spec_from_file_location",
+          "resolved_spelling": "importlib.util.spec_from_file_location",
+          "source": "    spec = importlib.util.spec_from_file_location(\"pirc27_first_batch_controls\", path)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "batch",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_pirc26_components_data.py",
+          "line": 76,
+          "scope": "test_registered_factories_fit_actual_dynamics_and_use_common_predictor",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_components_data.py",
+          "line": 89,
+          "scope": "test_registered_o2_consumes_exact_o1_lineage_and_curriculum",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_components_data.py",
+          "line": 77,
+          "scope": "test_registered_factories_fit_actual_dynamics_and_use_common_predictor",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_components_data.py",
+          "line": 78,
+          "scope": "test_registered_factories_fit_actual_dynamics_and_use_common_predictor",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_components_data.py",
+          "line": 133,
+          "scope": "test_actual_factory_profiles_refuse_data_capacity_and_changed_forecast_recipe",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_process_resources.py",
+          "line": 146,
+          "scope": "test_real_fit_reports_native_scope_without_serializing_telemetry_into_resumable_state",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_training_capacity.py",
+          "line": 119,
+          "scope": "test_actual_smaller_control_quota_refused_before_first_update",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_training_capacity.py",
+          "line": 129,
+          "scope": "test_actual_ten_thousand_step_save_and_last_step_resume_preserve_full_history.run",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_training_resume.py",
+          "line": 47,
+          "scope": "run_fixture",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_training_resume.py",
+          "line": 59,
+          "scope": "initial_payload",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_training_resume.py",
+          "line": 165,
+          "scope": "test_managed_adapter_requires_owner_and_binds_saved_position_rng",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_typed_recovery.py",
+          "line": 41,
+          "scope": "saved_training",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_typed_recovery.py",
+          "line": 47,
+          "scope": "saved_training",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_first_research_batch.py",
+      "line": 14,
+      "callee": "importlib.util.module_from_spec",
+      "argument": "spec",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 14,
+          "end_line": 14,
+          "scope": "batch",
+          "call": "importlib.util.module_from_spec",
+          "resolved_spelling": "importlib.util.module_from_spec",
+          "source": "    module = importlib.util.module_from_spec(spec)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "batch",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_pirc26_components_data.py",
+          "line": 76,
+          "scope": "test_registered_factories_fit_actual_dynamics_and_use_common_predictor",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_components_data.py",
+          "line": 89,
+          "scope": "test_registered_o2_consumes_exact_o1_lineage_and_curriculum",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_components_data.py",
+          "line": 77,
+          "scope": "test_registered_factories_fit_actual_dynamics_and_use_common_predictor",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_components_data.py",
+          "line": 78,
+          "scope": "test_registered_factories_fit_actual_dynamics_and_use_common_predictor",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_components_data.py",
+          "line": 133,
+          "scope": "test_actual_factory_profiles_refuse_data_capacity_and_changed_forecast_recipe",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_process_resources.py",
+          "line": 146,
+          "scope": "test_real_fit_reports_native_scope_without_serializing_telemetry_into_resumable_state",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_training_capacity.py",
+          "line": 119,
+          "scope": "test_actual_smaller_control_quota_refused_before_first_update",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_training_capacity.py",
+          "line": 129,
+          "scope": "test_actual_ten_thousand_step_save_and_last_step_resume_preserve_full_history.run",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_training_resume.py",
+          "line": 47,
+          "scope": "run_fixture",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_training_resume.py",
+          "line": 59,
+          "scope": "initial_payload",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_training_resume.py",
+          "line": 165,
+          "scope": "test_managed_adapter_requires_owner_and_binds_saved_position_rng",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_typed_recovery.py",
+          "line": 41,
+          "scope": "saved_training",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_typed_recovery.py",
+          "line": 47,
+          "scope": "saved_training",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_first_research_batch.py",
+      "line": 15,
+      "callee": "spec.loader.exec_module",
+      "argument": "module",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 15,
+          "end_line": 15,
+          "scope": "batch",
+          "call": "spec.loader.exec_module",
+          "resolved_spelling": "spec.loader.exec_module",
+          "source": "    spec.loader.exec_module(module)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "batch",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_pirc26_components_data.py",
+          "line": 76,
+          "scope": "test_registered_factories_fit_actual_dynamics_and_use_common_predictor",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_components_data.py",
+          "line": 89,
+          "scope": "test_registered_o2_consumes_exact_o1_lineage_and_curriculum",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_components_data.py",
+          "line": 77,
+          "scope": "test_registered_factories_fit_actual_dynamics_and_use_common_predictor",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_components_data.py",
+          "line": 78,
+          "scope": "test_registered_factories_fit_actual_dynamics_and_use_common_predictor",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_components_data.py",
+          "line": 133,
+          "scope": "test_actual_factory_profiles_refuse_data_capacity_and_changed_forecast_recipe",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_process_resources.py",
+          "line": 146,
+          "scope": "test_real_fit_reports_native_scope_without_serializing_telemetry_into_resumable_state",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_training_capacity.py",
+          "line": 119,
+          "scope": "test_actual_smaller_control_quota_refused_before_first_update",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_training_capacity.py",
+          "line": 129,
+          "scope": "test_actual_ten_thousand_step_save_and_last_step_resume_preserve_full_history.run",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_training_resume.py",
+          "line": 47,
+          "scope": "run_fixture",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_training_resume.py",
+          "line": 59,
+          "scope": "initial_payload",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_training_resume.py",
+          "line": 165,
+          "scope": "test_managed_adapter_requires_owner_and_binds_saved_position_rng",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_typed_recovery.py",
+          "line": 41,
+          "scope": "saved_training",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        },
+        {
+          "path": "tests/test_pirc26_typed_recovery.py",
+          "line": 47,
+          "scope": "saved_training",
+          "call": "batch",
+          "resolved_spelling": "tests.test_pirc26_training_forecast.batch"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_first_research_batch.py",
+      "line": 113,
+      "callee": "importlib.util.spec_from_file_location",
+      "argument": "'pirc27_dispatch_controls'",
+      "literal_target": "pirc27_dispatch_controls",
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 113,
+          "end_line": 113,
+          "scope": "load_dispatch",
+          "call": "importlib.util.spec_from_file_location",
+          "resolved_spelling": "importlib.util.spec_from_file_location",
+          "source": "    spec = importlib.util.spec_from_file_location(\"pirc27_dispatch_controls\", path)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "load_dispatch",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 169,
+          "scope": "test_dispatch_run_identity_is_literal_actual_owner_identity",
+          "call": "load_dispatch",
+          "resolved_spelling": "load_dispatch"
+        },
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 180,
+          "scope": "test_dispatch_inspects_only_owned_records_without_foreign_manifest_reads",
+          "call": "load_dispatch",
+          "resolved_spelling": "load_dispatch"
+        },
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 196,
+          "scope": "test_closed_arm_cells_remain_visible_while_other_original_arm_can_dispatch",
+          "call": "load_dispatch",
+          "resolved_spelling": "load_dispatch"
+        },
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 228,
+          "scope": "test_stopped_recovery_preserves_original_verdict_cost_and_terminal_identity",
+          "call": "load_dispatch",
+          "resolved_spelling": "load_dispatch"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_first_research_batch.py",
+      "line": 114,
+      "callee": "importlib.util.module_from_spec",
+      "argument": "spec",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 114,
+          "end_line": 114,
+          "scope": "load_dispatch",
+          "call": "importlib.util.module_from_spec",
+          "resolved_spelling": "importlib.util.module_from_spec",
+          "source": "    module = importlib.util.module_from_spec(spec)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "load_dispatch",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 169,
+          "scope": "test_dispatch_run_identity_is_literal_actual_owner_identity",
+          "call": "load_dispatch",
+          "resolved_spelling": "load_dispatch"
+        },
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 180,
+          "scope": "test_dispatch_inspects_only_owned_records_without_foreign_manifest_reads",
+          "call": "load_dispatch",
+          "resolved_spelling": "load_dispatch"
+        },
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 196,
+          "scope": "test_closed_arm_cells_remain_visible_while_other_original_arm_can_dispatch",
+          "call": "load_dispatch",
+          "resolved_spelling": "load_dispatch"
+        },
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 228,
+          "scope": "test_stopped_recovery_preserves_original_verdict_cost_and_terminal_identity",
+          "call": "load_dispatch",
+          "resolved_spelling": "load_dispatch"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_first_research_batch.py",
+      "line": 115,
+      "callee": "spec.loader.exec_module",
+      "argument": "module",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 115,
+          "end_line": 115,
+          "scope": "load_dispatch",
+          "call": "spec.loader.exec_module",
+          "resolved_spelling": "spec.loader.exec_module",
+          "source": "    spec.loader.exec_module(module)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "load_dispatch",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 169,
+          "scope": "test_dispatch_run_identity_is_literal_actual_owner_identity",
+          "call": "load_dispatch",
+          "resolved_spelling": "load_dispatch"
+        },
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 180,
+          "scope": "test_dispatch_inspects_only_owned_records_without_foreign_manifest_reads",
+          "call": "load_dispatch",
+          "resolved_spelling": "load_dispatch"
+        },
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 196,
+          "scope": "test_closed_arm_cells_remain_visible_while_other_original_arm_can_dispatch",
+          "call": "load_dispatch",
+          "resolved_spelling": "load_dispatch"
+        },
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 228,
+          "scope": "test_stopped_recovery_preserves_original_verdict_cost_and_terminal_identity",
+          "call": "load_dispatch",
+          "resolved_spelling": "load_dispatch"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_first_research_batch.py",
+      "line": 123,
+      "callee": "importlib.util.spec_from_file_location",
+      "argument": "'pirc27_shared_cpu_supplement_controls'",
+      "literal_target": "pirc27_shared_cpu_supplement_controls",
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 123,
+          "end_line": 123,
+          "scope": "load_shared_cpu_supplement",
+          "call": "importlib.util.spec_from_file_location",
+          "resolved_spelling": "importlib.util.spec_from_file_location",
+          "source": "    spec = importlib.util.spec_from_file_location(\"pirc27_shared_cpu_supplement_controls\", path)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "load_shared_cpu_supplement",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 136,
+          "scope": "test_shared_cpu_supplement_is_two_new_gaussian_cells_without_budget_reset",
+          "call": "load_shared_cpu_supplement",
+          "resolved_spelling": "load_shared_cpu_supplement"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_first_research_batch.py",
+      "line": 124,
+      "callee": "importlib.util.module_from_spec",
+      "argument": "spec",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 124,
+          "end_line": 124,
+          "scope": "load_shared_cpu_supplement",
+          "call": "importlib.util.module_from_spec",
+          "resolved_spelling": "importlib.util.module_from_spec",
+          "source": "    module = importlib.util.module_from_spec(spec)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "load_shared_cpu_supplement",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 136,
+          "scope": "test_shared_cpu_supplement_is_two_new_gaussian_cells_without_budget_reset",
+          "call": "load_shared_cpu_supplement",
+          "resolved_spelling": "load_shared_cpu_supplement"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_first_research_batch.py",
+      "line": 125,
+      "callee": "spec.loader.exec_module",
+      "argument": "module",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 125,
+          "end_line": 125,
+          "scope": "load_shared_cpu_supplement",
+          "call": "spec.loader.exec_module",
+          "resolved_spelling": "spec.loader.exec_module",
+          "source": "    spec.loader.exec_module(module)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "load_shared_cpu_supplement",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 136,
+          "scope": "test_shared_cpu_supplement_is_two_new_gaussian_cells_without_budget_reset",
+          "call": "load_shared_cpu_supplement",
+          "resolved_spelling": "load_shared_cpu_supplement"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_first_research_batch.py",
+      "line": 248,
+      "callee": "__import__",
+      "argument": "'json'",
+      "literal_target": "json",
+      "target_path": null,
+      "classification": "STDLIB",
+      "callers": [
+        {
+          "path": "tests/test_first_research_batch.py",
+          "line": 248,
+          "end_line": 248,
+          "scope": "test_stopped_recovery_preserves_original_verdict_cost_and_terminal_identity",
+          "call": "__import__",
+          "resolved_spelling": "__import__",
+          "source": "    value = __import__(\"json\").loads(output.read_bytes())",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "test_stopped_recovery_preserves_original_verdict_cost_and_terminal_identity",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "tests/test_managed_mixture_admission.py",
+      "line": 449,
+      "callee": "importlib.util.spec_from_file_location",
+      "argument": "'independent_mixture_reader'",
+      "literal_target": "independent_mixture_reader",
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_managed_mixture_admission.py",
+          "line": 449,
+          "end_line": 449,
+          "scope": "independent_reader",
+          "call": "importlib.util.spec_from_file_location",
+          "resolved_spelling": "importlib.util.spec_from_file_location",
+          "source": "        entry = importlib.util.spec_from_file_location(\"independent_mixture_reader\", path)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "independent_reader",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_formal_path_restore.py",
+          "line": 141,
+          "scope": "test_actual_formal_path_save_ack_reopened_restore_retains_current_statistics_and_all_costs",
+          "call": "independent_reader",
+          "resolved_spelling": "tests.path_paper_helpers.independent_reader"
+        },
+        {
+          "path": "tests/test_managed_mixture_admission.py",
+          "line": 414,
+          "scope": "test_actual_formal_mixture_save_ack_reopened_resume_retains_current_receipt_lineage_and_all_costs",
+          "call": "independent_reader",
+          "resolved_spelling": "independent_reader"
+        },
+        {
+          "path": "tests/test_managed_mixture_admission.py",
+          "line": 459,
+          "scope": "test_real_mixture_owner_export_passes_independent_reader_and_cli",
+          "call": "independent_reader",
+          "resolved_spelling": "independent_reader"
+        },
+        {
+          "path": "tests/test_managed_mixture_admission.py",
+          "line": 557,
+          "scope": "test_independent_reader_refuses_resealed_numeric_cost_permission_and_current_output_substitutions",
+          "call": "independent_reader",
+          "resolved_spelling": "independent_reader"
+        },
+        {
+          "path": "tests/test_managed_path_admission.py",
+          "line": 155,
+          "scope": "test_source_pass_does_not_promote_failed_current_sampling_or_ess",
+          "call": "independent_reader",
+          "resolved_spelling": "tests.path_paper_helpers.independent_reader"
+        },
+        {
+          "path": "tests/test_managed_path_paper.py",
+          "line": 21,
+          "scope": "test_real_path_owner_export_passes_independent_reader_and_cli",
+          "call": "independent_reader",
+          "resolved_spelling": "tests.path_paper_helpers.independent_reader"
+        },
+        {
+          "path": "tests/test_managed_path_paper.py",
+          "line": 77,
+          "scope": "test_independent_reader_refuses_resealed_saved_meanings_and_current_classification",
+          "call": "independent_reader",
+          "resolved_spelling": "tests.path_paper_helpers.independent_reader"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 87,
+          "scope": "test_owned_saved_bytes_and_independent_pass_fail_are_not_production_admission",
+          "call": "independent_reader",
+          "resolved_spelling": "tests.path_paper_helpers.independent_reader"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_managed_mixture_admission.py",
+      "line": 450,
+      "callee": "importlib.util.module_from_spec",
+      "argument": "entry",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_managed_mixture_admission.py",
+          "line": 450,
+          "end_line": 450,
+          "scope": "independent_reader",
+          "call": "importlib.util.module_from_spec",
+          "resolved_spelling": "importlib.util.module_from_spec",
+          "source": "        reader = importlib.util.module_from_spec(entry)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "independent_reader",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_formal_path_restore.py",
+          "line": 141,
+          "scope": "test_actual_formal_path_save_ack_reopened_restore_retains_current_statistics_and_all_costs",
+          "call": "independent_reader",
+          "resolved_spelling": "tests.path_paper_helpers.independent_reader"
+        },
+        {
+          "path": "tests/test_managed_mixture_admission.py",
+          "line": 414,
+          "scope": "test_actual_formal_mixture_save_ack_reopened_resume_retains_current_receipt_lineage_and_all_costs",
+          "call": "independent_reader",
+          "resolved_spelling": "independent_reader"
+        },
+        {
+          "path": "tests/test_managed_mixture_admission.py",
+          "line": 459,
+          "scope": "test_real_mixture_owner_export_passes_independent_reader_and_cli",
+          "call": "independent_reader",
+          "resolved_spelling": "independent_reader"
+        },
+        {
+          "path": "tests/test_managed_mixture_admission.py",
+          "line": 557,
+          "scope": "test_independent_reader_refuses_resealed_numeric_cost_permission_and_current_output_substitutions",
+          "call": "independent_reader",
+          "resolved_spelling": "independent_reader"
+        },
+        {
+          "path": "tests/test_managed_path_admission.py",
+          "line": 155,
+          "scope": "test_source_pass_does_not_promote_failed_current_sampling_or_ess",
+          "call": "independent_reader",
+          "resolved_spelling": "tests.path_paper_helpers.independent_reader"
+        },
+        {
+          "path": "tests/test_managed_path_paper.py",
+          "line": 21,
+          "scope": "test_real_path_owner_export_passes_independent_reader_and_cli",
+          "call": "independent_reader",
+          "resolved_spelling": "tests.path_paper_helpers.independent_reader"
+        },
+        {
+          "path": "tests/test_managed_path_paper.py",
+          "line": 77,
+          "scope": "test_independent_reader_refuses_resealed_saved_meanings_and_current_classification",
+          "call": "independent_reader",
+          "resolved_spelling": "tests.path_paper_helpers.independent_reader"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 87,
+          "scope": "test_owned_saved_bytes_and_independent_pass_fail_are_not_production_admission",
+          "call": "independent_reader",
+          "resolved_spelling": "tests.path_paper_helpers.independent_reader"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_managed_mixture_admission.py",
+      "line": 451,
+      "callee": "entry.loader.exec_module",
+      "argument": "reader",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_managed_mixture_admission.py",
+          "line": 451,
+          "end_line": 451,
+          "scope": "independent_reader",
+          "call": "entry.loader.exec_module",
+          "resolved_spelling": "entry.loader.exec_module",
+          "source": "        entry.loader.exec_module(reader)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "independent_reader",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_formal_path_restore.py",
+          "line": 141,
+          "scope": "test_actual_formal_path_save_ack_reopened_restore_retains_current_statistics_and_all_costs",
+          "call": "independent_reader",
+          "resolved_spelling": "tests.path_paper_helpers.independent_reader"
+        },
+        {
+          "path": "tests/test_managed_mixture_admission.py",
+          "line": 414,
+          "scope": "test_actual_formal_mixture_save_ack_reopened_resume_retains_current_receipt_lineage_and_all_costs",
+          "call": "independent_reader",
+          "resolved_spelling": "independent_reader"
+        },
+        {
+          "path": "tests/test_managed_mixture_admission.py",
+          "line": 459,
+          "scope": "test_real_mixture_owner_export_passes_independent_reader_and_cli",
+          "call": "independent_reader",
+          "resolved_spelling": "independent_reader"
+        },
+        {
+          "path": "tests/test_managed_mixture_admission.py",
+          "line": 557,
+          "scope": "test_independent_reader_refuses_resealed_numeric_cost_permission_and_current_output_substitutions",
+          "call": "independent_reader",
+          "resolved_spelling": "independent_reader"
+        },
+        {
+          "path": "tests/test_managed_path_admission.py",
+          "line": 155,
+          "scope": "test_source_pass_does_not_promote_failed_current_sampling_or_ess",
+          "call": "independent_reader",
+          "resolved_spelling": "tests.path_paper_helpers.independent_reader"
+        },
+        {
+          "path": "tests/test_managed_path_paper.py",
+          "line": 21,
+          "scope": "test_real_path_owner_export_passes_independent_reader_and_cli",
+          "call": "independent_reader",
+          "resolved_spelling": "tests.path_paper_helpers.independent_reader"
+        },
+        {
+          "path": "tests/test_managed_path_paper.py",
+          "line": 77,
+          "scope": "test_independent_reader_refuses_resealed_saved_meanings_and_current_classification",
+          "call": "independent_reader",
+          "resolved_spelling": "tests.path_paper_helpers.independent_reader"
+        },
+        {
+          "path": "tests/test_path_pilot_transport.py",
+          "line": 87,
+          "scope": "test_owned_saved_bytes_and_independent_pass_fail_are_not_production_admission",
+          "call": "independent_reader",
+          "resolved_spelling": "tests.path_paper_helpers.independent_reader"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_managed_mlmc_admission.py",
+      "line": 492,
+      "callee": "importlib.util.spec_from_file_location",
+      "argument": "'independent_mlmc_reader'",
+      "literal_target": "independent_mlmc_reader",
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_managed_mlmc_admission.py",
+          "line": 492,
+          "end_line": 492,
+          "scope": "test_independent_reader_rejects_resealed_stochastic_numeric_and_cost_substitutions",
+          "call": "importlib.util.spec_from_file_location",
+          "resolved_spelling": "importlib.util.spec_from_file_location",
+          "source": "        entry = importlib.util.spec_from_file_location(\"independent_mlmc_reader\", module_path)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "test_independent_reader_rejects_resealed_stochastic_numeric_and_cost_substitutions",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_managed_mlmc_admission.py",
+      "line": 493,
+      "callee": "importlib.util.module_from_spec",
+      "argument": "entry",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_managed_mlmc_admission.py",
+          "line": 493,
+          "end_line": 493,
+          "scope": "test_independent_reader_rejects_resealed_stochastic_numeric_and_cost_substitutions",
+          "call": "importlib.util.module_from_spec",
+          "resolved_spelling": "importlib.util.module_from_spec",
+          "source": "        reader = importlib.util.module_from_spec(entry)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "test_independent_reader_rejects_resealed_stochastic_numeric_and_cost_substitutions",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_managed_mlmc_admission.py",
+      "line": 494,
+      "callee": "entry.loader.exec_module",
+      "argument": "reader",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_managed_mlmc_admission.py",
+          "line": 494,
+          "end_line": 494,
+          "scope": "test_independent_reader_rejects_resealed_stochastic_numeric_and_cost_substitutions",
+          "call": "entry.loader.exec_module",
+          "resolved_spelling": "entry.loader.exec_module",
+          "source": "        entry.loader.exec_module(reader)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "test_independent_reader_rejects_resealed_stochastic_numeric_and_cost_substitutions",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_oracle_horizon_operator.py",
+      "line": 10,
+      "callee": "importlib.import_module",
+      "argument": "'pirc27_oracle_horizon'",
+      "literal_target": "pirc27_oracle_horizon",
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_oracle_horizon_operator.py",
+          "line": 10,
+          "end_line": 10,
+          "scope": "<module>",
+          "call": "importlib.import_module",
+          "resolved_spelling": "importlib.import_module",
+          "source": "operator = importlib.import_module(\"pirc27_oracle_horizon\")",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "<module>",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "test sys.path module alias or exec compiled source; not executed"
+    },
+    {
+      "path": "tests/test_pirc27_method_pilot.py",
+      "line": 17,
+      "callee": "importlib.util.spec_from_file_location",
+      "argument": "'pirc27_method_pilot_control'",
+      "literal_target": "pirc27_method_pilot_control",
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_pirc27_method_pilot.py",
+          "line": 17,
+          "end_line": 17,
+          "scope": "pilot",
+          "call": "importlib.util.spec_from_file_location",
+          "resolved_spelling": "importlib.util.spec_from_file_location",
+          "source": "    spec = importlib.util.spec_from_file_location(\"pirc27_method_pilot_control\", path)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "pilot",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_pirc27_method_pilot.py",
+      "line": 18,
+      "callee": "importlib.util.module_from_spec",
+      "argument": "spec",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_pirc27_method_pilot.py",
+          "line": 18,
+          "end_line": 18,
+          "scope": "pilot",
+          "call": "importlib.util.module_from_spec",
+          "resolved_spelling": "importlib.util.module_from_spec",
+          "source": "    module = importlib.util.module_from_spec(spec)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "pilot",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_pirc27_method_pilot.py",
+      "line": 19,
+      "callee": "spec.loader.exec_module",
+      "argument": "module",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_pirc27_method_pilot.py",
+          "line": 19,
+          "end_line": 19,
+          "scope": "pilot",
+          "call": "spec.loader.exec_module",
+          "resolved_spelling": "spec.loader.exec_module",
+          "source": "    spec.loader.exec_module(module)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "pilot",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_pirc27_source_transition.py",
+      "line": 17,
+      "callee": "importlib.util.spec_from_file_location",
+      "argument": "'pirc27_batch_transition_test'",
+      "literal_target": "pirc27_batch_transition_test",
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_pirc27_source_transition.py",
+          "line": 17,
+          "end_line": 17,
+          "scope": "batch_module",
+          "call": "importlib.util.spec_from_file_location",
+          "resolved_spelling": "importlib.util.spec_from_file_location",
+          "source": "    loader = importlib.util.spec_from_file_location(\"pirc27_batch_transition_test\", path)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "batch_module",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_pirc27_source_transition.py",
+          "line": 25,
+          "scope": "configuration",
+          "call": "batch_module",
+          "resolved_spelling": "batch_module"
+        },
+        {
+          "path": "tests/test_pirc27_source_transition.py",
+          "line": 164,
+          "scope": "test_continuation_freezes_seven_cells_and_restores_only_original_costs",
+          "call": "batch_module",
+          "resolved_spelling": "batch_module"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_pirc27_source_transition.py",
+      "line": 18,
+      "callee": "importlib.util.module_from_spec",
+      "argument": "loader",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_pirc27_source_transition.py",
+          "line": 18,
+          "end_line": 18,
+          "scope": "batch_module",
+          "call": "importlib.util.module_from_spec",
+          "resolved_spelling": "importlib.util.module_from_spec",
+          "source": "    module = importlib.util.module_from_spec(loader)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "batch_module",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_pirc27_source_transition.py",
+          "line": 25,
+          "scope": "configuration",
+          "call": "batch_module",
+          "resolved_spelling": "batch_module"
+        },
+        {
+          "path": "tests/test_pirc27_source_transition.py",
+          "line": 164,
+          "scope": "test_continuation_freezes_seven_cells_and_restores_only_original_costs",
+          "call": "batch_module",
+          "resolved_spelling": "batch_module"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_pirc27_source_transition.py",
+      "line": 19,
+      "callee": "loader.loader.exec_module",
+      "argument": "module",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_pirc27_source_transition.py",
+          "line": 19,
+          "end_line": 19,
+          "scope": "batch_module",
+          "call": "loader.loader.exec_module",
+          "resolved_spelling": "loader.loader.exec_module",
+          "source": "    loader.loader.exec_module(module)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "batch_module",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_pirc27_source_transition.py",
+          "line": 25,
+          "scope": "configuration",
+          "call": "batch_module",
+          "resolved_spelling": "batch_module"
+        },
+        {
+          "path": "tests/test_pirc27_source_transition.py",
+          "line": 164,
+          "scope": "test_continuation_freezes_seven_cells_and_restores_only_original_costs",
+          "call": "batch_module",
+          "resolved_spelling": "batch_module"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_pirc27_total_accounting.py",
+      "line": 10,
+      "callee": "importlib.util.spec_from_file_location",
+      "argument": "'pirc27_accounting_control'",
+      "literal_target": "pirc27_accounting_control",
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 10,
+          "end_line": 10,
+          "scope": "operator",
+          "call": "importlib.util.spec_from_file_location",
+          "resolved_spelling": "importlib.util.spec_from_file_location",
+          "source": "    spec = importlib.util.spec_from_file_location(\"pirc27_accounting_control\", path)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "operator",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 37,
+          "scope": "test_nonprefixed_derived_comparison_charged_to_original_arm_counts",
+          "call": "operator",
+          "resolved_spelling": "operator"
+        },
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 42,
+          "scope": "test_nonprefixed_render_reserve_still_holds_aggregate_capacity",
+          "call": "operator",
+          "resolved_spelling": "operator"
+        },
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 51,
+          "scope": "test_original_study_prefix_and_original_arm_union_never_double_counts",
+          "call": "operator",
+          "resolved_spelling": "operator"
+        },
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 57,
+          "scope": "test_unknown_cost_conservative_full_charge_and_pending_are_not_free",
+          "call": "operator",
+          "resolved_spelling": "operator"
+        },
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 21,
+          "scope": "Metadata.manifest",
+          "call": "operator",
+          "resolved_spelling": "operator"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_pirc27_total_accounting.py",
+      "line": 11,
+      "callee": "importlib.util.module_from_spec",
+      "argument": "spec",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 11,
+          "end_line": 11,
+          "scope": "operator",
+          "call": "importlib.util.module_from_spec",
+          "resolved_spelling": "importlib.util.module_from_spec",
+          "source": "    module = importlib.util.module_from_spec(spec)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "operator",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 37,
+          "scope": "test_nonprefixed_derived_comparison_charged_to_original_arm_counts",
+          "call": "operator",
+          "resolved_spelling": "operator"
+        },
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 42,
+          "scope": "test_nonprefixed_render_reserve_still_holds_aggregate_capacity",
+          "call": "operator",
+          "resolved_spelling": "operator"
+        },
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 51,
+          "scope": "test_original_study_prefix_and_original_arm_union_never_double_counts",
+          "call": "operator",
+          "resolved_spelling": "operator"
+        },
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 57,
+          "scope": "test_unknown_cost_conservative_full_charge_and_pending_are_not_free",
+          "call": "operator",
+          "resolved_spelling": "operator"
+        },
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 21,
+          "scope": "Metadata.manifest",
+          "call": "operator",
+          "resolved_spelling": "operator"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_pirc27_total_accounting.py",
+      "line": 12,
+      "callee": "spec.loader.exec_module",
+      "argument": "module",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 12,
+          "end_line": 12,
+          "scope": "operator",
+          "call": "spec.loader.exec_module",
+          "resolved_spelling": "spec.loader.exec_module",
+          "source": "    spec.loader.exec_module(module)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "operator",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 37,
+          "scope": "test_nonprefixed_derived_comparison_charged_to_original_arm_counts",
+          "call": "operator",
+          "resolved_spelling": "operator"
+        },
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 42,
+          "scope": "test_nonprefixed_render_reserve_still_holds_aggregate_capacity",
+          "call": "operator",
+          "resolved_spelling": "operator"
+        },
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 51,
+          "scope": "test_original_study_prefix_and_original_arm_union_never_double_counts",
+          "call": "operator",
+          "resolved_spelling": "operator"
+        },
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 57,
+          "scope": "test_unknown_cost_conservative_full_charge_and_pending_are_not_free",
+          "call": "operator",
+          "resolved_spelling": "operator"
+        },
+        {
+          "path": "tests/test_pirc27_total_accounting.py",
+          "line": 21,
+          "scope": "Metadata.manifest",
+          "call": "operator",
+          "resolved_spelling": "operator"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "spec loader name is not a module import name; target file expression and source in callers; follow spec at test execution only"
+    },
+    {
+      "path": "tests/test_remaining_path_axes.py",
+      "line": 10,
+      "callee": "importlib.import_module",
+      "argument": "'pirc27_remaining_path_axes'",
+      "literal_target": "pirc27_remaining_path_axes",
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_remaining_path_axes.py",
+          "line": 10,
+          "end_line": 10,
+          "scope": "<module>",
+          "call": "importlib.import_module",
+          "resolved_spelling": "importlib.import_module",
+          "source": "operator = importlib.import_module(\"pirc27_remaining_path_axes\")",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "<module>",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "test sys.path module alias or exec compiled source; not executed"
+    },
+    {
+      "path": "tests/test_remaining_path_closed_arm.py",
+      "line": 13,
+      "callee": "importlib.import_module",
+      "argument": "'pirc27_remaining_path_after_closed_arm'",
+      "literal_target": "pirc27_remaining_path_after_closed_arm",
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_remaining_path_closed_arm.py",
+          "line": 13,
+          "end_line": 13,
+          "scope": "<module>",
+          "call": "importlib.import_module",
+          "resolved_spelling": "importlib.import_module",
+          "source": "op = importlib.import_module(\"pirc27_remaining_path_after_closed_arm\")",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "<module>",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "test sys.path module alias or exec compiled source; not executed"
+    },
+    {
+      "path": "tests/test_research_implementation_reads.py",
+      "line": 30,
+      "callee": "exec",
+      "argument": "compile(payload, str(path), 'exec')",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_research_implementation_reads.py",
+          "line": 30,
+          "end_line": 30,
+          "scope": "load_source",
+          "call": "exec",
+          "resolved_spelling": "exec",
+          "source": "    exec(compile(payload, str(path), 'exec'), module.__dict__)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "load_source",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_research_implementation_reads.py",
+          "line": 104,
+          "scope": "test_inspection_uses_one_bounded_physical_source_read",
+          "call": "load_source",
+          "resolved_spelling": "load_source"
+        },
+        {
+          "path": "tests/test_research_implementation_reads.py",
+          "line": 116,
+          "scope": "test_actual_source_change_after_bounded_read_is_denied",
+          "call": "load_source",
+          "resolved_spelling": "load_source"
+        },
+        {
+          "path": "tests/test_research_implementation_reads.py",
+          "line": 138,
+          "scope": "test_actual_source_change_during_code_identity_is_denied",
+          "call": "load_source",
+          "resolved_spelling": "load_source"
+        },
+        {
+          "path": "tests/test_research_implementation_reads.py",
+          "line": 160,
+          "scope": "test_actual_source_alias_denied_before_source_bytes",
+          "call": "load_source",
+          "resolved_spelling": "load_source"
+        },
+        {
+          "path": "tests/test_research_implementation_reads.py",
+          "line": 181,
+          "scope": "test_legal_exact_quota_and_newline_identity_retained",
+          "call": "load_source",
+          "resolved_spelling": "load_source"
+        },
+        {
+          "path": "tests/test_research_implementation_reads.py",
+          "line": 213,
+          "scope": "test_legal_factory_forms_keep_original_hash",
+          "call": "load_source",
+          "resolved_spelling": "load_source"
+        },
+        {
+          "path": "tests/test_research_implementation_reads.py",
+          "line": 219,
+          "scope": "test_cross_module_wrapping_keeps_original_identity",
+          "call": "load_source",
+          "resolved_spelling": "load_source"
+        },
+        {
+          "path": "tests/test_research_implementation_reads.py",
+          "line": 223,
+          "scope": "test_cross_module_wrapping_keeps_original_identity",
+          "call": "load_source",
+          "resolved_spelling": "load_source"
+        },
+        {
+          "path": "tests/test_research_implementation_reads.py",
+          "line": 229,
+          "scope": "test_stale_inspect_cache_is_not_source_authority",
+          "call": "load_source",
+          "resolved_spelling": "load_source"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "test sys.path module alias or exec compiled source; not executed"
+    },
+    {
+      "path": "tests/test_research_registry_entry.py",
+      "line": 15,
+      "callee": "importlib.import_module",
+      "argument": "'application.research_registry'",
+      "literal_target": "application.research_registry",
+      "target_path": "application/research_registry.py",
+      "classification": "LOCAL",
+      "callers": [
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 15,
+          "end_line": 15,
+          "scope": "api",
+          "call": "importlib.import_module",
+          "resolved_spelling": "importlib.import_module",
+          "source": "    return importlib.import_module(\"application.research_registry\")",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "api",
+      "incoming_call_candidates": [
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 55,
+          "scope": "entry",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 95,
+          "scope": "test_same_version_different_implementation_rejected_and_new_version_kept",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 127,
+          "scope": "test_missing_or_unsupported_metadata_is_rejected",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 149,
+          "scope": "test_over_quota_denied_without_invoking_factory",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 177,
+          "scope": "test_default_and_capture_changes_cannot_reuse_the_same_registered_identity",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 210,
+          "scope": "test_malformed_metadata_types_have_typed_rejections",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 216,
+          "scope": "test_integer_schema_supports_real_128_bit_rng_state_but_rejects_unbounded_input",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 78,
+          "scope": "test_entry_has_required_canonical_metadata_and_exact_version_resolution",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 108,
+          "scope": "test_registration_seals_mutable_metadata_and_rechecks_live_implementation",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 133,
+          "scope": "test_pure_resource_plan_is_derived_from_frozen_schema_and_declared_shapes",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 163,
+          "scope": "test_bad_resource_declarations_are_rejected_before_planning",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 192,
+          "scope": "test_plan_does_not_share_mutable_resource_policy_with_the_caller",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 224,
+          "scope": "test_live_class_inheritance_and_global_configuration_are_identity_content",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 237,
+          "scope": "test_malformed_resolution_profile_is_typed",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 257,
+          "scope": "test_array_resource_sources_use_actual_lengths_without_allocating_tensors",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 158,
+          "scope": "test_bad_configuration_does_not_coerce_or_silently_drop_fields",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 205,
+          "scope": "test_malformed_schema_types_have_typed_rejections",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 224,
+          "scope": "test_live_class_inheritance_and_global_configuration_are_identity_content",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 237,
+          "scope": "test_malformed_resolution_profile_is_typed",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 248,
+          "scope": "test_non_utf8_json_is_rejected_before_identity_encoding",
+          "call": "api",
+          "resolved_spelling": "api"
+        },
+        {
+          "path": "tests/test_research_registry_entry.py",
+          "line": 253,
+          "scope": "test_structurally_small_json_still_has_a_total_byte_quota",
+          "call": "api",
+          "resolved_spelling": "api"
+        }
+      ],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "tests/test_walking_owner_terminal.py",
+      "line": 159,
+      "callee": "__import__",
+      "argument": "'application.research_budget'",
+      "literal_target": "application.research_budget",
+      "target_path": "application/research_budget.py",
+      "classification": "LOCAL",
+      "callers": [
+        {
+          "path": "tests/test_walking_owner_terminal.py",
+          "line": 159,
+          "end_line": 159,
+          "scope": "test_historical_success_reuse_does_not_subtract_old_stage",
+          "call": "__import__",
+          "resolved_spelling": "__import__",
+          "source": "    res=ledger.reserve(attempt,__import__(\"application.research_budget\",fromlist=[\"BudgetSpec\"]).BudgetSpec(",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "test_historical_success_reuse_does_not_subtract_old_stage",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports."
+    },
+    {
+      "path": "tests/test_walking_pilot_serial_scope.py",
+      "line": 26,
+      "callee": "exec",
+      "argument": "compile(source, 'baseline-walking-budget', 'exec')",
+      "literal_target": null,
+      "target_path": null,
+      "classification": "UNRESOLVED",
+      "callers": [
+        {
+          "path": "tests/test_walking_pilot_serial_scope.py",
+          "line": 26,
+          "end_line": 26,
+          "scope": "test_cross_process_writer_at_old_list_new_head_boundary",
+          "call": "exec",
+          "resolved_spelling": "exec",
+          "source": "    baseline={}; exec(compile(source,\"baseline-walking-budget\",\"exec\"),baseline)",
+          "resolution": "lexical alias only; receiver/callability UNPROVEN"
+        }
+      ],
+      "enclosing_scope": "test_cross_process_writer_at_old_list_new_head_boundary",
+      "incoming_call_candidates": [],
+      "caller_limit": "Syntactic/lexical candidates; receiver aliases/monkeypatching and arbitrary runtime reflection UNPROVEN. __getattr__ implicit consumers in lazy_exports.",
+      "availability": "UNPROVEN test-only loader/execution, not reachable product closure edge",
+      "reason": "test sys.path module alias or exec compiled source; not executed"
+    }
+  ],
+  "lazy_exports": [
+    {
+      "package": "application",
+      "symbol": "EvaluationPipeline",
+      "target": "application.pipelines",
+      "path": "application/pipelines.py",
+      "consumers": [],
+      "condition": "package __getattr__ requested name; module globals cache"
+    },
+    {
+      "package": "application",
+      "symbol": "EvidenceConditioner",
+      "target": "application.pipelines",
+      "path": "application/pipelines.py",
+      "consumers": [],
+      "condition": "package __getattr__ requested name; module globals cache"
+    },
+    {
+      "package": "application",
+      "symbol": "RandomStreams",
+      "target": "application.runtime",
+      "path": "application/runtime.py",
+      "consumers": [],
+      "condition": "package __getattr__ requested name; module globals cache"
+    },
+    {
+      "package": "application",
+      "symbol": "RunContext",
+      "target": "application.runtime",
+      "path": "application/runtime.py",
+      "consumers": [],
+      "condition": "package __getattr__ requested name; module globals cache"
+    },
+    {
+      "package": "infrastructure",
+      "symbol": "ArtifactWriter",
+      "target": "infrastructure.runs",
+      "path": "infrastructure/runs.py",
+      "consumers": [
+        {
+          "path": "application/experiment.py",
+          "line": 30,
+          "scope": "<module>",
+          "target": "infrastructure",
+          "imported": "ArtifactWriter",
+          "kind": "from",
+          "classification": "LOCAL"
+        }
+      ],
+      "condition": "package __getattr__ requested name; module globals cache"
+    },
+    {
+      "package": "infrastructure",
+      "symbol": "AtomicRunStore",
+      "target": "infrastructure.runs",
+      "path": "infrastructure/runs.py",
+      "consumers": [
+        {
+          "path": "application/experiment.py",
+          "line": 30,
+          "scope": "<module>",
+          "target": "infrastructure",
+          "imported": "AtomicRunStore",
+          "kind": "from",
+          "classification": "LOCAL"
+        },
+        {
+          "path": "tests/test_run_records.py",
+          "line": 18,
+          "scope": "<module>",
+          "target": "infrastructure",
+          "imported": "AtomicRunStore",
+          "kind": "from",
+          "classification": "LOCAL"
+        }
+      ],
+      "condition": "package __getattr__ requested name; module globals cache"
+    },
+    {
+      "package": "infrastructure",
+      "symbol": "JsonArtifactStore",
+      "target": "infrastructure.artifacts",
+      "path": "infrastructure/artifacts.py",
+      "consumers": [
+        {
+          "path": "cli/predict.py",
+          "line": 14,
+          "scope": "<module>",
+          "target": "infrastructure",
+          "imported": "JsonArtifactStore",
+          "kind": "from",
+          "classification": "LOCAL"
+        },
+        {
+          "path": "tests/test_run_records.py",
+          "line": 18,
+          "scope": "<module>",
+          "target": "infrastructure",
+          "imported": "JsonArtifactStore",
+          "kind": "from",
+          "classification": "LOCAL"
+        }
+      ],
+      "condition": "package __getattr__ requested name; module globals cache"
+    },
+    {
+      "package": "infrastructure",
+      "symbol": "TorchModelStore",
+      "target": "infrastructure.checkpoint",
+      "path": "infrastructure/checkpoint.py",
+      "consumers": [
+        {
+          "path": "application/experiment.py",
+          "line": 30,
+          "scope": "<module>",
+          "target": "infrastructure",
+          "imported": "TorchModelStore",
+          "kind": "from",
+          "classification": "LOCAL"
+        }
+      ],
+      "condition": "package __getattr__ requested name; module globals cache"
+    }
+  ],
+  "note": "exhaustive syntactic import API/eval/exec sites; arbitrary obfuscated reflection not proven absent. lexical receiver aliases are not runtime dispatch proof"
+}

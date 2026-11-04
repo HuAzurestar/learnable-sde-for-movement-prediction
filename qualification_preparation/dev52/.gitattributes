@@ -1,0 +1,2 @@
+# Raw evidence is preserved byte-for-byte; reviewers read the attached files directly.
+*.txt -text -diff
